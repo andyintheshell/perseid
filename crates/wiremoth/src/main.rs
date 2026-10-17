@@ -30,6 +30,13 @@ pub struct Args {
     /// Start without the proxy (UI only).
     #[arg(long)]
     pub no_proxy: bool,
+
+    /// Scale for the whole UI, e.g. 2 on a HiDPI display. By default the
+    /// system scale is used; on desktops that report no scaling to the
+    /// windowing system (common on X11), GDK_SCALE / QT_SCALE_FACTOR are
+    /// honored instead.
+    #[arg(long, value_name = "FACTOR")]
+    pub ui_scale: Option<f32>,
 }
 
 fn main() -> eframe::Result {

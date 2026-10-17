@@ -18,6 +18,20 @@ const FILTER_ID: &str = "wiremoth.filter";
 const RESPONSE_PANE_ID: &str = "wiremoth.detail.response";
 const ORANGE: Color32 = Color32::from_rgb(255, 176, 80);
 
+/// Content size (in egui points) the window aims for at startup.
+const DESIGN_WINDOW_SIZE: egui::Vec2 = egui::vec2(1280.0, 820.0);
+const MIN_UI_SCALE: f32 = 0.5;
+const MAX_UI_SCALE: f32 = 5.0;
+
+const ZOOM_IN_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, Key::Plus);
+const ZOOM_IN_SECONDARY_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, Key::Equals);
+const ZOOM_OUT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, Key::Minus);
+const ZOOM_RESET_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, Key::Num0);
+
 pub struct WiremothApp {
     proxy: Option<Proxy>,
     proxy_error: Option<String>,
@@ -33,6 +47,10 @@ pub struct WiremothApp {
     scroll_to_selected: bool,
     detail: Option<DetailCache>,
     filter_id: Option<egui::Id>,
+    /// Scale reported by the windowing system (physical pixels per point).
+    native_ui_scale: f32,
+    /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
+    base_ui_scale: f32,
 }
 
 /// Formatted request/response text for the selected exchange, rebuilt only
@@ -46,6 +64,25 @@ struct DetailCache {
 
 impl WiremothApp {
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> Self {
+        let native_ui_scale = cc.egui_ctx.native_pixels_per_point().unwrap_or(1.0).max(0.25);
+        let base_ui_scale =
+            resolve_ui_scale(args.ui_scale, native_ui_scale, desktop_scale_override());
+
+        // We handle zoom shortcuts ourselves so Ctrl+0 returns to the detected
+        // scale instead of 100%.
+        cc.egui_ctx
+            .options_mut(|options| options.zoom_with_keyboard = false);
+        let zoom = (base_ui_scale / native_ui_scale).clamp(0.2, 5.0);
+        cc.egui_ctx.set_zoom_factor(zoom);
+        log::info!(
+            "UI scale {:.0}% (system {:.0}%)",
+            base_ui_scale * 100.0,
+            native_ui_scale * 100.0
+        );
+        if (zoom - 1.0).abs() > 1e-3 {
+            resize_initial_window(&cc.egui_ctx, zoom);
+        }
+
         let notify: Arc<dyn Fn() + Send + Sync> = {
             let ctx = cc.egui_ctx.clone();
             Arc::new(move || ctx.request_repaint())
@@ -66,6 +103,8 @@ impl WiremothApp {
             scroll_to_selected: false,
             detail: None,
             filter_id: None,
+            native_ui_scale,
+            base_ui_scale,
         };
         if !args.no_proxy {
             let notify = app.notify.clone();
@@ -168,6 +207,8 @@ impl WiremothApp {
     }
 
     fn keyboard(&mut self, ctx: &egui::Context) {
+        self.zoom_shortcuts(ctx);
+
         let Some(filter_id) = self.filter_id else {
             return;
         };
@@ -199,6 +240,32 @@ impl WiremothApp {
         if ctx.input(|i| i.key_pressed(Key::End)) && !self.visible.is_empty() {
             let last = self.visible[self.visible.len() - 1];
             self.select_id(last);
+        }
+    }
+
+    /// Set the total UI scale (system scale times zoom) in physical pixels per
+    /// point, clamped to the supported range.
+    fn set_ui_scale(&self, ctx: &egui::Context, scale: f32) {
+        let scale = scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+        let zoom = (scale / self.native_ui_scale).clamp(0.2, 5.0);
+        ctx.set_zoom_factor(zoom);
+    }
+
+    fn zoom_shortcuts(&mut self, ctx: &egui::Context) {
+        let (zoom_in, zoom_out, reset) = ctx.input_mut(|input| {
+            (
+                input.consume_shortcut(&ZOOM_IN_SHORTCUT)
+                    || input.consume_shortcut(&ZOOM_IN_SECONDARY_SHORTCUT),
+                input.consume_shortcut(&ZOOM_OUT_SHORTCUT),
+                input.consume_shortcut(&ZOOM_RESET_SHORTCUT),
+            )
+        });
+        if reset {
+            self.set_ui_scale(ctx, self.base_ui_scale);
+        } else if zoom_in {
+            self.set_ui_scale(ctx, stepped_scale(ctx.pixels_per_point(), 0.1));
+        } else if zoom_out {
+            self.set_ui_scale(ctx, stepped_scale(ctx.pixels_per_point(), -0.1));
         }
     }
 
@@ -240,6 +307,38 @@ impl WiremothApp {
             {
                 self.clear_history();
             }
+
+            ui.separator();
+            ui.menu_button("View", |ui| {
+                let ctx = ui.ctx().clone();
+                let current = ctx.pixels_per_point();
+
+                let zoom_in = egui::Button::new("Zoom In")
+                    .shortcut_text(ctx.format_shortcut(&ZOOM_IN_SHORTCUT));
+                if ui.add(zoom_in).clicked() {
+                    self.set_ui_scale(&ctx, stepped_scale(current, 0.1));
+                }
+                let zoom_out = egui::Button::new("Zoom Out")
+                    .shortcut_text(ctx.format_shortcut(&ZOOM_OUT_SHORTCUT));
+                if ui.add(zoom_out).clicked() {
+                    self.set_ui_scale(&ctx, stepped_scale(current, -0.1));
+                }
+                let reset = egui::Button::new("Reset Zoom")
+                    .shortcut_text(ctx.format_shortcut(&ZOOM_RESET_SHORTCUT));
+                if ui
+                    .add_enabled((current - self.base_ui_scale).abs() > 1e-3, reset)
+                    .clicked()
+                {
+                    self.set_ui_scale(&ctx, self.base_ui_scale);
+                }
+
+                ui.separator();
+                ui.weak(format!(
+                    "UI scale: {:.0}% (system {:.0}%)",
+                    current * 100.0,
+                    self.native_ui_scale * 100.0,
+                ));
+            });
 
             ui.separator();
             ui.label("Filter");
@@ -304,6 +403,11 @@ impl WiremothApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak("HTTPS: CONNECT passthrough — TLS interception not implemented yet");
+                ui.separator();
+                ui.weak(format!(
+                    "UI {:.0}%",
+                    ui.ctx().pixels_per_point() * 100.0
+                ));
             });
         });
         ui.add_space(2.0);
@@ -480,6 +584,44 @@ fn text_pane(ui: &mut egui::Ui, title: &str, text: &str) {
         });
 }
 
+/// The scale the desktop gives GTK/Qt applications, used as a fallback on X11
+/// setups where the windowing system reports no HiDPI scaling (no `Xft.dpi`).
+fn desktop_scale_override() -> Option<f32> {
+    ["GDK_SCALE", "QT_SCALE_FACTOR"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok()?.trim().parse::<f32>().ok())
+        .find(|scale| scale.is_finite() && *scale > 1.0)
+        .map(|scale| scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE))
+}
+
+fn resolve_ui_scale(requested: Option<f32>, native: f32, desktop: Option<f32>) -> f32 {
+    requested
+        .or_else(|| (native > 1.0).then_some(native))
+        .or(desktop)
+        .unwrap_or(1.0)
+        .clamp(MIN_UI_SCALE, MAX_UI_SCALE)
+}
+
+/// One zoom step, rounded to a tenth so repeated steps stay on clean values.
+fn stepped_scale(current: f32, delta: f32) -> f32 {
+    ((current + delta) * 10.0).round() / 10.0
+}
+
+/// Keep the same logical content size as at 100% by growing the window when
+/// the UI is zoomed at startup. Without this a 2x UI opens in a window that is
+/// still 1280x820 physical pixels, leaving only 640x410 points of content.
+fn resize_initial_window(ctx: &egui::Context, zoom: f32) {
+    let mut size = DESIGN_WINDOW_SIZE;
+    if let Some(monitor) = ctx.input(|input| input.viewport().monitor_size) {
+        // `monitor_size` is in points at the native scale (zoom was 1.0 when
+        // it was measured), so divide by the zoom we just applied.
+        let max_size =
+            (monitor / zoom - egui::vec2(40.0, 80.0)).max(egui::vec2(320.0, 240.0));
+        size = size.min(max_size);
+    }
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+}
+
 fn matches_filter(item: &HistoryItem, needle: &str) -> bool {
     let status = item.status().map(|status| status.to_string()).unwrap_or_default();
     let haystack = format!(
@@ -487,4 +629,23 @@ fn matches_filter(item: &HistoryItem, needle: &str) -> bool {
         item.request.method, item.request.host, item.request.path, item.request.uri, status
     );
     haystack.to_lowercase().contains(needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requested_ui_scale_wins_and_is_clamped() {
+        assert_eq!(resolve_ui_scale(Some(1.5), 2.0, Some(2.0)), 1.5);
+        assert_eq!(resolve_ui_scale(Some(0.1), 1.0, None), MIN_UI_SCALE);
+        assert_eq!(resolve_ui_scale(Some(99.0), 1.0, None), MAX_UI_SCALE);
+    }
+
+    #[test]
+    fn native_scale_beats_desktop_fallback() {
+        assert_eq!(resolve_ui_scale(None, 2.0, Some(1.5)), 2.0);
+        assert_eq!(resolve_ui_scale(None, 1.0, Some(2.0)), 2.0);
+        assert_eq!(resolve_ui_scale(None, 1.0, None), 1.0);
+    }
 }

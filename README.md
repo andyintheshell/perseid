@@ -119,6 +119,7 @@ This starts the interception proxy on `127.0.0.1:8080` (loopback only) and opens
 --capture-limit <BYTES> maximum body bytes kept per request/response [default: 1048576]
 --history-limit <N>     maximum number of exchanges kept in memory [default: 2000]
 --no-proxy              start the UI without the proxy
+--ui-scale <FACTOR>     UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
 ```
 
 ### Pointing a browser at it
@@ -129,6 +130,12 @@ Configure your browser — or an extension such as FoxyProxy — to use an HTTP 
 - HTTPS requests arrive as `CONNECT` tunnels. Wiremoth relays the bytes in both directions and records the exchange with byte counts, but does not decrypt TLS yet (Milestone 2).
 
 The prototype has no disk persistence yet: history lives in memory, bounded by `--history-limit`; captured bodies are capped per message by `--capture-limit`.
+
+### HiDPI displays
+
+The UI follows the scale factor reported by the windowing system. On X11 desktops that do not report one (for example when `Xft.dpi` is unset), Wiremoth falls back to `GDK_SCALE` or `QT_SCALE_FACTOR`, so it matches the scale GTK and Qt applications already use.
+
+Override the result with `--ui-scale <FACTOR>`, or adjust it at runtime from the **View** menu or with `Ctrl`+`+` / `Ctrl`+`-`; `Ctrl`+`0` resets to the detected scale. The window opens at the same logical content size at every scale.
 
 ## Safety and privacy
 
