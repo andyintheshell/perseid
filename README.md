@@ -7,7 +7,7 @@ Wiremoth is an open-source, Rust-native web security tool for people who like to
 The goal is a practical companion for web security learning, CTFs, and authorized application testing—not a giant all-in-one scanner.
 
 > [!IMPORTANT]
-> **Project status: planning / pre-alpha.** Wiremoth does not have a functional public release yet. Everything in the roadmap below is proposed work, not a claim of implemented functionality.
+> **Project status: early prototype.** A runnable prototype exists today: a loopback-only HTTP/1.1 proxy with a native capture/history UI (see [Getting started](#getting-started)). HTTPS traffic is tunneled as TLS passthrough for now; interception with a local CA is Milestone 2. Everything else in the roadmap below is proposed work, not a claim of implemented functionality.
 
 ## Why Wiremoth?
 
@@ -85,8 +85,8 @@ The desktop application should not depend on starting a Chromium instance. Netwo
 ## Roadmap
 
 - [ ] **Milestone 0 — Proof of concept:** benchmark an idle egui window, history table, and large response viewer on low-memory Linux hardware.
-- [ ] **Milestone 1 — Proxy:** reliable HTTP/1.1 capture and forwarding; explicit scope configuration.
-- [ ] **Milestone 2 — HTTPS:** local CA generation, TLS interception, and documented browser trust setup.
+- [ ] **Milestone 1 — Proxy:** reliable HTTP/1.1 capture and forwarding; explicit scope configuration. *(Prototype: capture, forwarding, and the history UI work today; scope configuration is not implemented yet.)*
+- [ ] **Milestone 2 — HTTPS:** local CA generation, TLS interception, and documented browser trust setup. *(Prototype: `CONNECT` tunneling works as TLS passthrough with byte counts; interception is not implemented.)*
 - [ ] **Milestone 3 — Daily workflow:** persistent history, search, Repeater, decoder, and response diff.
 - [ ] **Milestone 4 — Testing tools:** bounded request fuzzing and a small set of passive checks.
 - [ ] **Milestone 5 — Hardening:** tests, crash recovery, safe handling of sensitive traffic, packaging, and performance benchmarks.
@@ -102,7 +102,33 @@ Important implementation principles include disk-backed history, limits on captu
 
 ## Getting started
 
-There is no installation or build procedure yet because the project is in the planning stage. Instructions will be added with the first runnable prototype. Until then, the roadmap is the most accurate description of what is being built.
+Wiremoth builds as a small Cargo workspace: `wiremoth-proxy` (the proxy library) and `wiremoth` (the desktop application).
+
+### Build and run
+
+Requirements: a recent stable Rust toolchain (edition 2024) and a desktop session with OpenGL support.
+
+```sh
+cargo run -p wiremoth
+```
+
+This starts the interception proxy on `127.0.0.1:8080` (loopback only) and opens the Wiremoth window. Options:
+
+```text
+--listen <ADDR>         address for the proxy to listen on [default: 127.0.0.1:8080]
+--capture-limit <BYTES> maximum body bytes kept per request/response [default: 1048576]
+--history-limit <N>     maximum number of exchanges kept in memory [default: 2000]
+--no-proxy              start the UI without the proxy
+```
+
+### Pointing a browser at it
+
+Configure your browser — or an extension such as FoxyProxy — to use an HTTP proxy at `127.0.0.1:8080` for HTTP and HTTPS.
+
+- Plain HTTP requests are forwarded and captured: method, headers, (bounded) bodies, status, size, duration, and any capture truncation are visible in the history table and detail pane.
+- HTTPS requests arrive as `CONNECT` tunnels. Wiremoth relays the bytes in both directions and records the exchange with byte counts, but does not decrypt TLS yet (Milestone 2).
+
+The prototype has no disk persistence yet: history lives in memory, bounded by `--history-limit`; captured bodies are capped per message by `--capture-limit`.
 
 ## Safety and privacy
 

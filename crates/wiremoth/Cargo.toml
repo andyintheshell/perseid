@@ -1,0 +1,22 @@
+[package]
+name = "wiremoth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A lightweight, keyboard-first workbench for inspecting HTTP traffic"
+
+[[bin]]
+name = "wiremoth"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+env_logger.workspace = true
+log.workspace = true
+wiremoth-proxy = { path = "../wiremoth-proxy" }
