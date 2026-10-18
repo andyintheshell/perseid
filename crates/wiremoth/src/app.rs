@@ -500,9 +500,9 @@ impl WiremothApp {
             .column(Column::exact(66.0))
             .column(Column::exact(52.0))
             .column(Column::initial(170.0).at_least(80.0))
-            .column(Column::remainder().at_least(120.0))
             .column(Column::exact(76.0))
-            .column(Column::exact(64.0));
+            .column(Column::exact(64.0))
+            .column(Column::remainder().at_least(120.0));
 
         if self.scroll_to_selected {
             if let Some(row) = self.selected_row_index() {
@@ -514,7 +514,7 @@ impl WiremothApp {
         table
             .header(20.0, |mut header| {
                 for title in [
-                    "#", "At", "Method", "Status", "Host", "Path", "Size", "Took",
+                    "#", "At", "Method", "Status", "Host", "Size", "Took", "Path",
                 ] {
                     header.col(|ui| {
                         ui.strong(title);
@@ -548,14 +548,6 @@ impl WiremothApp {
                         ui.add(Label::new(item.request.host.as_str()).truncate());
                     });
                     row.col(|ui| {
-                        let path = if item.is_tunnel() {
-                            "—"
-                        } else {
-                            item.request.path.as_str()
-                        };
-                        ui.add(Label::new(path).truncate());
-                    });
-                    row.col(|ui| {
                         ui.label(view::human_bytes(item.transferred()));
                     });
                     row.col(|ui| {
@@ -564,6 +556,14 @@ impl WiremothApp {
                                 .map(view::format_duration)
                                 .unwrap_or_else(|| "…".to_string()),
                         );
+                    });
+                    row.col(|ui| {
+                        let path = if item.is_tunnel() {
+                            "—"
+                        } else {
+                            item.request.path.as_str()
+                        };
+                        ui.add(Label::new(path).truncate());
                     });
 
                     if row.response().clicked() {
