@@ -69,7 +69,11 @@ struct DetailCache {
 
 impl WiremothApp {
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> Self {
-        let native_ui_scale = cc.egui_ctx.native_pixels_per_point().unwrap_or(1.0).max(0.25);
+        let native_ui_scale = cc
+            .egui_ctx
+            .native_pixels_per_point()
+            .unwrap_or(1.0)
+            .max(0.25);
         let base_ui_scale =
             resolve_ui_scale(args.ui_scale, native_ui_scale, desktop_scale_override());
 
@@ -202,8 +206,9 @@ impl WiremothApp {
             return;
         }
         let next = match self.selected_row_index() {
-            Some(position) => (position as isize + delta)
-                .clamp(0, self.visible.len() as isize - 1) as usize,
+            Some(position) => {
+                (position as isize + delta).clamp(0, self.visible.len() as isize - 1) as usize
+            }
             None => 0,
         };
         self.select_id(self.visible[next]);
@@ -301,7 +306,10 @@ impl WiremothApp {
             ui.separator();
 
             if let Some(proxy) = &self.proxy {
-                ui.colored_label(Color32::LIGHT_GREEN, format!("proxy on {}", proxy.local_addr()));
+                ui.colored_label(
+                    Color32::LIGHT_GREEN,
+                    format!("proxy on {}", proxy.local_addr()),
+                );
             } else {
                 ui.colored_label(Color32::LIGHT_RED, "proxy not running");
                 if ui.button("Retry").clicked() {
@@ -414,7 +422,10 @@ impl WiremothApp {
                 let dropped = proxy.dropped_events();
                 if dropped > 0 {
                     ui.separator();
-                    ui.colored_label(ORANGE, format!("{dropped} events dropped (consumer too slow)"));
+                    ui.colored_label(
+                        ORANGE,
+                        format!("{dropped} events dropped (consumer too slow)"),
+                    );
                 }
             }
             let evicted = self.history.evicted();
@@ -424,7 +435,10 @@ impl WiremothApp {
             }
 
             ui.separator();
-            ui.label(format!("capture limit {}", view::human_bytes(self.capture_limit as u64)));
+            ui.label(format!(
+                "capture limit {}",
+                view::human_bytes(self.capture_limit as u64)
+            ));
 
             if self.paused {
                 ui.separator();
@@ -434,10 +448,7 @@ impl WiremothApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak("HTTPS: CONNECT passthrough — TLS interception not implemented yet");
                 ui.separator();
-                ui.weak(format!(
-                    "UI {:.0}%",
-                    ui.ctx().pixels_per_point() * 100.0
-                ));
+                ui.weak(format!("UI {:.0}%", ui.ctx().pixels_per_point() * 100.0));
             });
         });
         ui.add_space(2.0);
@@ -502,7 +513,9 @@ impl WiremothApp {
 
         table
             .header(20.0, |mut header| {
-                for title in ["#", "At", "Method", "Status", "Host", "Path", "Size", "Took"] {
+                for title in [
+                    "#", "At", "Method", "Status", "Host", "Path", "Size", "Took",
+                ] {
                     header.col(|ui| {
                         ui.strong(title);
                     });
@@ -679,15 +692,17 @@ fn resize_initial_window(ctx: &egui::Context, zoom: f32) {
     if let Some(monitor) = ctx.input(|input| input.viewport().monitor_size) {
         // `monitor_size` is in points at the native scale (zoom was 1.0 when
         // it was measured), so divide by the zoom we just applied.
-        let max_size =
-            (monitor / zoom - egui::vec2(40.0, 80.0)).max(egui::vec2(320.0, 240.0));
+        let max_size = (monitor / zoom - egui::vec2(40.0, 80.0)).max(egui::vec2(320.0, 240.0));
         size = size.min(max_size);
     }
     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
 }
 
 fn matches_filter(item: &HistoryItem, needle: &str) -> bool {
-    let status = item.status().map(|status| status.to_string()).unwrap_or_default();
+    let status = item
+        .status()
+        .map(|status| status.to_string())
+        .unwrap_or_default();
     let haystack = format!(
         "{} {} {} {} {}",
         item.request.method, item.request.host, item.request.path, item.request.uri, status

@@ -41,9 +41,9 @@ pub use events::{
 };
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -88,16 +88,17 @@ impl Proxy {
     /// Binding happens synchronously, so address conflicts (e.g. another tool
     /// already on port 8080) are reported with [`StartError`] right here.
     pub fn start(config: ProxyConfig) -> Result<Self, StartError> {
-        let listener = std::net::TcpListener::bind(config.listen).map_err(|source| {
-            StartError::Bind {
+        let listener =
+            std::net::TcpListener::bind(config.listen).map_err(|source| StartError::Bind {
                 addr: config.listen,
                 source,
-            }
-        })?;
-        listener.set_nonblocking(true).map_err(|source| StartError::Bind {
-            addr: config.listen,
-            source,
-        })?;
+            })?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|source| StartError::Bind {
+                addr: config.listen,
+                source,
+            })?;
         let addr = listener.local_addr().map_err(|source| StartError::Bind {
             addr: config.listen,
             source,
@@ -112,9 +113,10 @@ impl Proxy {
         let mut connector = HttpConnector::new();
         connector.set_connect_timeout(Some(config.connect_timeout));
         connector.enforce_http(true);
-        let client: Client<HttpConnector, TeeBody<Incoming>> = Client::builder(TokioExecutor::new())
-            .http1_preserve_header_case(true)
-            .build(connector);
+        let client: Client<HttpConnector, TeeBody<Incoming>> =
+            Client::builder(TokioExecutor::new())
+                .http1_preserve_header_case(true)
+                .build(connector);
 
         let ctx = Arc::new(server::Ctx {
             client,
@@ -141,8 +143,8 @@ impl Proxy {
                     }
                 };
                 runtime.block_on(async move {
-                    let listener =
-                        TcpListener::from_std(listener).expect("listener was bound in this process");
+                    let listener = TcpListener::from_std(listener)
+                        .expect("listener was bound in this process");
                     server::serve(listener, ctx, shutdown_rx).await;
                 });
             })

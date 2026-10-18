@@ -12,7 +12,9 @@ use hyper_util::client::legacy::Error as ClientError;
 use log::debug;
 
 use crate::capture::{BodyBuffer, EndReason, TeeBody, new_buffer, snapshot};
-use crate::events::{CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
+use crate::events::{
+    CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
+};
 use crate::server::Ctx;
 use crate::util::{
     IntoProxyBody, ProxyBody, display_host, forwarded_headers, header_list, text_response,
@@ -125,7 +127,9 @@ fn resolve_target(req: &Request<Incoming>) -> Result<Uri, TargetError> {
     }
 
     if uri.path() == "*" {
-        return Err(TargetError::bad_request("asterisk-form targets are not supported"));
+        return Err(TargetError::bad_request(
+            "asterisk-form targets are not supported",
+        ));
     }
     if !uri.path().starts_with('/') {
         return Err(TargetError::bad_request("unsupported request target form"));
@@ -137,10 +141,7 @@ fn resolve_target(req: &Request<Incoming>) -> Result<Uri, TargetError> {
         .ok_or_else(|| TargetError::bad_request("origin-form request without a Host header"))?
         .to_str()
         .map_err(|_| TargetError::bad_request("Host header is not valid ASCII"))?;
-    let path = uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/");
+    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     format!("http://{host}{path}")
         .parse::<Uri>()
         .map_err(|_| TargetError::bad_request("invalid Host header"))
@@ -249,7 +250,12 @@ fn relay(
         }
     };
 
-    let tee = TeeBody::new(body, ctx.capture_limit, response_buffer, Some(Box::new(completion)));
+    let tee = TeeBody::new(
+        body,
+        ctx.capture_limit,
+        response_buffer,
+        Some(Box::new(completion)),
+    );
 
     let mut out = Response::new(tee.boxed_response());
     *out.status_mut() = parts.status;

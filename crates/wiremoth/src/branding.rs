@@ -1,7 +1,7 @@
 //! Embedded brand assets. The source files live in the repository's
 //! `branding/` directory; the app embeds only the PNG exports it needs.
 
-use egui::{ColorImage, Color32, Context, IconData, TextureHandle, TextureOptions};
+use egui::{Color32, ColorImage, Context, IconData, TextureHandle, TextureOptions};
 
 /// Signal orange from the brand palette.
 pub const SIGNAL_ORANGE: Color32 = Color32::from_rgb(0xff, 0x75, 0x42);

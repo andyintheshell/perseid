@@ -101,7 +101,10 @@ pub fn format_response(item: &HistoryItem) -> String {
     let mut out = String::new();
     match &item.response {
         Some(head) => {
-            out.push_str(&format!("{} {} {}\n", head.version, head.status, head.reason));
+            out.push_str(&format!(
+                "{} {} {}\n",
+                head.version, head.status, head.reason
+            ));
             push_headers(&mut out, &head.headers);
             out.push('\n');
             match item.response_body() {

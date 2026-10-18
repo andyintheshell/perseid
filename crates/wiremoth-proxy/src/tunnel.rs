@@ -13,7 +13,9 @@ use hyper_util::rt::TokioIo;
 use log::debug;
 use tokio::net::TcpStream;
 
-use crate::events::{CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
+use crate::events::{
+    CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
+};
 use crate::server::Ctx;
 use crate::util::{ProxyBody, empty_body, header_list, text_response, version_str};
 

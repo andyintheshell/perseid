@@ -150,6 +150,26 @@ Wiremoth is intended for systems you own or are explicitly authorized to test, i
 
 The intended defaults are **loopback-only proxy binding**, explicit capture/scan scope, no background active scanning, and clear controls for retaining or deleting sensitive traffic. A local interception CA must be deliberately trusted by the user and must never be silently installed system-wide.
 
+## Development
+
+From the workspace root:
+
+```bash
+cargo build
+cargo run
+cargo test --workspace
+```
+
+Before sending a change, run the same checks CI runs:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Install the tools with `rustup component add rustfmt clippy`. On Kali/Debian systems using the distribution's Rust packages, install `rustfmt` and `rust-clippy` through apt instead, keeping them in step with `rustc`.
+
 ## Contributing
 
 Contributions, testing feedback, and design discussions are welcome as the first prototype takes shape. Particularly useful early feedback includes low-memory Linux compatibility, accessibility, HTTP correctness, and ways to keep the Repeater workflow fast.

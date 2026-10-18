@@ -2,9 +2,9 @@
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
-use std::sync::Arc;
 use std::time::Duration;
 
 use hyper::body::Incoming;
@@ -61,8 +61,18 @@ impl Ctx {
 }
 
 /// Accept connections until `shutdown` fires.
-pub(crate) async fn serve(listener: TcpListener, ctx: Arc<Ctx>, mut shutdown: oneshot::Receiver<()>) {
-    info!("proxy listening on {}", listener.local_addr().map(|a| a.to_string()).unwrap_or_else(|_| "?".into()));
+pub(crate) async fn serve(
+    listener: TcpListener,
+    ctx: Arc<Ctx>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    info!(
+        "proxy listening on {}",
+        listener
+            .local_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| "?".into())
+    );
     loop {
         let accepted = tokio::select! {
             _ = &mut shutdown => {

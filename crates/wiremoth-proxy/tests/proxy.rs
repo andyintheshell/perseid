@@ -119,7 +119,10 @@ fn drain_until_finished(proxy: &Proxy) -> Vec<ProxyEvent> {
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
-    panic!("no Finished event within the test timeout; got {} events", events.len());
+    panic!(
+        "no Finished event within the test timeout; got {} events",
+        events.len()
+    );
 }
 
 fn started_of(events: &[ProxyEvent]) -> &RequestInfo {
@@ -165,7 +168,10 @@ fn body_after_head(response: &[u8]) -> &[u8] {
 async fn forwards_and_captures_plain_http() {
     // Non-canonical reason phrase: exercises preservation in both capture and
     // the response written back to the client.
-    let origin = spawn_origin("HTTP/1.1 200 Yo\r\nX-Origin: yes\r\nContent-Length: 11\r\n\r\nhello world".to_string()).await;
+    let origin = spawn_origin(
+        "HTTP/1.1 200 Yo\r\nX-Origin: yes\r\nContent-Length: 11\r\n\r\nhello world".to_string(),
+    )
+    .await;
     let proxy = test_proxy(64 * 1024, 64);
     let request = format!(
         "GET http://{origin}/hello?x=1 HTTP/1.1\r\nHost: {origin}\r\nProxy-Connection: keep-alive\r\nConnection: close\r\n\r\n"
@@ -173,7 +179,10 @@ async fn forwards_and_captures_plain_http() {
 
     let response = raw_exchange(proxy.local_addr(), &request).await;
     let text = String::from_utf8_lossy(&response);
-    assert!(text.starts_with("HTTP/1.1 200 Yo"), "raw response was: {text}");
+    assert!(
+        text.starts_with("HTTP/1.1 200 Yo"),
+        "raw response was: {text}"
+    );
     assert!(text.to_ascii_lowercase().contains("x-origin: yes"));
     assert_eq!(body_after_head(&response), b"hello world");
 
@@ -237,7 +246,11 @@ async fn forwards_bodies_larger_than_the_capture_limit() {
 
     let response = raw_exchange(proxy.local_addr(), &request).await;
     let received = body_after_head(&response);
-    assert_eq!(received.len(), big.len(), "every byte must still reach the client");
+    assert_eq!(
+        received.len(),
+        big.len(),
+        "every byte must still reach the client"
+    );
     assert!(received.iter().all(|&b| b == b'A'));
 
     let events = drain_until_finished(&proxy);
@@ -272,7 +285,10 @@ async fn connect_tunnel_relays_bytes_and_reports_stats() {
     stream.write_all(connect.as_bytes()).await.unwrap();
 
     let head = read_http_head(&mut stream).await;
-    assert!(head.starts_with("HTTP/1.1 200"), "unexpected CONNECT response: {head}");
+    assert!(
+        head.starts_with("HTTP/1.1 200"),
+        "unexpected CONNECT response: {head}"
+    );
 
     stream.write_all(b"ping").await.unwrap();
     let mut echoed = [0u8; 4];
@@ -308,15 +324,18 @@ async fn failed_upstream_connect_yields_502_and_failed_event() {
     drop(dead);
 
     let proxy = test_proxy(64 * 1024, 64);
-    let request =
-        format!("GET http://{dead_addr}/ HTTP/1.1\r\nHost: {dead_addr}\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "GET http://{dead_addr}/ HTTP/1.1\r\nHost: {dead_addr}\r\nConnection: close\r\n\r\n"
+    );
     let response = raw_exchange(proxy.local_addr(), &request).await;
     let text = String::from_utf8_lossy(&response);
     assert!(text.starts_with("HTTP/1.1 502"), "raw response was: {text}");
 
     let events = drain_until_finished(&proxy);
     match &finished_of(&events).result {
-        ExchangeResult::Failed { error } => assert!(error.contains("connect"), "error was: {error}"),
+        ExchangeResult::Failed { error } => {
+            assert!(error.contains("connect"), "error was: {error}")
+        }
         other => panic!("expected a failed result, got {other:?}"),
     }
 }
