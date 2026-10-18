@@ -21,7 +21,9 @@ pub(crate) fn new_buffer() -> BodyBuffer {
 /// Lock helper that tolerates a poisoned mutex: capture state is diagnostic
 /// data, not worth panicking the proxy over.
 pub(crate) fn lock(buffer: &BodyBuffer) -> MutexGuard<'_, CapturedBody> {
-    buffer.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    buffer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// A copy of the buffer contents for handing to an event.

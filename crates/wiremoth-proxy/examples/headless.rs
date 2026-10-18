@@ -16,13 +16,19 @@ fn main() -> Result<(), wiremoth_proxy::StartError> {
 
     let proxy = Proxy::start(ProxyConfig::default())?;
     println!("wiremoth proxy listening on http://{}", proxy.local_addr());
-    println!("try: curl -x http://{} http://example.com/", proxy.local_addr());
+    println!(
+        "try: curl -x http://{} http://example.com/",
+        proxy.local_addr()
+    );
 
     loop {
         match proxy.recv_timeout(Duration::from_secs(1)) {
             Ok(event) => match event {
                 ProxyEvent::Started { id, request, .. } => {
-                    println!("{id:>4} -> {} {} {}", request.method, request.host, request.path);
+                    println!(
+                        "{id:>4} -> {} {} {}",
+                        request.method, request.host, request.path
+                    );
                 }
                 ProxyEvent::ResponseHead { id, head } => {
                     println!("{id:>4} <- {} {}", head.status, head.reason);
@@ -32,7 +38,11 @@ fn main() -> Result<(), wiremoth_proxy::StartError> {
                         "{id:>4} == {} ms, {} bytes captured{}",
                         end.duration.as_millis(),
                         body.total_len(),
-                        if body.is_truncated() { " (truncated)" } else { "" }
+                        if body.is_truncated() {
+                            " (truncated)"
+                        } else {
+                            ""
+                        }
                     ),
                     ExchangeResult::Tunnel {
                         client_to_server,
