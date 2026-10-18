@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/wiremoth-logo-dark.png">
+    <img src="branding/wiremoth-logo-light.png" alt="Wiremoth — inspect the wire" width="520">
+  </picture>
+</p>
+
 # Wiremoth
 
 **A lightweight, keyboard-first workbench for inspecting, replaying, and testing HTTP traffic.**

@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod branding;
 mod history;
 mod view;
 
@@ -43,11 +44,18 @@ fn main() -> eframe::Result {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Wiremoth")
+        .with_inner_size([1280.0, 820.0])
+        .with_min_inner_size([720.0, 480.0]);
+    if let Some(icon) = branding::window_icon() {
+        viewport = viewport.with_icon(icon);
+    } else {
+        log::warn!("could not decode the window icon");
+    }
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Wiremoth")
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([720.0, 480.0]),
+        viewport,
         ..Default::default()
     };
 

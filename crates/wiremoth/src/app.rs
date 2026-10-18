@@ -9,6 +9,7 @@ use egui_extras::{Column, TableBuilder};
 use wiremoth_proxy::{Proxy, ProxyConfig};
 
 use crate::Args;
+use crate::branding;
 use crate::history::{History, HistoryItem};
 use crate::view;
 
@@ -51,6 +52,10 @@ pub struct WiremothApp {
     native_ui_scale: f32,
     /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
     base_ui_scale: f32,
+    /// Toolbar brand mark and full logo lockup for the About window.
+    mark: Option<egui::TextureHandle>,
+    lockup: Option<egui::TextureHandle>,
+    about_open: bool,
 }
 
 /// Formatted request/response text for the selected exchange, rebuilt only
@@ -88,6 +93,9 @@ impl WiremothApp {
             Arc::new(move || ctx.request_repaint())
         };
 
+        let mark = branding::mark_texture(&cc.egui_ctx);
+        let lockup = branding::lockup_texture(&cc.egui_ctx);
+
         let mut app = Self {
             proxy: None,
             proxy_error: None,
@@ -105,6 +113,9 @@ impl WiremothApp {
             filter_id: None,
             native_ui_scale,
             base_ui_scale,
+            mark,
+            lockup,
+            about_open: false,
         };
         if !args.no_proxy {
             let notify = app.notify.clone();
@@ -272,7 +283,21 @@ impl WiremothApp {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            ui.heading("Wiremoth");
+            if let Some(mark) = &self.mark {
+                let response = ui
+                    .add(
+                        egui::Image::from_texture(mark)
+                            .fit_to_exact_size(egui::vec2(24.0, 24.0))
+                            .corner_radius(6.0)
+                            .sense(egui::Sense::click()),
+                    )
+                    .on_hover_text("About Wiremoth")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.clicked() {
+                    self.about_open = true;
+                }
+            }
+            ui.heading(RichText::new("Wiremoth").color(branding::IVORY));
             ui.separator();
 
             if let Some(proxy) = &self.proxy {
@@ -338,6 +363,11 @@ impl WiremothApp {
                     current * 100.0,
                     self.native_ui_scale * 100.0,
                 ));
+                ui.separator();
+                if ui.button("About Wiremoth").clicked() {
+                    self.about_open = true;
+                    ui.close();
+                }
             });
 
             ui.separator();
@@ -411,6 +441,38 @@ impl WiremothApp {
             });
         });
         ui.add_space(2.0);
+    }
+
+    fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        let mut open = self.about_open;
+        let lockup = self.lockup.clone();
+        egui::Window::new("About Wiremoth")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                if let Some(lockup) = &lockup {
+                    ui.add(
+                        egui::Image::from_texture(lockup)
+                            .max_width(420.0)
+                            .corner_radius(10.0),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.label(format!("Wiremoth {}", env!("CARGO_PKG_VERSION")));
+                ui.hyperlink_to(
+                    RichText::new("github.com/andyintheshell/wiremoth")
+                        .color(branding::SIGNAL_ORANGE),
+                    "https://github.com/andyintheshell/wiremoth",
+                );
+                ui.add_space(2.0);
+                ui.weak("A lightweight, keyboard-first workbench for inspecting HTTP traffic.");
+            });
+        self.about_open = open;
     }
 
     fn history_table(&mut self, ui: &mut egui::Ui) {
@@ -559,6 +621,8 @@ impl eframe::App for WiremothApp {
             .min_size(120.0)
             .show(ui, |ui| self.detail_panel(ui));
         egui::CentralPanel::default().show(ui, |ui| self.history_table(ui));
+
+        self.about_window(&ctx);
 
         // Keep the fetch loop honest about dropped events even while idle.
         if self
