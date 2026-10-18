@@ -16,8 +16,9 @@ definition of done, and deliberate deviations.
   request/response interception with edit, forward, and drop, explicit scope
   configuration, and match/replace rules.
 
-  *Status: capture, forwarding, and the history UI work; interception, scope,
-  and match/replace are not implemented.*
+  *Status: capture, forwarding, the history UI, the Target site map, and a
+  view-only scope filter work; editable interception, scope enforcement, and
+  match/replace are not implemented.*
 
 - [ ] **Milestone 2 — HTTPS:** local CA generation, TLS interception,
   documented browser trust setup, and pass-through controls.
@@ -28,13 +29,15 @@ definition of done, and deliberate deviations.
 - [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
   search, Repeater, Decoder, and response diff (Comparer).
 
-  *Status: in-memory history and basic filtering work.*
+  *Status: in-memory history, basic filtering, and a read-only Repeater
+  preview work; persistence, editable replay, Decoder, and Comparer are not
+  implemented.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** HTTP/2 and WebSocket
-  proxying with history, Sequencer, and bounded fuzzing covering Burp CE's
-  Intruder demo.
+  proxying with history, Sequencer, and unthrottled Intruder-style fuzzing
+  with explicit scope and user-controlled concurrency.
 
-  *Status: HTTP/1.1 only.*
+  *Status: HTTP/1.1 only; the Intruder tab is a planned-workspace overview.*
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a

@@ -51,7 +51,7 @@ systems using the distribution's Rust packages, install `rustfmt` and
 | Path | Contents |
 | --- | --- |
 | `crates/wiremoth-proxy/` | Proxy library: listener, forwarding, CONNECT tunnels, capture, events. |
-| `crates/wiremoth/` | egui desktop application: history model, views, keyboard handling. |
+| `crates/wiremoth/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
 | `docs/` | User and design documentation. |
 | `branding/` | Logo and icon source assets. |
 
@@ -63,7 +63,7 @@ through the bounded channel.
 
 - Keep changes focused; separate refactors from behavior changes where
   practical.
-- Add or update tests for proxy and history behavior.
+- Add or update tests for proxy, history, and scope behavior.
 - For UI changes, include a screenshot or a short note describing the manual
   check you performed.
 - Update the [roadmap](docs/roadmap.md), [parity matrix](docs/burp-parity.md),

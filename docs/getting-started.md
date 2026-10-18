@@ -18,8 +18,8 @@ cargo run -p wiremoth
 ```
 
 This starts the proxy on `127.0.0.1:8080` (loopback only) and opens the
-Wiremoth window. The toolbar shows whether the proxy is running and lets you
-retry if the address is already in use.
+Wiremoth window on **Proxy > HTTP history**. The toolbar shows whether the
+proxy is running and lets you retry if the address is already in use.
 
 ### Options
 
@@ -32,6 +32,26 @@ retry if the address is already in use.
 ```
 
 Run `cargo run -p wiremoth -- --help` for the authoritative list.
+
+## Workspace
+
+The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
+`P`, `I`, or `R` (use `Cmd` on macOS).
+
+| Tab | Available today |
+| --- | --- |
+| **Target** | A host/path site map built from captured HTTP, and an editable scope list. Scope hides out-of-scope hosts from the site map and history. It is currently a view filter only: forwarding and capture are unchanged. |
+| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** documents the planned hold/edit/forward workflow; editable interception is not implemented yet. |
+| **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
+| **Repeater** | A read-only preview of the selected request and response. Editing and resending arrive in Milestone 3. |
+
+The scope input accepts a bare host, a `host:port` authority, or a full URL;
+matching also covers subdomains. Toggle **Filter views to the scope** in
+**Target > Scope** to apply it. The HTTP history filter matches method, host,
+path, URI, and status.
+
+The request/response pane has request and response tabs, each with Raw,
+Headers, and Hex views. Click a row or use the keyboard to select it.
 
 ## Pointing a browser at Wiremoth
 
@@ -55,6 +75,8 @@ leaves the filter. Clicking a row also selects it.
 - HTTP/1.1 only; HTTP/2 and WebSocket-specific handling are still planned.
 - HTTPS is TLS passthrough; there is no interception, editing, or replay yet.
 - Requests and responses are captured and forwarded, not paused for editing.
+- Scope filtering is view-only. It does not block, drop, or modify traffic.
+- Repeater cannot edit or send requests yet; Intruder has no engine yet.
 - History is in memory only. It is bounded by `--history-limit`; captured
   bodies are capped per message by `--capture-limit`.
 - There is no disk persistence, project file, or settings persistence yet.
@@ -78,5 +100,9 @@ scale.
   **Retry** after freeing the port.
 - **The UI is tiny or huge:** adjust it from the **View** menu or pass
   `--ui-scale`; see [HiDPI displays](#hidpi-displays).
+- **History or the site map looks empty:** the filter or scope may be hiding
+  rows. Clear the history filter, or turn off **Filter views to the scope** in
+  **Target > Scope**.
 - **HTTPS sites work but show no decrypted traffic:** expected for now;
-  `CONNECT` tunnels are relayed without interception.
+  `CONNECT` tunnels are relayed without interception. The site map deliberately
+  lists HTTP endpoints only.

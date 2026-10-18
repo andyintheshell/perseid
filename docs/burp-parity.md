@@ -20,10 +20,19 @@ The reference feature set is PortSwigger's published CE toolkit:
 - Decoder
 - Sequencer
 - Comparer
-- Intruder (demo edition)
+- Intruder
 
 Source: [Burp Suite Community Edition](https://portswigger.net/burp/communitydownload)
 (checked October 2026).
+
+The workspace deliberately follows Burp's tool order: **Target**, **Proxy**,
+**Intruder**, and **Repeater**. Tools that are not implemented yet are labelled
+as previews rather than presented as working features. Familiar navigation is
+part of the goal; reproducing every control before its engine exists is not.
+
+Parity here means capability, not artificial restrictions. Burp CE rate-limits
+Intruder to encourage upgrades; Wiremoth's fuzzer will not reproduce that
+limit. Scope and concurrency remain explicit, user-controlled safety settings.
 
 ## Capability matrix
 
@@ -35,22 +44,27 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | --- | --- | --- | --- | --- |
 | Loopback HTTP/1.1 proxy and forwarding | Yes | Yes | Working | — |
 | Intercept, edit, forward, or drop messages | Yes | Capture only | Partial | M1 |
-| Scope / target allowlist | Yes | No | Planned | M1 |
+| Scope / target allowlist | Yes | View filter over history and site map | Partial | M1 |
+| Target site map | Yes | Host/path tree from history | Partial | M1 |
 | Match/replace rules | Yes | No | Planned | M1 |
 | Session history | Yes | In-memory, bounded | Partial | M3 |
-| History filtering | Yes | Basic filter | Partial | M3 |
+| History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | HTTPS interception with a local CA | Yes | CONNECT passthrough | Partial | M2 |
 | HTTP/2 proxying | Yes | No (HTTP/1.1 only) | Planned | M4 |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
-| Repeater | Yes | No | Planned | M3 |
+| Repeater | Yes | Read-only preview | Partial | M3 |
 | Decoder | Yes | No | Planned | M3 |
 | Comparer | Yes | No | Planned | M3 |
 | Sequencer | Yes | No | Planned | M4 |
-| Intruder (CE demo) | Yes (throttled) | No | Planned | M4 |
+| Intruder-style request fuzzing | Yes (rate-limited demo) | No | Planned (unthrottled) | M4 |
 | Extension support | BApps | No | Deviation | Post-parity |
 | Bundled Chromium browser | Yes | External browser | Deviation | — |
 | Project files | No (Pro feature) | SQLite persistence planned | Beyond CE | M3 |
 | Automated scanner, crawler, Collaborator/OAST | No (Pro features) | No | Non-goal | — |
+
+Scope rules currently filter the site map and history only. They are not yet a
+traffic guardrail: capture and forwarding still apply to every host until the
+interception milestone enforces scope.
 
 ## Deliberate deviations
 
@@ -63,8 +77,11 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
   acknowledges extension capability but plans a native extension point after
   core parity rather than reproducing Burp's extension ABI. Features that are
   only reachable through BApps are not part of the parity claim.
+- **No artificial Intruder throttling.** Burp CE deliberately rate-limits
+  Intruder. Wiremoth will run fuzzing at the rate the user configures, bounded
+  by scope and resource settings rather than an upgrade restriction.
 - **Keyboard-first ergonomics.** Parity is about capabilities and outcomes,
-  not reproducing Burp's layout or mouse-driven workflow.
+  not reproducing Burp's mouse-driven workflow.
 - **Persistence is a Wiremoth extra.** Burp CE cannot save project files;
   Wiremoth plans local, bounded SQLite history as part of its daily workflow.
 
@@ -88,7 +105,7 @@ or are explicitly authorized to test.
 | **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and session history. |
 | **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. |
 | **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. |
-| **M4 — Protocols and testing tools** | HTTP/2, WebSocket proxying and history, Sequencer, and bounded Intruder-demo-style fuzzing. |
+| **M4 — Protocols and testing tools** | HTTP/2, WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |
 
 After M5, Wiremoth can claim CE manual-toolkit parity subject to the

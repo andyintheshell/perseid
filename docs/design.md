@@ -55,7 +55,7 @@ Current workspace layout:
 | Component | Responsibility |
 | --- | --- |
 | `crates/wiremoth-proxy` | Loopback listener, HTTP forwarding, CONNECT tunnels, body teeing, bounded capture events. |
-| `crates/wiremoth` | egui/eframe desktop app: event draining, in-memory history, filtering, detail views, keyboard navigation. |
+| `crates/wiremoth` | egui/eframe desktop app: Burp-style workspace, in-memory history, site map, scope filter, message views, keyboard navigation. |
 
 Planned additions include a TLS interception layer with a local CA, a
 disk-backed history store, replay/fuzzing workers, and a native extension
@@ -66,6 +66,27 @@ limit.
 The desktop application does not start or embed a Chromium instance. An
 external browser points at the loopback proxy; this keeps the binary small and
 lets users keep their normal browser, extensions, and devtools.
+
+## Interface direction
+
+The workspace follows Burp's tool organization so existing users can find
+familiar surfaces immediately: **Target**, **Proxy**, **Intruder**, and
+**Repeater**, in that order. **Proxy > HTTP history** is the default landing
+view because it is the live capture surface.
+
+The visual language is a warm, low-contrast light theme: near-white surfaces,
+pale orange selection states, and a burnt-orange accent. The palette lives in
+one theme module so future views stay consistent. HiDPI text and controls are
+first-class requirements, not an afterthought.
+
+Tools that are not implemented yet are shown as explicit previews with the
+milestone that will complete them. Intercept, Intruder, and Repeater do not
+present nonfunctional controls as if they already worked. Scope is implemented
+as a view filter over the site map and history; traffic enforcement belongs to
+the interception milestone.
+
+The interface is keyboard-friendly: tab switches, history navigation, filtering,
+and zoom all have shortcuts. A mouse remains fully supported.
 
 ## Technology
 

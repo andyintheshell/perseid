@@ -1,15 +1,10 @@
 //! Embedded brand assets. The source files live in the repository's
 //! `branding/` directory; the app embeds only the PNG exports it needs.
 
-use egui::{Color32, ColorImage, Context, IconData, TextureHandle, TextureOptions};
-
-/// Signal orange from the brand palette.
-pub const SIGNAL_ORANGE: Color32 = Color32::from_rgb(0xff, 0x75, 0x42);
-/// Ivory from the brand palette.
-pub const IVORY: Color32 = Color32::from_rgb(0xf7, 0xf3, 0xec);
+use egui::{ColorImage, Context, IconData, TextureHandle, TextureOptions};
 
 const ICON_PNG: &[u8] = include_bytes!("../../../branding/wiremoth-icon-128.png");
-const LOCKUP_PNG: &[u8] = include_bytes!("../../../branding/wiremoth-logo-dark.png");
+const LOCKUP_PNG: &[u8] = include_bytes!("../../../branding/wiremoth-logo-light.png");
 
 /// Window/task-bar icon, decoded from the 128 px app icon.
 pub fn window_icon() -> Option<IconData> {

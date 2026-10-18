@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use egui::Color32;
 
 use crate::history::{HistoryItem, Phase};
+use crate::theme;
 use wiremoth_proxy::CapturedBody;
 
 /// Maximum body bytes rendered as text.
@@ -55,34 +56,32 @@ pub fn status_text(item: &HistoryItem) -> String {
 pub fn status_color(item: &HistoryItem) -> Color32 {
     let Some(status) = item.status() else {
         return if item.is_in_flight() {
-            Color32::GRAY
+            theme::GRAY
         } else {
-            Color32::LIGHT_RED
+            theme::RED
         };
     };
     match status / 100 {
-        2 => Color32::LIGHT_GREEN,
-        3 => Color32::LIGHT_BLUE,
-        4 => Color32::from_rgb(255, 176, 80),
-        5 => Color32::LIGHT_RED,
-        _ => Color32::GRAY,
+        2 => theme::GREEN,
+        3 => theme::BLUE,
+        4 => theme::AMBER,
+        5 => theme::RED,
+        _ => theme::GRAY,
     }
+}
+
+/// Formatted representations of one side of an exchange, for the
+/// Request/Response tabs and their Raw/Headers/Hex views.
+pub struct MessageViews {
+    pub raw: String,
+    pub head: String,
+    pub hex: String,
 }
 
 /// The request as it was (or will be) sent to the origin server: origin-form
 /// target, like the raw view in other interception tools.
 pub fn format_request(item: &HistoryItem) -> String {
-    let mut out = String::new();
-    let target = if item.is_tunnel() {
-        &item.request.host
-    } else {
-        &item.request.path
-    };
-    out.push_str(&format!(
-        "{} {} {}\n",
-        item.request.method, target, item.request.version
-    ));
-    push_headers(&mut out, &item.request.headers);
+    let mut out = format_request_head(item);
     out.push('\n');
 
     if item.request_body.total_len() == 0 && !item.request_body.is_complete() {
@@ -97,7 +96,49 @@ pub fn format_request(item: &HistoryItem) -> String {
     out
 }
 
+/// Request line and headers only.
+pub fn format_request_head(item: &HistoryItem) -> String {
+    let mut out = String::new();
+    let target = if item.is_tunnel() {
+        &item.request.host
+    } else {
+        &item.request.path
+    };
+    out.push_str(&format!(
+        "{} {} {}\n",
+        item.request.method, target, item.request.version
+    ));
+    push_headers(&mut out, &item.request.headers);
+    out
+}
+
 pub fn format_response(item: &HistoryItem) -> String {
+    let mut out = format_response_head(item);
+    if item.response.is_some() {
+        out.push('\n');
+        match item.response_body() {
+            Some(body) => out.push_str(&format_body(body)),
+            None => match &item.phase {
+                Phase::InFlight => out.push_str("(response body streaming…)\n"),
+                Phase::Finished { .. } => match item.tunnel_stats() {
+                    Some((up, down)) => out.push_str(&format!(
+                        "[wiremoth: TLS passthrough tunnel; relayed {} to server, {} to client; payload not decrypted]\n",
+                        human_bytes(up),
+                        human_bytes(down),
+                    )),
+                    None => out.push_str("(no response body captured)\n"),
+                },
+            },
+        }
+    }
+    if let Some(error) = item.error() {
+        out.push_str(&format!("\n[wiremoth: exchange failed: {error}]\n"));
+    }
+    out
+}
+
+/// Status line and headers only.
+pub fn format_response_head(item: &HistoryItem) -> String {
     let mut out = String::new();
     match &item.response {
         Some(head) => {
@@ -106,31 +147,77 @@ pub fn format_response(item: &HistoryItem) -> String {
                 head.version, head.status, head.reason
             ));
             push_headers(&mut out, &head.headers);
-            out.push('\n');
-            match item.response_body() {
-                Some(body) => out.push_str(&format_body(body)),
-                None => match &item.phase {
-                    Phase::InFlight => out.push_str("(response body streaming…)\n"),
-                    Phase::Finished { .. } => match item.tunnel_stats() {
-                        Some((up, down)) => out.push_str(&format!(
-                            "[wiremoth: TLS passthrough tunnel; relayed {} to server, {} to client; payload not decrypted]\n",
-                            human_bytes(up),
-                            human_bytes(down),
-                        )),
-                        None => out.push_str("(no response body captured)\n"),
-                    },
-                },
-            }
         }
         None => match &item.phase {
             Phase::InFlight => out.push_str("(awaiting response…)\n"),
             Phase::Finished { .. } => out.push_str("(no response head captured)\n"),
         },
     }
-    if let Some(error) = item.error() {
-        out.push_str(&format!("\n[wiremoth: exchange failed: {error}]\n"));
+    out
+}
+
+pub fn request_views(item: &HistoryItem) -> MessageViews {
+    let head = format_request_head(item);
+    let raw = format_request(item);
+    let mut bytes = head.as_bytes().to_vec();
+    bytes.push(b'\n');
+    bytes.extend_from_slice(item.request_body.data());
+    let mut hex = hex_preview(&bytes);
+    append_body_notes(&mut hex, &item.request_body, item.is_in_flight());
+    MessageViews { raw, head, hex }
+}
+
+pub fn response_views(item: &HistoryItem) -> MessageViews {
+    let head = format_response_head(item);
+    let raw = format_response(item);
+    let mut hex = if item.response.is_some() {
+        let mut bytes = head.as_bytes().to_vec();
+        bytes.push(b'\n');
+        if let Some(body) = item.response_body() {
+            bytes.extend_from_slice(body.data());
+        }
+        hex_preview(&bytes)
+    } else {
+        raw.clone()
+    };
+    if let Some(body) = item.response_body() {
+        append_body_notes(&mut hex, body, item.is_in_flight());
+    }
+    if let Some((up, down)) = item.tunnel_stats() {
+        hex.push_str(&format!(
+            "\n[wiremoth: TLS passthrough tunnel; {up} bytes to server, {down} bytes to client; payload not decrypted]\n"
+        ));
+    }
+    MessageViews { raw, head, hex }
+}
+
+fn hex_preview(bytes: &[u8]) -> String {
+    let shown = &bytes[..bytes.len().min(HEX_PREVIEW_LIMIT)];
+    let mut out = hexdump(shown);
+    if shown.len() < bytes.len() {
+        out.push_str(&format!(
+            "\n[wiremoth: hex preview truncated to {} of {} bytes]\n",
+            human_bytes(shown.len() as u64),
+            human_bytes(bytes.len() as u64)
+        ));
     }
     out
+}
+
+fn append_body_notes(out: &mut String, body: &CapturedBody, in_flight: bool) {
+    if body.total_len() == 0 && !body.is_complete() {
+        out.push_str(if in_flight {
+            "\n[wiremoth: body still streaming]\n"
+        } else {
+            "\n[wiremoth: no body captured]\n"
+        });
+    }
+    if body.is_truncated() {
+        out.push_str(&format!(
+            "\n[wiremoth: capture limit reached; {} bytes on the wire]\n",
+            human_bytes(body.total_len())
+        ));
+    }
 }
 
 fn push_headers(out: &mut String, headers: &[(String, String)]) {

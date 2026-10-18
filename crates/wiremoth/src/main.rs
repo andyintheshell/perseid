@@ -5,6 +5,8 @@
 mod app;
 mod branding;
 mod history;
+mod site_map;
+mod theme;
 mod view;
 
 use std::net::SocketAddr;

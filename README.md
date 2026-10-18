@@ -15,29 +15,34 @@ the responses. It is built for web security learning, CTFs, and authorized
 application testing — with no embedded browser and memory bounded by design.
 
 > [!IMPORTANT]
-> **Status: early prototype.** A loopback-only HTTP/1.1 proxy and history UI
-> work today. HTTPS is tunneled as TLS passthrough; local-CA interception is
-> next. See the [roadmap](docs/roadmap.md).
+> **Status: early prototype.** A loopback-only HTTP/1.1 proxy and a Burp-style
+> Target/Proxy workspace work today. HTTPS is tunneled as TLS passthrough;
+> local-CA interception is next. See the [roadmap](docs/roadmap.md).
 
-![Wiremoth history and request/response detail](docs/images/wiremoth-main.png)
+![Wiremoth HTTP history with request and response detail](docs/images/wiremoth-main.png)
 
 ## What works today
 
 - Loopback HTTP/1.1 proxy with configurable listen address, capture limit,
   and history bound.
-- Bounded in-memory history with filtering and keyboard navigation (`j`/`k`,
-  arrows, `Home`/`End`, `Ctrl`+`F`).
-- Request/response detail with headers, bodies, hex view, truncation markers,
+- Burp-style workspace with **Target**, **Proxy**, **Intruder**, and
+  **Repeater** tabs in the familiar order, in a warm light theme.
+- Bounded in-memory history with filtering, a view-only scope filter, and
+  keyboard navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`).
+- Request/response tabs with Raw, Headers, and Hex views, truncation markers,
   size, and timing.
+- Target site map grouped by host and path, plus an editable scope list that
+  filters the site map and HTTP history.
 - `CONNECT` tunneling for HTTPS with byte counts — no TLS decryption yet.
-- Native egui UI with HiDPI handling and the Wiremoth brand.
+- Read-only Repeater preview and clearly labelled Intercept/Intruder previews;
+  no fake controls are presented as working features.
 
 ## Goal: Burp Suite Community parity
 
 Wiremoth's north star is **feature parity with Burp Suite Community Edition's
 manual toolkit**: proxy and history, HTTPS interception, Repeater, Decoder,
-Comparer, Sequencer, WebSockets, and Intruder-demo-style fuzzing — adapted to
-an external browser and a memory-bounded Rust core.
+Comparer, Sequencer, WebSockets, and Intruder-style fuzzing without artificial
+rate limits — adapted to an external browser and a memory-bounded Rust core.
 
 This is a direction, not a current claim. The definition, capability matrix,
 and deliberate deviations live in
