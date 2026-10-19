@@ -121,13 +121,15 @@ pub(crate) fn text_body(text: String) -> ProxyBody {
     boxed(Full::new(Bytes::from(text)))
 }
 
-/// Build a proxy-generated error response (400/501/502/504 pages).
+/// Build a proxy-generated error response (400/501/502/503/504 pages).
 pub(crate) fn text_response(status: StatusCode, message: &str) -> Response<ProxyBody> {
-    Response::builder()
-        .status(status)
-        .header(CONTENT_TYPE, "text/plain; charset=utf-8")
-        .body(text_body(format!("wiremoth: {message}\n")))
-        .expect("valid generated response")
+    let mut response = Response::new(text_body(format!("wiremoth: {message}\n")));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
 }
 
 #[cfg(test)]

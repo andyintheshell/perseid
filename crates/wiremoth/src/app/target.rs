@@ -185,15 +185,14 @@ impl WiremothApp {
                         );
                         let enter =
                             response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-                        if ui.button("Add").clicked() || enter {
-                            if let Some(rule) =
+                        if (ui.button("Add").clicked() || enter)
+                            && let Some(rule) =
                                 site_map::normalize_scope_input(&self.scope_input)
-                            {
-                                if self.scope.insert(rule) {
-                                    dirty = true;
-                                }
-                                self.scope_input.clear();
+                        {
+                            if self.scope.insert(rule) {
+                                dirty = true;
                             }
+                            self.scope_input.clear();
                         }
                     });
 

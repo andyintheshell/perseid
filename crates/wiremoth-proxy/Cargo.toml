@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "HTTP interception proxy used by the Wiremoth workbench"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["http", "proxy", "security", "hyper", "capture"]
+categories = ["network-programming", "web-programming::http-server"]
 
 [dependencies]
 bytes.workspace = true

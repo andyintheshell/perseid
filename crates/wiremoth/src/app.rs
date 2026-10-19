@@ -131,6 +131,7 @@ pub struct WiremothApp {
     listen: SocketAddr,
     capture_limit: usize,
     history: History,
+    dropped_seen: u64,
     paused: bool,
     filter: String,
     visible: Vec<u64>,
@@ -207,7 +208,8 @@ impl WiremothApp {
             notify,
             listen: args.listen,
             capture_limit: args.capture_limit,
-            history: History::new(args.history_limit),
+            history: History::new(args.history_limit, args.history_bytes),
+            dropped_seen: 0,
             paused: false,
             filter: String::new(),
             visible: Vec::new(),
@@ -252,6 +254,7 @@ impl WiremothApp {
                 proxy.set_paused(self.paused);
                 self.proxy = Some(proxy);
                 self.proxy_error = None;
+                self.dropped_seen = 0;
             }
             Err(err) => {
                 log::error!("could not start the proxy: {err}");
@@ -265,6 +268,13 @@ impl WiremothApp {
         let Some(proxy) = &self.proxy else {
             return;
         };
+        let dropped = proxy.dropped_events();
+        if dropped > self.dropped_seen {
+            self.dropped_seen = dropped;
+            self.history.interrupt_in_flight(
+                "capture events were dropped; the exchange result is unavailable",
+            );
+        }
         let mut selected_changed = false;
         for _ in 0..MAX_EVENTS_PER_FRAME {
             let Some(event) = proxy.try_recv() else {
@@ -274,6 +284,15 @@ impl WiremothApp {
             if self.selected == Some(id) {
                 selected_changed = true;
             }
+        }
+        // Drain what the proxy queued before declaring it stopped, then
+        // resolve any exchange whose terminal event never made it through.
+        let stopped = !proxy.is_running();
+        if stopped {
+            self.proxy = None;
+            self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
+            self.history
+                .interrupt_in_flight("proxy stopped before the exchange finished");
         }
         if selected_changed {
             self.detail = None;
@@ -598,7 +617,11 @@ impl WiremothApp {
                 RichText::new(format!("{} exchanges", self.history.len()))
                     .small()
                     .color(theme::TEXT_MUTED),
-            );
+            )
+            .on_hover_text(format!(
+                "{} captured body bytes retained",
+                view::human_bytes(self.history.retained_bytes() as u64)
+            ));
 
             let in_flight = self.history.in_flight();
             if in_flight > 0 {
@@ -635,6 +658,14 @@ impl WiremothApp {
                     ui.colored_label(
                         theme::AMBER,
                         format!("{dropped} events dropped (consumer too slow)"),
+                    );
+                }
+                let rejected = proxy.rejected_connections() + proxy.rejected_tunnels();
+                if rejected > 0 {
+                    ui.separator();
+                    ui.colored_label(
+                        theme::AMBER,
+                        format!("{rejected} rejected by connection limits"),
                     );
                 }
             }

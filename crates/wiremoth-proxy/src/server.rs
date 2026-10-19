@@ -16,7 +16,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioIo;
 use log::{debug, info, warn};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use crate::capture::TeeBody;
 use crate::events::ProxyEvent;
@@ -33,6 +33,10 @@ pub(crate) struct Ctx {
     pub(crate) paused: Arc<AtomicBool>,
     pub(crate) capture_limit: usize,
     pub(crate) connect_timeout: Duration,
+    pub(crate) connection_slots: Arc<Semaphore>,
+    pub(crate) tunnel_slots: Arc<Semaphore>,
+    pub(crate) rejected_connections: Arc<AtomicU64>,
+    pub(crate) rejected_tunnels: Arc<AtomicU64>,
 }
 
 impl Ctx {
@@ -40,12 +44,18 @@ impl Ctx {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Capture is decided when an exchange starts, so pausing never strands
+    /// an exchange that is already in flight.
+    pub(crate) fn capture_enabled(&self) -> bool {
+        !self.paused.load(Ordering::Relaxed)
+    }
+
     /// Enqueue a capture event. Never blocks and never grows memory: when the
     /// consumer is too slow, the event is dropped and counted.
+    ///
+    /// Callers gate events for exchanges that started while capture was
+    /// paused; this method deliberately does not re-check the pause state.
     pub(crate) fn emit(&self, event: ProxyEvent) {
-        if self.paused.load(Ordering::Relaxed) {
-            return;
-        }
         match self.tx.try_send(event) {
             Ok(()) => {
                 if let Some(notify) = &self.notify {
@@ -82,7 +92,12 @@ pub(crate) async fn serve(
             accepted = listener.accept() => accepted,
         };
         match accepted {
-            Ok((stream, peer)) => spawn_connection(stream, peer, ctx.clone()),
+            Ok((stream, peer)) => {
+                let Some(permit) = acquire_connection(&ctx, peer) else {
+                    continue;
+                };
+                spawn_connection(stream, peer, ctx.clone(), permit);
+            }
             Err(err) => {
                 warn!("accept failed: {err}");
                 // Back off briefly so a persistent error cannot spin the loop.
@@ -92,9 +107,28 @@ pub(crate) async fn serve(
     }
 }
 
-fn spawn_connection(stream: TcpStream, peer: SocketAddr, ctx: Arc<Ctx>) {
+fn acquire_connection(ctx: &Ctx, peer: SocketAddr) -> Option<OwnedSemaphorePermit> {
+    match ctx.connection_slots.clone().try_acquire_owned() {
+        Ok(permit) => Some(permit),
+        Err(_) => {
+            ctx.rejected_connections.fetch_add(1, Ordering::Relaxed);
+            debug!("connection from {peer} rejected: concurrent connection limit reached");
+            None
+        }
+    }
+}
+
+fn spawn_connection(
+    stream: TcpStream,
+    peer: SocketAddr,
+    ctx: Arc<Ctx>,
+    permit: OwnedSemaphorePermit,
+) {
     let _ = stream.set_nodelay(true);
     tokio::spawn(async move {
+        // Holding the permit for the lifetime of the connection task is what
+        // enforces the concurrent-connection limit.
+        let _permit = permit;
         let io = TokioIo::new(stream);
         let service = service_fn(move |req| {
             let ctx = ctx.clone();

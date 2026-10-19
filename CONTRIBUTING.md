@@ -15,7 +15,7 @@ the easiest to review.
 
 Requirements:
 
-- A recent stable Rust toolchain (edition 2024, Rust 1.85 or newer).
+- Rust 1.95.0 or newer (edition 2024), matching `rust-toolchain.toml` and CI.
 - A Linux desktop session with OpenGL support for the UI.
 
 From the workspace root:

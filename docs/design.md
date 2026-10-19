@@ -114,7 +114,9 @@ Important implementation principles:
 
 - Disk-backed history with bounded in-memory windows (planned).
 - Hard limits on captured body size, with explicit truncation markers.
-- Bounded worker queues and a bounded UI event channel with drop counters.
+- A total retained-body budget for history, independent of the exchange count.
+- Bounded worker queues, concurrent connections and tunnels, and a bounded UI
+  event channel with drop counters.
 - Virtualized request lists and hex dumps, plus bounded text previews.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.

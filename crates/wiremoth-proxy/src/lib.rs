@@ -1,14 +1,16 @@
 //! The Wiremoth interception proxy.
 //!
-//! One call to [`Proxy::start`] binds a listener and returns immediately; the
-//! proxy runs on its own Tokio runtime in a dedicated thread so the caller
-//! (typically the egui UI thread) never blocks on network activity.
+//! One call to [`Proxy::start`] binds a listener, waits for the background
+//! runtime to become ready, and returns; the proxy runs on its own Tokio
+//! runtime in a dedicated thread so the caller (typically the egui UI thread)
+//! never blocks on network activity afterward.
 //!
 //! Captured traffic is delivered as [`ProxyEvent`]s over a bounded channel.
 //! Small and immutable by design: bodies are capped by
 //! [`ProxyConfig::capture_limit`], the queue is capped by
-//! [`ProxyConfig::event_queue`] (overflow is counted, not buffered), and the
-//! consumer owns the resulting history.
+//! [`ProxyConfig::event_queue`] (overflow is counted, not buffered), concurrent
+//! work is capped by [`ProxyConfig::max_connections`] and
+//! [`ProxyConfig::max_tunnels`], and the consumer owns the resulting history.
 //!
 //! # Current scope
 //!
@@ -35,7 +37,10 @@ mod server;
 mod tunnel;
 mod util;
 
-pub use config::{DEFAULT_CAPTURE_LIMIT, DEFAULT_EVENT_QUEUE, DEFAULT_LISTEN, ProxyConfig};
+pub use config::{
+    DEFAULT_CAPTURE_LIMIT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_EVENT_QUEUE, DEFAULT_LISTEN,
+    DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_TUNNELS, ProxyConfig,
+};
 pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
 };
@@ -52,7 +57,7 @@ use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{Semaphore, oneshot};
 
 use crate::capture::TeeBody;
 
@@ -67,6 +72,10 @@ pub enum StartError {
     },
     #[error("could not start the proxy thread: {0}")]
     Spawn(#[source] std::io::Error),
+    #[error("could not initialize the proxy runtime: {0}")]
+    Runtime(#[source] std::io::Error),
+    #[error("the proxy thread stopped before it was ready")]
+    Startup,
 }
 
 /// A running proxy.
@@ -78,6 +87,8 @@ pub struct Proxy {
     events: Receiver<ProxyEvent>,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
+    rejected_connections: Arc<AtomicU64>,
+    rejected_tunnels: Arc<AtomicU64>,
     shutdown: Option<oneshot::Sender<()>>,
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -86,7 +97,9 @@ impl Proxy {
     /// Bind `config.listen` and start forwarding traffic in the background.
     ///
     /// Binding happens synchronously, so address conflicts (e.g. another tool
-    /// already on port 8080) are reported with [`StartError`] right here.
+    /// already on port 8080) are reported with [`StartError`] right here. The
+    /// call also waits for the runtime thread to become ready, so a successful
+    /// return means the proxy is actually accepting connections.
     pub fn start(config: ProxyConfig) -> Result<Self, StartError> {
         let listener =
             std::net::TcpListener::bind(config.listen).map_err(|source| StartError::Bind {
@@ -106,9 +119,14 @@ impl Proxy {
 
         let (tx, events) = std::sync::mpsc::sync_channel(config.event_queue.max(1));
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
 
         let dropped = Arc::new(AtomicU64::new(0));
         let paused = Arc::new(AtomicBool::new(false));
+        let rejected_connections = Arc::new(AtomicU64::new(0));
+        let rejected_tunnels = Arc::new(AtomicU64::new(0));
+        let connection_slots = Arc::new(Semaphore::new(config.max_connections.max(1)));
+        let tunnel_slots = Arc::new(Semaphore::new(config.max_tunnels.max(1)));
 
         let mut connector = HttpConnector::new();
         connector.set_connect_timeout(Some(config.connect_timeout));
@@ -127,6 +145,10 @@ impl Proxy {
             paused: paused.clone(),
             capture_limit: config.capture_limit,
             connect_timeout: config.connect_timeout,
+            connection_slots,
+            tunnel_slots,
+            rejected_connections: rejected_connections.clone(),
+            rejected_tunnels: rejected_tunnels.clone(),
         });
 
         let thread = thread::Builder::new()
@@ -138,23 +160,46 @@ impl Proxy {
                 {
                     Ok(runtime) => runtime,
                     Err(err) => {
-                        log::error!("could not start the proxy runtime: {err}");
+                        let _ = startup_tx.send(Err(StartError::Runtime(err)));
                         return;
                     }
                 };
                 runtime.block_on(async move {
-                    let listener = TcpListener::from_std(listener)
-                        .expect("listener was bound in this process");
+                    let listener = match TcpListener::from_std(listener) {
+                        Ok(listener) => listener,
+                        Err(err) => {
+                            let _ = startup_tx.send(Err(StartError::Runtime(err)));
+                            return;
+                        }
+                    };
+                    if startup_tx.send(Ok(())).is_err() {
+                        return;
+                    }
+                    drop(startup_tx);
                     server::serve(listener, ctx, shutdown_rx).await;
                 });
             })
             .map_err(StartError::Spawn)?;
+
+        match startup_rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                let _ = thread.join();
+                return Err(err);
+            }
+            Err(_) => {
+                let _ = thread.join();
+                return Err(StartError::Startup);
+            }
+        }
 
         Ok(Self {
             addr,
             events,
             dropped,
             paused,
+            rejected_connections,
+            rejected_tunnels,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         })
@@ -165,7 +210,21 @@ impl Proxy {
         self.addr
     }
 
+    /// Whether the proxy runtime thread is still running.
+    ///
+    /// A successful [`Proxy::start`] guarantees this is true initially. If it
+    /// becomes false, the proxy stopped unexpectedly and the handle should be
+    /// dropped and restarted.
+    pub fn is_running(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
+    }
+
     /// Take the next capture event, if any.
+    ///
+    /// `None` means the queue is empty; use [`Proxy::is_running`] to tell that
+    /// apart from a stopped proxy.
     pub fn try_recv(&self) -> Option<ProxyEvent> {
         self.events.try_recv().ok()
     }
@@ -180,7 +239,21 @@ impl Proxy {
         self.dropped.load(Ordering::Relaxed)
     }
 
-    /// While paused, the proxy keeps forwarding but emits no capture events.
+    /// Client connections closed because [`ProxyConfig::max_connections`] was
+    /// reached.
+    pub fn rejected_connections(&self) -> u64 {
+        self.rejected_connections.load(Ordering::Relaxed)
+    }
+
+    /// CONNECT requests rejected because [`ProxyConfig::max_tunnels`] was
+    /// reached.
+    pub fn rejected_tunnels(&self) -> u64 {
+        self.rejected_tunnels.load(Ordering::Relaxed)
+    }
+
+    /// While paused, the proxy keeps forwarding but does not start recording
+    /// new exchanges. Exchanges already in flight still deliver their terminal
+    /// events, so history never strands rows.
     pub fn set_paused(&self, paused: bool) {
         self.paused.store(paused, Ordering::Relaxed);
     }
@@ -195,8 +268,10 @@ impl Drop for Proxy {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            log::error!("proxy thread panicked while shutting down");
         }
     }
 }

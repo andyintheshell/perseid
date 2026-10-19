@@ -9,12 +9,12 @@ default-members = ["crates/wiremoth"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/wiremoth/wiremoth"
+repository = "https://github.com/andyintheshell/wiremoth"
+homepage = "https://github.com/andyintheshell/wiremoth"
 
 [workspace.dependencies]
-anyhow = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
