@@ -17,8 +17,8 @@ application testing — with no embedded browser and memory bounded by design.
 > [!IMPORTANT]
 > **Status: early prototype.** A loopback-only HTTP/1.1 proxy with editable
 > request/response interception, opt-in scope enforcement, match/replace rules,
-> and a Burp-style Target/Proxy workspace work today. HTTPS is tunneled as TLS
-> passthrough; local-CA interception is next. See the [roadmap](docs/roadmap.md).
+> local-CA HTTPS interception, and a Burp-style Target/Proxy workspace work
+> today. See the [roadmap](docs/roadmap.md).
 
 ![Wiremoth HTTP history with request and response detail](docs/images/wiremoth-main.png)
 
@@ -27,9 +27,12 @@ application testing — with no embedded browser and memory bounded by design.
 - Loopback HTTP/1.1 proxy with configurable listen address, capture limit,
   interception limit, and count/byte history bounds.
 - Editable request and response interception behind one Burp-style **Intercept
-  is on/off** control: hold plain-HTTP messages, edit the head and buffered
-  body, then forward or drop. Bodies over the intercept limit stay header-only
-  instead of being silently modified.
+  is on/off** control: hold HTTP and decrypted HTTPS messages, edit the head and
+  buffered body, then forward or drop. Bodies over the intercept limit stay
+  header-only instead of being silently modified.
+- Opt-in HTTPS interception with a locally generated certificate authority,
+  per-host certificates, a pass-through host list, and documented manual browser
+  trust and removal steps. Wiremoth never installs trust automatically.
 - Opt-in scope enforcement for HTTP and `CONNECT`, returning `403` for
   out-of-scope hosts. An empty scope allows every host, and enforcement is off
   by default.
@@ -47,7 +50,8 @@ application testing — with no embedded browser and memory bounded by design.
   Hex keeps the original wire bytes.
 - Target site map grouped by host and path, plus an editable scope list shared
   by the view filter and the traffic guardrail.
-- `CONNECT` tunneling for HTTPS with byte counts — no TLS decryption yet.
+- `CONNECT` tunneling for HTTPS: opaque passthrough by default, decryption with
+  a locally generated CA when enabled.
 - Read-only Repeater preview and a clearly labelled Intruder preview; no fake
   controls are presented as working features.
 
@@ -70,8 +74,10 @@ cargo run -p wiremoth
 
 The proxy listens on `127.0.0.1:8080` and the Wiremoth window opens. Point your
 browser — or an extension such as FoxyProxy — at that address for HTTP and
-HTTPS. To hold plain-HTTP traffic, open **Proxy > Intercept** and click
-**Intercept is off** once to turn interception on.
+HTTPS. To hold HTTP (and decrypted HTTPS) traffic, open **Proxy > Intercept**
+and click **Intercept is off** once to turn interception on. To decrypt HTTPS,
+generate and trust the local CA as described in
+[HTTPS interception](docs/tls.md).
 
 > Only test systems you own or have explicit permission to test. See
 > [Safety and privacy](docs/safety.md).
@@ -84,6 +90,7 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 | Document | Contents |
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Build, run, proxy setup, options, limitations |
+| [HTTPS interception](docs/tls.md) | Local CA setup, browser trust and removal, pass-through hosts |
 | [Design](docs/design.md) | Principles, architecture, technology, performance |
 | [Performance and memory](docs/performance.md) | M0 measurements, idle RSS breakdown, and method |
 | [Roadmap](docs/roadmap.md) | Milestones from prototype to Community parity |

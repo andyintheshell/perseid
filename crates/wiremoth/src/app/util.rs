@@ -11,13 +11,22 @@ pub(super) fn request_url(item: &HistoryItem) -> String {
     if item.request.uri.starts_with("http://") || item.request.uri.starts_with("https://") {
         item.request.uri.clone()
     } else {
-        format!("http://{}{}", item.request.host, item.request.path)
+        let scheme = if item.request.scheme.is_empty() {
+            "http"
+        } else {
+            item.request.scheme.as_str()
+        };
+        format!("{scheme}://{}{}", item.request.host, item.request.path)
     }
 }
 
 pub(super) fn mime_type(item: &HistoryItem) -> String {
     if item.is_tunnel() {
-        return "TLS tunnel".to_string();
+        return if item.tls_intercepted_requests().is_some() {
+            "TLS intercepted".to_string()
+        } else {
+            "TLS tunnel".to_string()
+        };
     }
     item.response
         .as_ref()

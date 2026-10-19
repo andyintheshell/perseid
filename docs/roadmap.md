@@ -25,13 +25,19 @@ definition of done, and deliberate deviations.
   can filter the workspace and optionally block out-of-scope HTTP requests and
   `CONNECT` tunnels with a `403`. Match/replace rules run after interception on
   heads and buffered UTF-8 bodies. Requests and responses larger than the
-  interception limit stay header-only. HTTPS remains CONNECT passthrough.*
+  interception limit stay header-only. HTTPS interception arrived in Milestone 2.*
 
-- [ ] **Milestone 2 — HTTPS:** local CA generation, TLS interception,
+- [x] **Milestone 2 — HTTPS:** local CA generation, TLS interception,
   documented browser trust setup, and pass-through controls.
 
-  *Status: `CONNECT` tunneling works as TLS passthrough with byte counts;
-  TLS interception is not implemented.*
+  *Complete: a locally generated ECDSA certificate authority mints per-host
+  certificates for intercepted `CONNECT` tunnels. Decryption is opt-in and
+  starts only when a CA is loaded and the TLS toggle is on. Trust is installed
+  and removed manually in the browser; Wiremoth never touches a system or
+  browser trust store. Pass-through hosts stay opaque, scope can still block
+  tunnels, and decrypted exchanges flow through the same interception,
+  match/replace, and bounded-capture pipeline as plain HTTP. See
+  [HTTPS interception](tls.md).*
 
 - [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
   search, Repeater, Decoder, and response diff (Comparer).

@@ -21,6 +21,9 @@ pub struct RequestInfo {
     /// The request target exactly as the client sent it
     /// (absolute form for plain HTTP, `host:port` for CONNECT).
     pub uri: String,
+    /// Scheme of the connection the request arrived on: `http`, or `https`
+    /// for an intercepted CONNECT tunnel.
+    pub scheme: String,
     /// Logical host, e.g. `example.com` or `example.com:8080`.
     pub host: String,
     /// Origin-form path (`/a?b=c`), empty for CONNECT.
@@ -134,6 +137,10 @@ pub enum ExchangeResult {
         client_to_server: u64,
         server_to_client: u64,
     },
+    /// A CONNECT tunnel whose TLS was intercepted; `requests` counts the
+    /// decrypted HTTP exchanges carried over the tunnel. Those exchanges also
+    /// appear individually in history.
+    InterceptedTls { requests: u64 },
     /// The exchange failed (upstream connect error, malformed request, ...).
     Failed { error: String },
 }

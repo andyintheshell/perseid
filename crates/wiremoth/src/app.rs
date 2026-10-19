@@ -16,22 +16,28 @@ mod proxy;
 mod rules;
 mod scale;
 mod target;
+mod tls;
 mod util;
 mod widgets;
 mod windows;
 
 use std::collections::{BTreeSet, VecDeque};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Color32, Key, RichText, Stroke};
-use wiremoth_proxy::{InterceptItem, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings};
+use wiremoth_proxy::{
+    CertificateAuthority, InterceptItem, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings,
+    TlsConfig,
+};
 
 use self::intercept::InterceptDraft;
 
 use crate::Args;
 use crate::branding;
+use crate::ca_store;
 use crate::history::History;
 use crate::memory::MemoryMeter;
 use crate::site_map::{self, SiteMap};
@@ -106,6 +112,7 @@ enum ProxySection {
     #[default]
     HttpHistory,
     MatchReplace,
+    Tls,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -161,6 +168,16 @@ pub struct WiremothApp {
     scope: BTreeSet<String>,
     scope_enabled: bool,
     scope_input: String,
+    /// Where the TLS interception CA lives on disk.
+    ca_dir: PathBuf,
+    /// Loaded CA, if the user created one. `None` keeps HTTPS on passthrough.
+    tls_ca: Option<Arc<CertificateAuthority>>,
+    /// Why the stored CA could not be loaded, if it failed.
+    tls_ca_error: Option<String>,
+    /// Whether CONNECT targets are decrypted (subject to the pass-through list).
+    tls_intercept: bool,
+    tls_passthrough: Vec<String>,
+    tls_passthrough_input: String,
     /// Scale reported by the windowing system (physical pixels per point).
     native_ui_scale: f32,
     /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
@@ -215,6 +232,16 @@ impl WiremothApp {
 
         let mark = branding::mark_texture(&cc.egui_ctx);
 
+        let ca_dir = args.ca_dir.clone().unwrap_or_else(ca_store::default_dir);
+        let (tls_ca, tls_ca_error) = match ca_store::load(&ca_dir) {
+            Ok(ca) => (ca, None),
+            Err(err) => (None, Some(err)),
+        };
+        let tls_intercept = args.tls_intercept && tls_ca.is_some();
+        if args.tls_intercept && tls_ca.is_none() {
+            log::warn!("--tls-intercept ignored: no certificate authority is configured");
+        }
+
         let mut app = Self {
             proxy: None,
             proxy_error: None,
@@ -246,6 +273,12 @@ impl WiremothApp {
             scope: BTreeSet::new(),
             scope_enabled: false,
             scope_input: String::new(),
+            ca_dir,
+            tls_ca,
+            tls_ca_error,
+            tls_intercept,
+            tls_passthrough: args.tls_passthrough.clone(),
+            tls_passthrough_input: String::new(),
             native_ui_scale,
             base_ui_scale,
             mark,
@@ -269,6 +302,10 @@ impl WiremothApp {
             capture_limit: self.capture_limit,
             intercept_limit: self.intercept_limit,
             settings,
+            tls: TlsConfig {
+                authority: self.tls_ca.clone(),
+                extra_roots_pem: Vec::new(),
+            },
             notify: Some(notify),
             ..ProxyConfig::default()
         };
@@ -299,6 +336,8 @@ impl WiremothApp {
             intercept_responses: self.intercept_enabled,
             scope_enforce: self.scope_enforce,
             scope_rules: self.scope.iter().cloned().collect(),
+            tls_intercept: self.tls_intercept,
+            tls_passthrough: self.tls_passthrough.clone(),
             match_replace: self.match_replace.clone(),
         }
     }
@@ -802,13 +841,14 @@ impl WiremothApp {
                         .color(theme::TEXT_MUTED),
                 );
                 ui.separator();
-                ui.label(
-                    RichText::new(
-                        "HTTPS: CONNECT passthrough - TLS interception not implemented yet",
-                    )
-                    .small()
-                    .color(theme::TEXT_MUTED),
-                );
+                let https_status = if self.tls_intercept && self.tls_ca.is_some() {
+                    "HTTPS: decrypting via the local CA"
+                } else if self.tls_ca.is_some() {
+                    "HTTPS: CONNECT passthrough - TLS interception is off"
+                } else {
+                    "HTTPS: CONNECT passthrough - no interception CA"
+                };
+                ui.label(RichText::new(https_status).small().color(theme::TEXT_MUTED));
             });
         });
     }

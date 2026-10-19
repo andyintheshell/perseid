@@ -1,14 +1,20 @@
 //! End-to-end tests: real TCP client -> wiremoth proxy -> local origin server.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use rcgen::{CertificateParams, KeyPair};
+use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
+use rustls::{ClientConfig, RootCertStore, ServerConfig};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 use wiremoth_proxy::{
-    ExchangeResult, InterceptItem, InterceptKind, MatchReplaceRule, Proxy, ProxyConfig, ProxyEvent,
-    ProxySettings, RequestInfo, RuleDirection, RulePart, StartError,
+    CertificateAuthority, ExchangeResult, InterceptItem, InterceptKind, MatchReplaceRule, Proxy,
+    ProxyConfig, ProxyEvent, ProxySettings, RequestInfo, RuleDirection, RulePart, StartError,
+    TlsConfig,
 };
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -78,7 +84,7 @@ async fn spawn_capture_origin(response: String) -> (SocketAddr, oneshot::Receive
 }
 
 /// Read a request head plus declared body.
-async fn read_request(stream: &mut TcpStream) -> Vec<u8> {
+async fn read_request<S: AsyncRead + Unpin>(stream: &mut S) -> Vec<u8> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -1279,4 +1285,473 @@ fn start_returns_only_after_the_proxy_is_running() {
     .expect("proxy should start on an ephemeral port");
     assert!(proxy.is_running());
     assert!(proxy.local_addr().port() > 0);
+}
+
+// ---------------------------------------------------------------------------
+// TLS interception
+// ---------------------------------------------------------------------------
+
+/// Self-signed certificate for `name`, as a server config plus its PEM.
+fn origin_certificate(name: &str) -> (ServerConfig, String) {
+    let key = KeyPair::generate().expect("origin key");
+    let params = CertificateParams::new(vec![name.to_string()]).expect("origin params");
+    let cert = params.self_signed(&key).expect("origin certificate");
+    let key_der = PrivatePkcs8KeyDer::from(key.serialize_der());
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert.der().clone()], PrivateKeyDer::Pkcs8(key_der))
+        .expect("origin server config");
+    (config, cert.pem())
+}
+
+/// TLS origin that speaks HTTP/1.1 and reports every request it receives.
+async fn spawn_tls_origin(
+    name: &str,
+    response: String,
+) -> (SocketAddr, String, mpsc::UnboundedReceiver<Vec<u8>>) {
+    let (config, cert_pem) = origin_certificate(name);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (request_tx, request_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let acceptor = TlsAcceptor::from(Arc::new(config.clone()));
+            let response = response.clone();
+            let request_tx = request_tx.clone();
+            tokio::spawn(async move {
+                let Ok(mut tls) = acceptor.accept(stream).await else {
+                    return;
+                };
+                loop {
+                    let request = tokio::time::timeout(TIMEOUT, read_request(&mut tls))
+                        .await
+                        .unwrap_or_default();
+                    if request.is_empty() {
+                        break;
+                    }
+                    let _ = request_tx.send(request);
+                    if tls.write_all(response.as_bytes()).await.is_err() {
+                        break;
+                    }
+                }
+                let _ = tls.shutdown().await;
+            });
+        }
+    });
+    (addr, cert_pem, request_rx)
+}
+
+/// Trust anchors built from PEM certificates.
+fn pem_roots(pems: &[&str]) -> RootCertStore {
+    let mut roots = RootCertStore::empty();
+    for pem in pems {
+        for cert in rustls_pemfile::certs(&mut pem.as_bytes()) {
+            roots
+                .add(cert.expect("a PEM certificate"))
+                .expect("a trustable certificate");
+        }
+    }
+    roots
+}
+
+fn proxy_with_tls(
+    authority: Option<Arc<CertificateAuthority>>,
+    extra_roots_pem: Vec<String>,
+    settings: ProxySettings,
+) -> Proxy {
+    init_logging();
+    Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().expect("valid test address"),
+        settings,
+        tls: TlsConfig {
+            authority,
+            extra_roots_pem,
+        },
+        event_queue: 64,
+        ..ProxyConfig::default()
+    })
+    .expect("proxy should start on an ephemeral port")
+}
+
+/// CONNECT to `target`, then hand the tunnel to `roots`-trusting TLS and send
+/// `request`. Returns the CONNECT response head and the response inside TLS.
+async fn tls_exchange(
+    proxy: SocketAddr,
+    target: SocketAddr,
+    server_name: &str,
+    roots: RootCertStore,
+    request: &str,
+) -> (String, Vec<u8>) {
+    let mut stream = TcpStream::connect(proxy).await.unwrap();
+    let connect = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
+    stream.write_all(connect.as_bytes()).await.unwrap();
+    let head = read_http_head(&mut stream).await;
+    assert!(
+        head.starts_with("HTTP/1.1 200"),
+        "unexpected CONNECT response: {head}"
+    );
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(config));
+    let name = ServerName::try_from(server_name.to_string()).expect("valid server name");
+    let mut tls = connector
+        .connect(name, stream)
+        .await
+        .expect("client TLS handshake should succeed");
+    tls.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    let _ = tokio::time::timeout(TIMEOUT, tls.read_to_end(&mut response)).await;
+    (head, response)
+}
+
+/// Collect events until `finishes` exchanges report `Finished`.
+fn drain_events(proxy: &Proxy, finishes: usize) -> Vec<ProxyEvent> {
+    let deadline = Instant::now() + TIMEOUT;
+    let mut events = Vec::new();
+    let mut finished = 0;
+    while Instant::now() < deadline {
+        match proxy.recv_timeout(Duration::from_millis(100)) {
+            Ok(event) => {
+                if matches!(event, ProxyEvent::Finished { .. }) {
+                    finished += 1;
+                }
+                events.push(event);
+                if finished >= finishes {
+                    return events;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    panic!(
+        "only {finished} of {finishes} exchanges finished within the test timeout; got {} events",
+        events.len()
+    );
+}
+
+fn started_events(events: &[ProxyEvent]) -> Vec<&RequestInfo> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ProxyEvent::Started { request, .. } => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+
+fn results(events: &[ProxyEvent]) -> Vec<ExchangeResult> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ProxyEvent::Finished { end, .. } => Some(end.result.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepts_https_and_captures_the_decrypted_exchange() {
+    let (origin, origin_pem, mut origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nhello secure"
+            .to_string(),
+    )
+    .await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca.clone()),
+        vec![origin_pem],
+        ProxySettings {
+            tls_intercept: true,
+            match_replace: vec![MatchReplaceRule {
+                enabled: true,
+                direction: RuleDirection::Request,
+                part: RulePart::Head,
+                pattern: "original".to_string(),
+                replacement: "rewritten".to_string(),
+                regex: false,
+            }],
+            ..ProxySettings::default()
+        },
+    );
+
+    let request = format!(
+        "GET /secure HTTP/1.1\r\nHost: {origin}\r\nX-Test: original\r\nConnection: close\r\n\r\n"
+    );
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "localhost",
+        pem_roots(&[ca.cert_pem()]),
+        &request,
+    )
+    .await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(
+        text.starts_with("HTTP/1.1 200 OK"),
+        "response inside TLS was: {text}"
+    );
+    assert_eq!(body_after_head(&response), b"hello secure");
+
+    // The origin sees a plain origin-form request, rewritten by the rule.
+    let upstream = String::from_utf8_lossy(
+        &origin_requests
+            .recv()
+            .await
+            .expect("origin should capture the decrypted request"),
+    )
+    .into_owned();
+    assert!(
+        upstream.starts_with("GET /secure HTTP/1.1"),
+        "upstream request was: {upstream}"
+    );
+    assert!(
+        upstream.to_ascii_lowercase().contains("x-test: rewritten"),
+        "match/replace did not run on the decrypted request:\n{upstream}"
+    );
+    assert!(
+        upstream
+            .to_ascii_lowercase()
+            .contains(&format!("host: {origin}")),
+        "upstream request lost the Host header:\n{upstream}"
+    );
+
+    let events = drain_events(&proxy, 2);
+    let started = started_events(&events);
+    assert_eq!(started.len(), 2, "CONNECT plus one decrypted request");
+    let connect = started
+        .iter()
+        .find(|request| request.method == "CONNECT")
+        .expect("a CONNECT exchange");
+    assert_eq!(connect.scheme, "https");
+    let inner = started
+        .iter()
+        .find(|request| request.method == "GET")
+        .expect("a decrypted GET exchange");
+    assert_eq!(inner.scheme, "https");
+    assert_eq!(inner.uri, "/secure");
+    assert_eq!(inner.host, origin.to_string());
+    assert_eq!(inner.path, "/secure");
+
+    let results = results(&events);
+    assert!(
+        results
+            .iter()
+            .any(|result| matches!(result, ExchangeResult::InterceptedTls { requests: 1 })),
+        "expected an intercepted tunnel result, got {results:?}"
+    );
+    assert!(
+        results.iter().any(|result| matches!(
+            result,
+            ExchangeResult::Response { body } if body.data() == b"hello secure"
+        )),
+        "expected a captured decrypted response, got {results:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepted_requests_without_host_fall_back_to_the_connect_authority() {
+    let (origin, origin_pem, mut origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nnomatch".to_string(),
+    )
+    .await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca.clone()),
+        vec![origin_pem],
+        ProxySettings {
+            tls_intercept: true,
+            ..ProxySettings::default()
+        },
+    );
+
+    // An HTTP/1.0 request without a Host header: only the CONNECT authority
+    // (including its non-default port) identifies the target.
+    let request = "GET /nohost HTTP/1.0\r\nConnection: close\r\n\r\n";
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "127.0.0.1",
+        pem_roots(&[ca.cert_pem()]),
+        request,
+    )
+    .await;
+    assert_eq!(body_after_head(&response), b"nomatch");
+
+    let upstream = String::from_utf8_lossy(
+        &origin_requests
+            .recv()
+            .await
+            .expect("origin should capture the decrypted request"),
+    )
+    .into_owned();
+    assert!(
+        upstream
+            .to_ascii_lowercase()
+            .contains(&format!("host: {origin}")),
+        "fallback lost the CONNECT port:\n{upstream}"
+    );
+
+    let events = drain_events(&proxy, 2);
+    assert!(
+        results(&events)
+            .iter()
+            .any(|result| matches!(result, ExchangeResult::Response { .. })),
+        "expected the decrypted response to be captured"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tls_passthrough_hosts_stay_encrypted() {
+    let (origin, origin_pem, _origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\ntunnel me".to_string(),
+    )
+    .await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca),
+        Vec::new(),
+        ProxySettings {
+            tls_intercept: true,
+            tls_passthrough: vec!["127.0.0.1".to_string()],
+            ..ProxySettings::default()
+        },
+    );
+
+    // Trusting the origin directly only works when the tunnel stays opaque.
+    let request = format!("GET /raw HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "127.0.0.1",
+        pem_roots(&[&origin_pem]),
+        &request,
+    )
+    .await;
+    assert_eq!(body_after_head(&response), b"tunnel me");
+
+    let events = drain_events(&proxy, 1);
+    assert_eq!(
+        started_events(&events).len(),
+        1,
+        "only the CONNECT exchange"
+    );
+    let results = results(&events);
+    assert!(
+        matches!(results.as_slice(), [ExchangeResult::Tunnel { .. }]),
+        "expected a passthrough tunnel result, got {results:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tls_interception_is_off_by_default_even_with_a_ca() {
+    let (origin, origin_pem, _origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string(),
+    )
+    .await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(Some(ca), Vec::new(), ProxySettings::default());
+
+    let request = format!("GET /default HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "127.0.0.1",
+        pem_roots(&[&origin_pem]),
+        &request,
+    )
+    .await;
+    assert_eq!(body_after_head(&response), b"ok");
+
+    let events = drain_events(&proxy, 1);
+    let results = results(&events);
+    assert!(
+        matches!(results.as_slice(), [ExchangeResult::Tunnel { .. }]),
+        "expected a passthrough tunnel result, got {results:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tls_authority_can_be_added_at_runtime() {
+    let (origin, origin_pem, mut origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nruntime".to_string(),
+    )
+    .await;
+    // Interception is requested but no CA is configured yet: passthrough.
+    let proxy = proxy_with_tls(
+        None,
+        vec![origin_pem.clone()],
+        ProxySettings {
+            tls_intercept: true,
+            ..ProxySettings::default()
+        },
+    );
+
+    let request = format!("GET /first HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "127.0.0.1",
+        pem_roots(&[&origin_pem]),
+        &request,
+    )
+    .await;
+    assert_eq!(body_after_head(&response), b"runtime");
+    let events = drain_events(&proxy, 1);
+    assert!(matches!(
+        results(&events).as_slice(),
+        [ExchangeResult::Tunnel { .. }]
+    ));
+    let _ = origin_requests.recv().await;
+
+    // Adding the CA at runtime sends new tunnels through interception.
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    proxy.set_tls_authority(Some(ca.clone()));
+    let request = format!("GET /second HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "127.0.0.1",
+        pem_roots(&[ca.cert_pem()]),
+        &request,
+    )
+    .await;
+    assert_eq!(body_after_head(&response), b"runtime");
+
+    let events = drain_events(&proxy, 2);
+    let outcomes = results(&events);
+    assert!(
+        outcomes
+            .iter()
+            .any(|result| matches!(result, ExchangeResult::InterceptedTls { requests: 1 })),
+        "expected an intercepted tunnel result, got {outcomes:?}"
+    );
+
+    // Removing it again falls back to passthrough for the next tunnel.
+    proxy.set_tls_authority(None);
+    let request = format!("GET /third HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_head, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "127.0.0.1",
+        pem_roots(&[&origin_pem]),
+        &request,
+    )
+    .await;
+    assert_eq!(body_after_head(&response), b"runtime");
+    let events = drain_events(&proxy, 1);
+    assert!(matches!(
+        results(&events).as_slice(),
+        [ExchangeResult::Tunnel { .. }]
+    ));
 }

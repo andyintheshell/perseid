@@ -30,6 +30,9 @@ proxy is running and lets you retry if the address is already in use.
 --history-limit <N>       maximum number of exchanges kept in memory [default: 2000]
 --history-bytes <BYTES>   maximum total body bytes retained by history [default: 268435456]
 --no-proxy                start the UI without the proxy
+--ca-dir <DIR>            TLS interception CA directory [default: $WIREMOTH_CA_DIR or $XDG_DATA_HOME/wiremoth]
+--tls-intercept           start with HTTPS interception enabled (requires a CA)
+--tls-passthrough <HOST>  host that is never TLS-intercepted (repeatable)
 --ui-scale <FACTOR>       UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
 ```
 
@@ -42,8 +45,8 @@ The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
 
 | Tab | Available today |
 | --- | --- |
-| **Target** | A host/path site map built from captured HTTP, and an editable scope list. Scope can filter the site map and history, and can optionally block out-of-scope traffic before it is forwarded. |
-| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds plain-HTTP requests and responses for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. |
+| **Target** | A host/path site map built from captured exchanges, and an editable scope list. Scope can filter the site map and history, and can optionally block out-of-scope traffic before it is forwarded. |
+| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds HTTP and decrypted HTTPS messages for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. **TLS** manages the local CA, the HTTPS decryption toggle, and the pass-through host list. |
 | **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
 | **Repeater** | A read-only preview of the selected request and response. Editing and resending arrive in Milestone 3. |
 
@@ -69,15 +72,16 @@ baseline, resident-memory context, and method.
 ## Intercepting traffic
 
 Open **Proxy > Intercept** and click the **Intercept is off** button to turn
-interception on. As in Burp, this is the single on/off control: plain-HTTP
-requests and responses are held before they are forwarded, and the button
-changes to **Intercept is on**. Held messages appear in a queue; the status bar
-shows how many are waiting. Edit the raw head, edit the body when it is
-buffered UTF-8 text, then choose **Forward** or **Drop** in the toolbar.
-**Forward** applies match/replace rules and re-checks the scope before sending.
-Holding a message does not stop unrelated connections from progressing. Turning
-interception off stops new messages from being held; anything already waiting
-still needs **Forward** or **Drop**.
+interception on. As in Burp, this is the single on/off control: HTTP requests
+and responses — including decrypted HTTPS when TLS interception is enabled — are
+held before they are forwarded, and the button changes to **Intercept is on**.
+Held messages appear in a queue; the status bar shows how many are waiting.
+Edit the raw head, edit the body when it is buffered UTF-8 text, then choose
+**Forward** or **Drop** in the toolbar. **Forward** applies match/replace rules
+and re-checks the scope before sending. Holding a message does not stop
+unrelated connections from progressing. Turning interception off stops new
+messages from being held; anything already waiting still needs **Forward** or
+**Drop**.
 
 Only bodies up to `--intercept-limit` (1 MiB by default) are buffered for
 editing. Larger or streaming bodies are still held for header edits, but their
@@ -105,9 +109,23 @@ Responses such as `304 Not Modified` and `204 No Content` have no body by
 definition. Raw labels them explicitly, so a force-refreshed page that reuses
 its cached copy does not look like a failed capture.
 
-HTTPS is still a `CONNECT` passthrough. Scope enforcement can block a tunnel
-before it opens, but Wiremoth cannot edit requests inside it until TLS
-interception lands.
+## HTTPS interception
+
+Wiremoth can decrypt HTTPS with a local certificate authority (CA). The CA is
+generated on demand and stored outside the proxy; its private key stays on your
+machine. Open **Proxy > TLS** to generate it, copy the certificate path, and
+import the certificate into your browser. Trust is always installed manually,
+never system-wide by Wiremoth. Step-by-step Firefox and Chromium instructions,
+pass-through configuration, and removal steps are in
+[HTTPS interception](tls.md).
+
+Decryption is off by default and requires both a loaded CA and the **Decrypt
+HTTPS** toggle. While it is on, each request inside a `CONNECT` tunnel appears
+as its own `https://` entry in HTTP history and flows through interception,
+scope, and match/replace like plain HTTP. The original `CONNECT` row records the
+tunnel and how many requests it carried. Hosts on the pass-through list stay
+opaque, as does all HTTPS while decryption is off. Only HTTP/1.1 is negotiated
+inside the tunnel.
 
 ## Match/replace rules
 
@@ -131,10 +149,11 @@ proxy at `127.0.0.1:8080` for HTTP and HTTPS.
   bodies, status, size, duration, and capture truncation are visible in the
   history table and detail pane. They can also be held and edited when
   interception is enabled.
-- HTTPS requests arrive as `CONNECT` tunnels. Wiremoth relays the bytes in
-  both directions and records the exchange with byte counts, but does not
-  decrypt TLS yet (Milestone 2). Browsers therefore keep seeing the site's
-  real certificate; no CA needs to be trusted for now.
+- HTTPS requests arrive as `CONNECT` tunnels. By default Wiremoth relays the
+  bytes in both directions and records the exchange with byte counts, without
+  decrypting. After generating a CA and enabling **Decrypt HTTPS**, each request
+  inside the tunnel is captured — and can be held and edited — as a separate
+  `https://` history entry.
 
 History is keyboard-friendly: `j`/`k` or the arrow keys move the selection,
 `Home`/`End` jump to the ends, `Ctrl`+`F` focuses the filter, and `Escape`
@@ -143,12 +162,16 @@ leaves the filter. Clicking a row also selects it.
 ## Current limitations
 
 - HTTP/1.1 only; HTTP/2 and WebSocket-specific handling are still planned.
-- HTTPS is TLS passthrough; there is no interception, editing, or replay of
-  HTTPS contents yet.
-- Interception is available for plain HTTP. Only buffered UTF-8 bodies can be
-  edited; larger, streaming, and binary bodies are header-only.
-- Scope enforcement can block HTTP and `CONNECT`, but it is off by default and
-  an empty scope allows every host.
+- HTTPS interception terminates HTTP/1.1 inside `CONNECT` tunnels. Certificate
+  pinning, non-HTTP TLS protocols, and clients that do not trust the local CA
+  need the pass-through list; HTTP/3/QUIC is not proxied.
+- Browser trust must be installed and removed manually. Wiremoth never edits a
+  system or browser trust store.
+- Interception covers HTTP and decrypted HTTPS. Only buffered UTF-8 bodies can
+  be edited; larger, streaming, and binary bodies are header-only.
+- Scope enforcement can block HTTP and `CONNECT`, and it checks decrypted
+  requests when TLS interception is on. It is off by default, and an empty scope
+  allows every host.
 - Match/replace body rules apply only to buffered UTF-8 bodies. Rules are
   runtime-only and are not persisted between launches.
 - Compressed-body unpacking is always on for the inspection views and has no
@@ -190,6 +213,8 @@ scale.
 - **A request or `CONNECT` gets a `403`:** **Block out-of-scope traffic** is
   enabled and the host is not in the scope list. Add the host or turn the
   guardrail off.
-- **HTTPS sites work but show no decrypted traffic:** expected for now;
-  `CONNECT` tunnels are relayed without interception. The site map deliberately
-  lists HTTP endpoints only.
+- **HTTPS sites show no decrypted traffic:** decryption is off, no CA is loaded,
+  or the host is on the pass-through list. Check the status in **Proxy > TLS**.
+  If the browser reports an untrusted certificate, import the current
+  `wiremoth-ca.pem` as described in [HTTPS interception](tls.md); regenerating
+  the CA requires importing the new certificate.

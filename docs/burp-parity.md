@@ -51,7 +51,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
-| HTTPS interception with a local CA | Yes | CONNECT passthrough | Partial | M2 |
+| HTTPS interception with a local CA | Yes | Local CA, opt-in TLS interception, pass-through hosts, manual trust setup | Working | — |
 | HTTP/2 proxying | Yes | No (HTTP/1.1 only) | Planned | M4 |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
 | Repeater | Yes | Read-only preview | Partial | M3 |
@@ -64,17 +64,22 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Project files | No (Pro feature) | SQLite persistence planned | Beyond CE | M3 |
 | Automated scanner, crawler, Collaborator/OAST | No (Pro features) | No | Non-goal | — |
 
-Interception, scope enforcement, and match/replace currently cover plain HTTP.
-HTTPS `CONNECT` targets can be blocked by scope, but tunnel contents are still
-passed through without inspection. Interception buffers bodies up to
-`--intercept-limit`; larger or streaming bodies are held for header edits, and
-body rewrite rules apply only to buffered UTF-8 bodies. The message editor
-decodes gzip, deflate, and Brotli bodies in Raw, Headers, and Hex, mirroring
-Burp's default unpacking, and the request and response panes use Burp's
-horizontal side-by-side layout. Like Burp, the proxy removes unsupported
-`Accept-Encoding` codings before forwarding. Interception and body rules still
-operate on the wire representation, and forwarding keeps the original response
-encoding. Scope enforcement is opt-in, and an empty scope allows every host.
+Interception, scope enforcement, and match/replace cover plain HTTP and
+decrypted HTTPS. HTTPS `CONNECT` targets can be blocked by scope. TLS
+interception is opt-in: it requires a locally generated CA, a manually trusted
+certificate in the browser, and the TLS toggle. The CA private key stays local;
+Wiremoth never installs trust automatically. Hosts on the pass-through list stay
+opaque, and HTTP/1.1 is the only protocol negotiated inside the tunnel. See
+[HTTPS interception](tls.md) for the trust and removal workflow.
+Interception buffers bodies up to `--intercept-limit`; larger or streaming
+bodies are held for header edits, and body rewrite rules apply only to buffered
+UTF-8 bodies. The message editor decodes gzip, deflate, and Brotli bodies in
+Raw, Headers, and Hex, mirroring Burp's default unpacking, and the request and
+response panes use Burp's horizontal side-by-side layout. Like Burp, the proxy
+removes unsupported `Accept-Encoding` codings before forwarding. Interception
+and body rules still operate on the wire representation, and forwarding keeps
+the original response encoding. Scope enforcement is opt-in, and an empty scope
+allows every host.
 
 Burp Suite's status bar exposes a memory figure. Wiremoth's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;
@@ -118,8 +123,8 @@ or are explicitly authorized to test.
 
 | Milestone | Parity outcome |
 | --- | --- |
-| **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete for plain HTTP; HTTPS contents arrive in M2.)* |
-| **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. |
+| **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete.)* |
+| **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. *(Complete.)* |
 | **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. |
 | **M4 — Protocols and testing tools** | HTTP/2, WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |

@@ -54,6 +54,24 @@ impl WiremothApp {
                         self.proxy_section = ProxySection::MatchReplace;
                         ui.ctx().memory_mut(|memory| memory.stop_text_input());
                     }
+                    let tls_label = if self.tls_ca_error.is_some() {
+                        "TLS !"
+                    } else if self.tls_intercept && self.tls_ca.is_some() {
+                        "TLS on"
+                    } else {
+                        "TLS"
+                    };
+                    let tls_hint = self
+                        .tls_ca_error
+                        .as_deref()
+                        .unwrap_or("Certificate authority and HTTPS decryption controls");
+                    if section_tab(ui, self.proxy_section == ProxySection::Tls, tls_label)
+                        .on_hover_text(tls_hint)
+                        .clicked()
+                    {
+                        self.proxy_section = ProxySection::Tls;
+                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                    }
                 });
             });
 
@@ -61,6 +79,7 @@ impl WiremothApp {
             ProxySection::Intercept => self.intercept_view(ui),
             ProxySection::HttpHistory => self.http_history_view(ui),
             ProxySection::MatchReplace => self.match_replace_view(ui),
+            ProxySection::Tls => self.tls_settings_view(ui),
         }
     }
 

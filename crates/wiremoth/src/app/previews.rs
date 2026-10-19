@@ -65,18 +65,16 @@ impl WiremothApp {
                             .auto_shrink([false, false])
                             .show(&mut columns[1], |ui| {
                                 ui.add(
-                                    Label::new(
-                                        RichText::new(text).monospace().color(theme::TEXT),
-                                    )
-                                    .selectable(true)
-                                    .wrap_mode(egui::TextWrapMode::Extend),
+                                    Label::new(RichText::new(text).monospace().color(theme::TEXT))
+                                        .selectable(true)
+                                        .wrap_mode(egui::TextWrapMode::Extend),
                                 );
                             });
                     }
                     None => {
                         columns[1].label(
                             RichText::new(
-                                "Select a plain-HTTP exchange in Proxy history to use it as a template.",
+                                "Select an HTTP exchange in Proxy history to use it as a template.",
                             )
                             .small()
                             .color(theme::TEXT_MUTED),

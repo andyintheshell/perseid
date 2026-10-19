@@ -11,6 +11,7 @@ use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response};
+use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioIo;
@@ -21,12 +22,17 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use crate::events::ProxyEvent;
 use crate::intercept::{InterceptDecision, InterceptItem};
 use crate::policy::{Policy, PolicySnapshot};
+use crate::tls::CertificateAuthority;
 use crate::util::ProxyBody;
 use crate::{forward, tunnel};
 
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
-    pub(crate) client: Client<HttpConnector, ProxyBody>,
+    pub(crate) client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
+    /// The local CA that mints interception certificates. `None` keeps CONNECT
+    /// traffic on the passthrough path even when interception is enabled.
+    /// Swapped at runtime by [`crate::Proxy::set_tls_authority`].
+    pub(crate) tls_ca: Arc<RwLock<Option<Arc<CertificateAuthority>>>>,
     pub(crate) tx: SyncSender<ProxyEvent>,
     pub(crate) notify: Option<Arc<dyn Fn() + Send + Sync>>,
     pub(crate) dropped: Arc<AtomicU64>,
@@ -83,6 +89,14 @@ impl Ctx {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .snapshot()
+    }
+
+    /// Snapshot the certificate authority for one CONNECT decision.
+    pub(crate) fn tls_authority(&self) -> Option<Arc<CertificateAuthority>> {
+        self.tls_ca
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// Hold a message for a UI decision. The intercept channel applies

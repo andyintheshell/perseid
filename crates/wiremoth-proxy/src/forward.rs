@@ -73,6 +73,24 @@ struct Exchange {
     request: RequestInfo,
 }
 
+/// The transport a request arrived on. Origin-form targets are resolved
+/// against the originating scheme, so a decrypted request reaches the origin
+/// over TLS while a plain proxy request stays plain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConnScheme {
+    Http,
+    Https,
+}
+
+impl ConnScheme {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Https => "https",
+        }
+    }
+}
+
 /// Where the body bytes will come from once the message is sent.
 enum BodySource {
     Incoming(Incoming),
@@ -96,6 +114,27 @@ impl BodySource {
 }
 
 pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<ProxyBody> {
+    handle_with(ctx, req, ConnScheme::Http, None).await
+}
+
+/// Handle a request received inside an intercepted CONNECT tunnel.
+///
+/// `authority` is the CONNECT target; it backs up the `Host` header for
+/// clients that omit one.
+pub(crate) async fn handle_intercepted(
+    ctx: Arc<Ctx>,
+    req: Request<Incoming>,
+    authority: String,
+) -> Response<ProxyBody> {
+    handle_with(ctx, req, ConnScheme::Https, Some(authority)).await
+}
+
+async fn handle_with(
+    ctx: Arc<Ctx>,
+    req: Request<Incoming>,
+    conn_scheme: ConnScheme,
+    fallback_authority: Option<String>,
+) -> Response<ProxyBody> {
     let start = ExchangeStart {
         id: ctx.next_id(),
         timestamp: SystemTime::now(),
@@ -106,13 +145,19 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
     let (mut parts, body) = req.into_parts();
     let raw_uri = parts.uri.clone();
 
-    let target = match resolve_target(&parts.uri, &parts.headers) {
+    let target = match resolve_target(
+        &parts.uri,
+        &parts.headers,
+        conn_scheme,
+        fallback_authority.as_deref(),
+    ) {
         Ok(target) => target,
         Err(err) => {
             debug!("rejecting request: {}", err.message);
             let request = RequestInfo {
                 method: parts.method.to_string(),
                 uri: raw_uri.to_string(),
+                scheme: conn_scheme.as_str().to_string(),
                 host: parts
                     .headers
                     .get(HOST)
@@ -139,7 +184,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
         start,
         capture,
         policy,
-        request: build_request_info(&parts, &target, &raw_uri),
+        request: build_request_info(&parts, &target, &raw_uri, conn_scheme),
     };
     if exchange.policy.scope_enforced() && !exchange.policy.in_scope(&exchange.request.host) {
         ctx.block_by_scope();
@@ -299,7 +344,12 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
         }
     }
 
-    let target = match resolve_target(&parts.uri, &parts.headers) {
+    let target = match resolve_target(
+        &parts.uri,
+        &parts.headers,
+        conn_scheme,
+        fallback_authority.as_deref(),
+    ) {
         Ok(target) => target,
         Err(err) => {
             return reject_request(
@@ -313,7 +363,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
             );
         }
     };
-    exchange.request = build_request_info(&parts, &target, &parts.uri);
+    exchange.request = build_request_info(&parts, &target, &parts.uri, conn_scheme);
 
     if exchange.policy.scope_enforced() && !exchange.policy.in_scope(&exchange.request.host) {
         ctx.block_by_scope();
@@ -710,17 +760,24 @@ fn apply_response_head(parts: &mut http::response::Parts, parsed: ParsedResponse
 ///
 /// Browsers send absolute-form targets (`GET http://host/path`); origin-form
 /// targets (`GET /path` plus `Host`) are also accepted for clients that do
-/// not implement proxy request syntax.
-fn resolve_target(uri: &Uri, headers: &HeaderMap) -> Result<Target, TargetError> {
+/// not implement proxy request syntax. Inside an intercepted TLS tunnel the
+/// origin-form path resolves against `https`, and the CONNECT authority is the
+/// fallback when the client omits `Host`.
+fn resolve_target(
+    uri: &Uri,
+    headers: &HeaderMap,
+    conn_scheme: ConnScheme,
+    fallback_authority: Option<&str>,
+) -> Result<Target, TargetError> {
     if let Some(scheme) = uri.scheme() {
-        if scheme.as_str() != "http" {
-            return Err(TargetError {
-                status: StatusCode::NOT_IMPLEMENTED,
-                message: format!(
-                    "absolute-form target with scheme `{scheme}` is not supported yet; \
-                     HTTPS interception is future work, use CONNECT for tunnels"
-                ),
-            });
+        match scheme.as_str() {
+            "http" | "https" => {}
+            other => {
+                return Err(TargetError {
+                    status: StatusCode::NOT_IMPLEMENTED,
+                    message: format!("absolute-form target with scheme `{other}` is not supported"),
+                });
+            }
         }
         let authority = uri.authority().cloned().ok_or_else(|| {
             TargetError::bad_request("absolute-form target is missing an authority")
@@ -740,13 +797,17 @@ fn resolve_target(uri: &Uri, headers: &HeaderMap) -> Result<Target, TargetError>
         return Err(TargetError::bad_request("unsupported request target form"));
     }
 
-    let host = headers
-        .get(HOST)
-        .ok_or_else(|| TargetError::bad_request("origin-form request without a Host header"))?
-        .to_str()
-        .map_err(|_| TargetError::bad_request("Host header is not valid ASCII"))?;
+    let host = match headers.get(HOST) {
+        Some(value) => value
+            .to_str()
+            .map_err(|_| TargetError::bad_request("Host header is not valid ASCII"))?
+            .to_string(),
+        None => fallback_authority
+            .map(str::to_string)
+            .ok_or_else(|| TargetError::bad_request("origin-form request without a Host header"))?,
+    };
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
-    let uri = format!("http://{host}{path}")
+    let uri = format!("{}://{host}{path}", conn_scheme.as_str())
         .parse::<Uri>()
         .map_err(|_| TargetError::bad_request("invalid Host header"))?;
     let authority = uri
@@ -756,10 +817,19 @@ fn resolve_target(uri: &Uri, headers: &HeaderMap) -> Result<Target, TargetError>
     Ok(Target { uri, authority })
 }
 
-fn build_request_info(parts: &http::request::Parts, target: &Target, raw_uri: &Uri) -> RequestInfo {
+fn build_request_info(
+    parts: &http::request::Parts,
+    target: &Target,
+    raw_uri: &Uri,
+    conn_scheme: ConnScheme,
+) -> RequestInfo {
     RequestInfo {
         method: parts.method.to_string(),
         uri: raw_uri.to_string(),
+        scheme: raw_uri
+            .scheme()
+            .map(|scheme| scheme.as_str().to_string())
+            .unwrap_or_else(|| conn_scheme.as_str().to_string()),
         host: display_host(&target.authority),
         path: target
             .uri

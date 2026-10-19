@@ -29,8 +29,10 @@ aids, not permission to test an arbitrary host.
   traffic** is opt-in and off by default; when enabled, HTTP requests and
   `CONNECT` tunnels outside the list receive a `403`. An empty scope allows
   every host. Scope is checked again after interception and rewriting, so an
-  edit cannot move a request outside the guardrail unnoticed. HTTPS tunnel
-  contents are not decrypted, so only the tunnel target can be checked.
+  edit cannot move a request outside the guardrail unnoticed. For HTTPS, the
+  `CONNECT` target is checked before a tunnel opens; with TLS interception
+  enabled, decrypted requests are checked as well. Without interception, only
+  the tunnel target is visible.
 - The prototype has no telemetry. Apart from proxied traffic, the application
   does not make network requests; opening the project link in the About window
   is an explicit user action.
@@ -40,7 +42,8 @@ aids, not permission to test an arbitrary host.
 For now, captured history and held interception messages live in memory only
 and disappear when the process exits. Dropping the proxy handle or closing the
 application releases held messages and aborts their exchanges. There is no disk
-persistence, export, or background upload.
+persistence, export, or background upload. The only files Wiremoth writes are
+the TLS certificate authority and its private key described below.
 
 When persistent history and exports are added:
 
@@ -50,16 +53,23 @@ When persistent history and exports are added:
   choice.
 - Sensitive captures should be clearly marked with their retention limits.
 
-## TLS interception (planned)
+## TLS interception
 
-HTTPS interception requires a local certificate authority. When it lands:
+HTTPS interception uses a certificate authority generated and stored locally.
 
-- The CA is generated locally and its private key stays on the user's machine.
-- Trust must be installed deliberately by the user, with documented setup and
-  removal steps.
-- The CA must never be silently installed system-wide.
-- Pass-through rules should make it easy to exclude hosts that must not be
-  intercepted.
+- The CA private key stays on the user's machine in the CA directory
+  (`--ca-dir`, `WIREMOTH_CA_DIR`, or `$XDG_DATA_HOME/wiremoth`). The directory
+  is created owner-only and the key is written owner-readable only.
+- Trust must be installed deliberately by the user in each browser. Wiremoth
+  never writes to system or browser trust stores, and never installs the CA
+  silently.
+- Interception is off by default and requires both a loaded CA and the TLS
+  toggle. Turning it off, or adding a host to the pass-through list, keeps that
+  traffic opaque.
+- Removal is deliberate and documented in [HTTPS interception](tls.md): remove
+  the browser trust entry, then delete the CA files.
+- Pass-through hosts are an exclude list matched like scope (exact host,
+  subdomains, and any port). An empty list excludes nothing.
 
 ## Reporting a vulnerability
 
