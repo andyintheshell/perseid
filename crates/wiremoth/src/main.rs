@@ -5,6 +5,7 @@
 mod app;
 mod branding;
 mod history;
+mod memory;
 mod site_map;
 mod theme;
 mod view;

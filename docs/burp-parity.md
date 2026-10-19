@@ -49,6 +49,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Match/replace rules | Yes | No | Planned | M1 |
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
+| Memory usage display | Yes | Current/peak RSS, captured-body bytes, rolling graph (Linux) | Working | — |
 | HTTPS interception with a local CA | Yes | CONNECT passthrough | Partial | M2 |
 | HTTP/2 proxying | Yes | No (HTTP/1.1 only) | Planned | M4 |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
@@ -65,6 +66,9 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 Scope rules currently filter the site map and history only. They are not yet a
 traffic guardrail: capture and forwarding still apply to every host until the
 interception milestone enforces scope.
+
+Memory usage uses Linux process RSS (`/proc/self/status`) and excludes GPU and
+driver memory outside the process. Other platforms report it as unavailable.
 
 ## Deliberate deviations
 

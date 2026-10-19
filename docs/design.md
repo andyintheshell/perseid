@@ -86,7 +86,10 @@ as a view filter over the site map and history; traffic enforcement belongs to
 the interception milestone.
 
 The interface is keyboard-friendly: tab switches, history navigation, filtering,
-and zoom all have shortcuts. A mouse remains fully supported.
+and zoom all have shortcuts. A mouse remains fully supported. A compact
+memory indicator in the status bar reports process RSS and opens a details
+window with peak usage and retained-body bytes, following Burp's bottom-bar
+convention.
 
 ## Technology
 
@@ -112,9 +115,13 @@ Important implementation principles:
 - Disk-backed history with bounded in-memory windows (planned).
 - Hard limits on captured body size, with explicit truncation markers.
 - Bounded worker queues and a bounded UI event channel with drop counters.
-- Virtualized request lists and detail views.
+- Virtualized request lists and hex dumps, plus bounded text previews.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
+- A live process-memory meter so memory behavior is visible during use.
+
+The Milestone 0 baseline and measurement method are published in
+[Performance and memory](performance.md).
 
 ## Non-goals
 
