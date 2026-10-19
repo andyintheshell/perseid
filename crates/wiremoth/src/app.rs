@@ -139,8 +139,7 @@ pub struct WiremothApp {
     history: History,
     dropped_seen: u64,
     paused: bool,
-    intercept_requests: bool,
-    intercept_responses: bool,
+    intercept_enabled: bool,
     intercept_queue: VecDeque<InterceptItem>,
     intercept_draft: Option<InterceptDraft>,
     scope_enforce: bool,
@@ -225,8 +224,7 @@ impl WiremothApp {
             history: History::new(args.history_limit, args.history_bytes),
             dropped_seen: 0,
             paused: false,
-            intercept_requests: false,
-            intercept_responses: false,
+            intercept_enabled: false,
             intercept_queue: VecDeque::new(),
             intercept_draft: None,
             scope_enforce: false,
@@ -293,8 +291,11 @@ impl WiremothApp {
 
     fn proxy_settings(&self) -> ProxySettings {
         ProxySettings {
-            intercept_requests: self.intercept_requests,
-            intercept_responses: self.intercept_responses,
+            // The UI exposes Burp's single Intercept on/off control. The proxy
+            // policy still tracks each direction separately so rules can grow
+            // without changing this API.
+            intercept_requests: self.intercept_enabled,
+            intercept_responses: self.intercept_enabled,
             scope_enforce: self.scope_enforce,
             scope_rules: self.scope.iter().cloned().collect(),
             match_replace: self.match_replace.clone(),
@@ -712,8 +713,7 @@ impl WiremothApp {
             if pending > 0 {
                 ui.separator();
                 ui.colored_label(theme::AMBER, format!("{pending} awaiting intercept"));
-            } else if self.proxy.is_some() && (self.intercept_requests || self.intercept_responses)
-            {
+            } else if self.proxy.is_some() && self.intercept_enabled {
                 ui.separator();
                 ui.label(
                     RichText::new("intercept armed")

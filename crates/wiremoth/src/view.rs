@@ -12,9 +12,9 @@ use wiremoth_proxy::CapturedBody;
 pub const TEXT_PREVIEW_LIMIT: usize = 256 * 1024;
 /// Maximum body bytes rendered as a hex dump (hex is far bulkier than text).
 pub const HEX_PREVIEW_LIMIT: usize = 64 * 1024;
-/// Binary bodies get a shorter inline hex preview in Raw; the Hex tab has the
-/// larger virtualized dump.
-const RAW_BINARY_PREVIEW_LIMIT: usize = 8 * 1024;
+/// Binary bodies get a shorter inline hex preview in the interception editor;
+/// the Hex tab has the larger virtualized dump.
+const INTERCEPT_BINARY_PREVIEW_LIMIT: usize = 8 * 1024;
 
 pub fn human_bytes(n: u64) -> String {
     const KIB: f64 = 1024.0;
@@ -94,7 +94,7 @@ pub fn format_request(item: &HistoryItem) -> String {
             "(no request body captured)\n"
         });
     } else {
-        out.push_str(&format_body(&item.request_body));
+        out.push_str(&format_raw_body(&item.request_body));
     }
     out
 }
@@ -120,7 +120,7 @@ pub fn format_response(item: &HistoryItem) -> String {
     if item.response.is_some() {
         out.push('\n');
         match item.response_body() {
-            Some(body) => out.push_str(&format_body(body)),
+            Some(body) => out.push_str(&format_raw_body(body)),
             None => match &item.phase {
                 Phase::InFlight => out.push_str("(response body streaming…)\n"),
                 Phase::Finished { .. } => match item.tunnel_stats() {
@@ -232,9 +232,12 @@ fn push_headers(out: &mut String, headers: &[(String, String)]) {
     }
 }
 
-/// Render a captured body: text when it looks like text, hex otherwise, with
-/// notes for any limit that hides data.
-pub fn format_body(body: &CapturedBody) -> String {
+/// Render a captured body for the text-based Raw message view.
+///
+/// Raw never switches to a hex dump, even for binary bodies: bytes are decoded
+/// lossily and a note points at the Hex view for the byte-offset representation.
+/// Requests and responses share this path so both stay consistent.
+pub fn format_raw_body(body: &CapturedBody) -> String {
     if body.total_len() == 0 {
         return if body.is_complete() {
             "(empty body)\n".to_string()
@@ -244,27 +247,41 @@ pub fn format_body(body: &CapturedBody) -> String {
     }
 
     let data = body.data();
-    let binary = looks_binary(data);
-    let limit = if binary {
-        RAW_BINARY_PREVIEW_LIMIT
-    } else {
-        TEXT_PREVIEW_LIMIT
-    };
-    let shown = &data[..data.len().min(limit)];
+    let shown = &data[..data.len().min(TEXT_PREVIEW_LIMIT)];
+    let mut out = String::from_utf8_lossy(shown).into_owned();
+    out.push('\n');
+    if looks_binary(shown) {
+        out.push_str(
+            "[wiremoth: binary body shown as lossy text; use Hex for a byte-offset view]\n",
+        );
+    }
+    push_body_preview_notes(&mut out, body, shown.len(), data.len());
+    out
+}
 
-    let mut out = if binary {
-        hexdump(shown)
-    } else {
-        let mut text = String::from_utf8_lossy(shown).into_owned();
-        text.push('\n');
-        text
-    };
+/// Render a bounded, read-only hex preview for the interception editor.
+pub fn format_binary_preview(body: &CapturedBody) -> String {
+    if body.total_len() == 0 {
+        return if body.is_complete() {
+            "(empty body)\n".to_string()
+        } else {
+            "(body not read)\n".to_string()
+        };
+    }
 
-    if shown.len() < data.len() {
+    let data = body.data();
+    let shown = &data[..data.len().min(INTERCEPT_BINARY_PREVIEW_LIMIT)];
+    let mut out = hexdump(shown);
+    push_body_preview_notes(&mut out, body, shown.len(), data.len());
+    out
+}
+
+fn push_body_preview_notes(out: &mut String, body: &CapturedBody, shown: usize, captured: usize) {
+    if shown < captured {
         out.push_str(&format!(
             "\n[wiremoth: preview truncated to {} of {} captured bytes]\n",
-            human_bytes(shown.len() as u64),
-            human_bytes(data.len() as u64)
+            human_bytes(shown as u64),
+            human_bytes(captured as u64)
         ));
     }
     if body.is_truncated() {
@@ -276,11 +293,10 @@ pub fn format_body(body: &CapturedBody) -> String {
     if !body.is_complete() {
         out.push_str("\n[wiremoth: body did not finish]\n");
     }
-    out
 }
 
 /// Bodies with NUL bytes or invalid UTF-8 (that is not just a truncated final
-/// character) are rendered as hex.
+/// character) are treated as binary by the Raw view and interception editor.
 fn looks_binary(data: &[u8]) -> bool {
     let sample = &data[..data.len().min(4096)];
     if sample.contains(&0) {
@@ -321,6 +337,86 @@ fn hexdump(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn item_with_bodies(request: Vec<u8>, response: Vec<u8>) -> HistoryItem {
+        use wiremoth_proxy::{ExchangeResult, RequestInfo, ResponseHead};
+
+        HistoryItem {
+            id: 1,
+            timestamp: SystemTime::UNIX_EPOCH,
+            request: RequestInfo {
+                method: "POST".to_string(),
+                uri: "http://example.com/upload".to_string(),
+                host: "example.com".to_string(),
+                path: "/upload".to_string(),
+                version: "HTTP/1.1".to_string(),
+                headers: vec![(
+                    "content-type".to_string(),
+                    "application/octet-stream".to_string(),
+                )],
+            },
+            request_body: CapturedBody::from_bytes(request),
+            response: Some(ResponseHead {
+                version: "HTTP/1.1".to_string(),
+                status: 200,
+                reason: "OK".to_string(),
+                headers: vec![("content-type".to_string(), "image/png".to_string())],
+            }),
+            phase: Phase::Finished {
+                duration: Duration::from_millis(1),
+                result: ExchangeResult::Response {
+                    body: CapturedBody::from_bytes(response),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn raw_views_never_render_binary_bodies_as_hex() {
+        let item = item_with_bodies(
+            b"\x89PNG\r\n\x1a\n\x00\xffrequest".to_vec(),
+            b"\x00\x01\x02\xff\xfePNG".to_vec(),
+        );
+
+        let request = request_views(&item);
+        let response = response_views(&item);
+
+        for raw in [&request.raw, &response.raw] {
+            assert!(
+                !raw.contains("00000000  "),
+                "Raw view contains a hex dump:\n{raw}"
+            );
+            assert!(
+                raw.contains("binary body shown as lossy text"),
+                "Raw view is missing the binary-body note:\n{raw}"
+            );
+        }
+        assert!(request.raw.starts_with("POST /upload HTTP/1.1\n"));
+        assert!(response.raw.starts_with("HTTP/1.1 200 OK\n"));
+        assert!(request.hex.contains("00000000  "));
+        assert!(response.hex.contains("00000000  "));
+    }
+
+    #[test]
+    fn raw_views_keep_text_bodies_readable() {
+        let item = item_with_bodies(b"name=wiremoth".to_vec(), b"hello".to_vec());
+
+        let request = request_views(&item);
+        let response = response_views(&item);
+
+        assert!(request.raw.ends_with("name=wiremoth\n"));
+        assert!(response.raw.ends_with("hello\n"));
+        assert!(!request.raw.contains("binary body"));
+        assert!(!response.raw.contains("binary body"));
+    }
+
+    #[test]
+    fn intercept_binary_preview_remains_hex() {
+        let preview = format_binary_preview(&CapturedBody::from_bytes(vec![
+            0x89, b'P', b'N', b'G', 0, 1,
+        ]));
+        assert!(preview.starts_with("00000000  89 50 4e 47 00 01"));
+    }
 
     #[test]
     fn human_bytes_scales_units() {

@@ -26,9 +26,10 @@ application testing — with no embedded browser and memory bounded by design.
 
 - Loopback HTTP/1.1 proxy with configurable listen address, capture limit,
   interception limit, and count/byte history bounds.
-- Editable request and response interception: hold plain-HTTP messages, edit
-  the head and buffered body, then forward or drop. Bodies over the intercept
-  limit stay header-only instead of being silently modified.
+- Editable request and response interception behind one Burp-style **Intercept
+  is on/off** control: hold plain-HTTP messages, edit the head and buffered
+  body, then forward or drop. Bodies over the intercept limit stay header-only
+  instead of being silently modified.
 - Opt-in scope enforcement for HTTP and `CONNECT`, returning `403` for
   out-of-scope hosts. An empty scope allows every host, and enforcement is off
   by default.
@@ -68,8 +69,8 @@ cargo run -p wiremoth
 
 The proxy listens on `127.0.0.1:8080` and the Wiremoth window opens. Point your
 browser — or an extension such as FoxyProxy — at that address for HTTP and
-HTTPS. To hold plain-HTTP traffic, open **Proxy > Intercept** and enable
-request and/or response interception.
+HTTPS. To hold plain-HTTP traffic, open **Proxy > Intercept** and click
+**Intercept is off** once to turn interception on.
 
 > Only test systems you own or have explicit permission to test. See
 > [Safety and privacy](docs/safety.md).

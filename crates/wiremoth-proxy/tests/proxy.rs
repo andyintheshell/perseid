@@ -791,6 +791,47 @@ async fn intercepts_and_forwards_an_edited_response() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn one_interception_policy_can_hold_both_directions() {
+    let origin = spawn_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let mut proxy = test_proxy_with(
+        ProxySettings {
+            intercept_requests: true,
+            intercept_responses: true,
+            ..ProxySettings::default()
+        },
+        64 * 1024,
+        64 * 1024,
+    );
+    let request =
+        format!("GET http://{origin}/both HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let client = spawn_raw_client(proxy.local_addr(), request);
+
+    let mut held_request = next_intercept(&mut proxy).await;
+    assert_eq!(held_request.kind(), InterceptKind::Request);
+    let request_head = held_request.head().to_string();
+    held_request
+        .forward(&request_head, None)
+        .expect("request should forward");
+
+    let mut held_response = next_intercept(&mut proxy).await;
+    assert_eq!(held_response.kind(), InterceptKind::Response);
+    assert_eq!(held_response.request().path, "/both");
+    let response_head = held_response.head().to_string();
+    held_response
+        .forward(&response_head, None)
+        .expect("response should forward");
+
+    let response = client.await.unwrap();
+    assert_eq!(body_after_head(&response), b"ok");
+    let events = drain_until_finished(&proxy);
+    assert_eq!(started_of(&events).path, "/both");
+    match &finished_of(&events).result {
+        ExchangeResult::Response { body } => assert_eq!(body.data(), b"ok"),
+        other => panic!("expected a response result, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn dropping_an_intercepted_request_fails_the_exchange() {
     let (origin, origin_request) =
         spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;

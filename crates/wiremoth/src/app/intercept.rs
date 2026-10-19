@@ -23,7 +23,9 @@ impl InterceptDraft {
             Some(bytes) if body_editable => (String::from_utf8_lossy(bytes).into_owned(), None),
             Some(bytes) => (
                 String::new(),
-                Some(view::format_body(&CapturedBody::from_bytes(bytes.to_vec()))),
+                Some(view::format_binary_preview(&CapturedBody::from_bytes(
+                    bytes.to_vec(),
+                ))),
             ),
             None => (String::new(), None),
         };
@@ -93,31 +95,96 @@ impl WiremothApp {
                             },
                         );
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
+                    // Burp's Intercept tab has one Intercept on/off control,
+                    // with Forward and Drop beside it, rather than separate
+                    // request and response switches.
                     ui.horizontal(|ui| {
+                        let on = self.intercept_enabled;
+                        let toggle = egui::Button::new(
+                            RichText::new(if on {
+                                "Intercept is on"
+                            } else {
+                                "Intercept is off"
+                            })
+                            .size(13.5)
+                            .strong()
+                            .color(if on { Color32::WHITE } else { theme::TEXT }),
+                        )
+                        .fill(if on {
+                            theme::ACCENT_DARK
+                        } else {
+                            theme::SURFACE_ALT
+                        })
+                        .stroke(Stroke::new(
+                            1.0,
+                            if on {
+                                theme::ACCENT_DARK
+                            } else {
+                                theme::BORDER
+                            },
+                        ))
+                        .corner_radius(5.0)
+                        .min_size(egui::vec2(136.0, 30.0));
                         if ui
-                            .checkbox(&mut self.intercept_requests, "Intercept requests")
-                            .on_hover_text("Hold plain-HTTP requests before they reach the origin")
-                            .changed()
+                            .add(toggle)
+                            .on_hover_text(if on {
+                                "Turn interception off. Already held messages still need Forward or Drop."
+                            } else {
+                                "Hold plain-HTTP requests and responses before they are forwarded."
+                            })
+                            .clicked()
                         {
+                            self.intercept_enabled = !self.intercept_enabled;
                             settings_changed = true;
                         }
+
+                        ui.add_space(4.0);
+                        let can_decide = pending > 0;
                         if ui
-                            .checkbox(&mut self.intercept_responses, "Intercept responses")
-                            .on_hover_text("Hold plain-HTTP responses before they reach the client")
-                            .changed()
+                            .add_enabled(can_decide, egui::Button::new("Forward"))
+                            .on_hover_text("Send the edited message on the wire")
+                            .on_disabled_hover_text("No intercepted message is held")
+                            .clicked()
                         {
-                            settings_changed = true;
+                            forward = true;
+                        }
+                        if ui
+                            .add_enabled(can_decide, egui::Button::new("Drop"))
+                            .on_hover_text("Drop the message and close this exchange")
+                            .on_disabled_hover_text("No intercepted message is held")
+                            .clicked()
+                        {
+                            drop_message = true;
+                        }
+                        if pending > 1 {
+                            ui.label(
+                                RichText::new(format!("{} more queued", pending - 1))
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             self.capture_toggle(ui);
                         });
                     });
-                    ui.add_space(3.0);
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(if self.intercept_enabled {
+                            "New plain-HTTP requests and responses will wait here."
+                        } else {
+                            "New plain-HTTP traffic is forwarded automatically."
+                        })
+                        .small()
+                        .color(if self.intercept_enabled {
+                            theme::ACCENT_DARK
+                        } else {
+                            theme::TEXT_MUTED
+                        }),
+                    );
                     ui.label(
                         RichText::new(format!(
-                            "HTTPS is CONNECT passthrough; only plain-HTTP messages can be held. \
-                             Bodies over {} are held for header edits only.",
+                            "HTTPS is CONNECT passthrough. Bodies over {} are held for header edits only.",
                             view::human_bytes(self.intercept_limit as u64)
                         ))
                         .small()
@@ -130,17 +197,17 @@ impl WiremothApp {
 
                 ui.add_space(8.0);
                 let Some(item) = self.intercept_queue.front() else {
-                    if self.intercept_requests || self.intercept_responses {
+                    if self.intercept_enabled {
                         empty_state(
                             ui,
                             "Waiting for traffic",
-                            "Matching plain-HTTP messages will appear here before they are forwarded.",
+                            "The next plain-HTTP request or response will appear here before it is forwarded.",
                         );
                     } else {
                         empty_state(
                             ui,
                             "Interception is off",
-                            "Enable request or response interception above to hold messages for editing.",
+                            "Click Intercept is off above to start holding plain-HTTP requests and responses.",
                         );
                     }
                     return;
@@ -179,32 +246,6 @@ impl WiremothApp {
                                 .monospace()
                                 .small()
                                 .color(theme::TEXT_MUTED),
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                if ui
-                                    .button("Forward")
-                                    .on_hover_text("Send the edited message on the wire")
-                                    .clicked()
-                                {
-                                    forward = true;
-                                }
-                                if ui
-                                    .button("Drop")
-                                    .on_hover_text("Drop the message and close this exchange")
-                                    .clicked()
-                                {
-                                    drop_message = true;
-                                }
-                                if pending > 1 {
-                                    ui.label(
-                                        RichText::new(format!("{} more queued", pending - 1))
-                                            .small()
-                                            .color(theme::TEXT_MUTED),
-                                    );
-                                }
-                            },
                         );
                     });
                     ui.add_space(4.0);

@@ -89,9 +89,10 @@ Tools that are not implemented yet are shown as explicit previews with the
 milestone that will complete them. Intruder and Repeater do not present
 nonfunctional controls as if they already worked. **Proxy > Intercept** is a
 real editor: held messages show their raw head, editable buffered text body,
-and read-only binary preview, with explicit Forward and Drop actions. Scope
-serves both as a view filter and, when enabled, as a traffic guardrail checked
-before interception and again after edits.
+and read-only binary preview, with Burp's single Intercept on/off control plus
+explicit Forward and Drop actions. Scope serves both as a view filter and, when
+enabled, as a traffic guardrail checked before interception and again after
+edits.
 
 The interface is keyboard-friendly: tab switches, history navigation, filtering,
 and zoom all have shortcuts. A mouse remains fully supported. A compact

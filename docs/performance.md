@@ -23,7 +23,7 @@ was enabled, and the default limits were used: 1 MiB per captured body and
 | 2,000 exchanges | 98.9 MiB | 98.9 MiB | 125 KiB in captured bodies; `End` and scrolling checked |
 | 8 MiB text response, Raw | 102.6 MiB | 102.6 MiB | 1 MiB captured; 256 KiB text preview |
 | 8 MiB text response, Hex | 102.6 MiB | 102.6 MiB | 64 KiB hex dump, virtualized by line |
-| 8 MiB binary response, Raw | 104.7 MiB | 108.6 MiB | 1 MiB captured; 8 KiB inline binary preview |
+| 8 MiB binary response, Raw | 104.7 MiB | 108.6 MiB | 1 MiB captured; M0 used an 8 KiB inline hex preview |
 | 8 MiB binary response, Hex | 104.7 MiB | 108.6 MiB | 64 KiB hex dump, virtualized by line |
 
 The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
@@ -62,8 +62,9 @@ library pages that are shared with other processes and can be reclaimed.
   dump as one text galley peaked at about 182.8 MiB in the text-response
   scenario; with virtualization and allocator tuning, the same view peaks at
   102.6 MiB.
-- Binary bodies get a smaller 8 KiB inline preview in Raw to keep the
-  non-virtualized text view bounded. The Hex tab still exposes a 64 KiB dump.
+- Binary bodies used to get a smaller 8 KiB inline hex preview in Raw. Raw now
+  uses the bounded text preview (up to 256 KiB) for every body so it never
+  mixes representations; the Hex tab still exposes a 64 KiB dump.
 - glibc was creating extra malloc arenas for the UI and proxy threads. Limiting
   the process to two arenas with `mallopt(M_ARENA_MAX, 2)` reduced idle RSS by
   about 8.3 MiB, from 100.4 to 92.1 MiB.

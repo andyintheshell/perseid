@@ -66,18 +66,23 @@ baseline, resident-memory context, and method.
 
 ## Intercepting traffic
 
-Open **Proxy > Intercept** and enable **Intercept requests**, **Intercept
-responses**, or both. Matching plain-HTTP messages are held before they are
-forwarded and appear in a queue; the status bar shows how many are waiting.
-Edit the raw head, edit the body when it is buffered UTF-8 text, then choose
-**Forward** or **Drop**. **Forward** applies match/replace rules and re-checks
-the scope before sending. Holding a request does not stop unrelated
-connections from progressing.
+Open **Proxy > Intercept** and click the **Intercept is off** button to turn
+interception on. As in Burp, this is the single on/off control: plain-HTTP
+requests and responses are held before they are forwarded, and the button
+changes to **Intercept is on**. Held messages appear in a queue; the status bar
+shows how many are waiting. Edit the raw head, edit the body when it is
+buffered UTF-8 text, then choose **Forward** or **Drop** in the toolbar.
+**Forward** applies match/replace rules and re-checks the scope before sending.
+Holding a message does not stop unrelated connections from progressing. Turning
+interception off stops new messages from being held; anything already waiting
+still needs **Forward** or **Drop**.
 
 Only bodies up to `--intercept-limit` (1 MiB by default) are buffered for
 editing. Larger or streaming bodies are still held for header edits, but their
-body bytes pass through unchanged and body editing is disabled. Binary bodies
-are shown as a read-only hex preview.
+body bytes pass through unchanged and body editing is disabled. In the
+interception editor, binary bodies are shown as a read-only hex preview. In
+history, **Raw** always shows text (using lossy decoding for binary bodies) so
+it never mixes in a hex dump; use **Hex** for the byte-offset view.
 
 HTTPS is still a `CONNECT` passthrough. Scope enforcement can block a tunnel
 before it opens, but Wiremoth cannot edit requests inside it until TLS
@@ -94,7 +99,7 @@ reflects the edited result.
 Body rules apply only to buffered UTF-8 bodies. Binary, streaming, and
 over-limit bodies are left untouched. Empty patterns are ignored. An invalid
 regular expression stays visible in the editor and is skipped while the rest of
-the policy, including interception toggles and valid rules, remains active.
+the policy, including the interception control and valid rules, remains active.
 
 ## Pointing a browser at Wiremoth
 
