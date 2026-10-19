@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
-use http::header::{CONTENT_LENGTH, HOST, TRANSFER_ENCODING};
+use http::header::{ACCEPT_ENCODING, CONTENT_LENGTH, HOST, TRANSFER_ENCODING};
 use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Incoming};
@@ -31,8 +31,8 @@ use crate::message::{
 use crate::policy::PolicySnapshot;
 use crate::server::Ctx;
 use crate::util::{
-    IntoProxyBody, ProxyBody, display_host, forwarded_headers, header_list, text_response,
-    version_str,
+    IntoProxyBody, ProxyBody, display_host, forwarded_headers, header_list,
+    sanitized_accept_encoding, text_response, version_str,
 };
 
 /// Cases where the proxy rejects a request before any upstream traffic happens.
@@ -393,7 +393,13 @@ async fn forward(
     *upstream.version_mut() = Version::HTTP_11;
     let mut headers = HeaderMap::new();
     for (name, value) in forwarded_headers(&parts.headers) {
+        if name == ACCEPT_ENCODING {
+            continue;
+        }
         headers.append(name, value);
+    }
+    if let Some(value) = sanitized_accept_encoding(&parts.headers) {
+        headers.insert(ACCEPT_ENCODING, value);
     }
     // `Content-Length` was stripped: the body's size hint drives framing.
     debug_assert!(headers.get(CONTENT_LENGTH).is_none());

@@ -1207,6 +1207,39 @@ async fn streaming_bodies_are_held_for_head_edits_only() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn strips_unsupported_accept_encoding_before_forwarding() {
+    let (origin, request_rx) =
+        spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let proxy = test_proxy(64 * 1024, 64);
+    let request = format!(
+        "GET http://{origin}/compressed HTTP/1.1\r\n\
+         Host: {origin}\r\n\
+         Accept-Encoding: gzip, zstd, br;q=0.9\r\n\
+         Connection: close\r\n\r\n"
+    );
+
+    let response = raw_exchange(proxy.local_addr(), &request).await;
+    assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+
+    let upstream = String::from_utf8_lossy(
+        &request_rx
+            .await
+            .expect("origin should capture the upstream request"),
+    )
+    .into_owned();
+    assert!(
+        upstream
+            .to_ascii_lowercase()
+            .contains("accept-encoding: gzip, br;q=0.9"),
+        "upstream request did not sanitize Accept-Encoding:\n{upstream}"
+    );
+    assert!(
+        !upstream.to_ascii_lowercase().contains("zstd"),
+        "upstream request kept an unsupported coding:\n{upstream}"
+    );
+}
+
 #[test]
 fn invalid_rules_prevent_start() {
     let settings = ProxySettings {

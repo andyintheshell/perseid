@@ -55,8 +55,10 @@ Enable **Block out-of-scope traffic** to return `403` for HTTP requests and
 scope allows every host. The HTTP history filter matches method, host, path,
 URI, and status.
 
-The request/response pane has request and response tabs, each with Raw,
-Headers, and Hex views. Click a row or use the keyboard to select it.
+The detail pane shows the request and response side by side, each with its own
+Raw, Headers, and Hex tabs. This follows Burp's default horizontal message-editor
+layout. Drag the divider between the panes to give either side more room. Click
+a history row or use the keyboard to select it.
 
 The status bar shows a live **Memory** figure: the bytes currently held by
 Wiremoth's allocator, the closest equivalent to the memory figure in Burp
@@ -83,12 +85,21 @@ body bytes pass through unchanged and body editing is disabled. In the
 interception editor, binary bodies are shown as a read-only hex preview.
 
 In history, **Raw** always shows text so it never mixes in a hex dump. Bodies
-with `Content-Encoding: gzip`, `deflate`, or `br` (Brotli) are decoded for the
-bounded Raw preview, which makes ordinary compressed HTML readable. The proxy
-still forwards the encoded bytes unchanged. Unsupported encodings and binary
-bodies are shown lossily, with control bytes masked as `·` so the panel never
-looks blank. Use **Hex** for the byte-offset view; it keeps the original wire
-bytes.
+with `Content-Encoding: gzip`, `deflate`, or `br` (Brotli) are decoded for all
+three inspection views, including **Hex**, which makes ordinary compressed HTML
+readable. The displayed headers have `Content-Encoding` removed;
+`Content-Length` is updated when the complete decoded length is known. A note in
+Raw and Hex records the original wire size.
+
+This matches Burp's model: Burp unpacks compressed bodies for the message editor
+by default and does not recompress them for display. Wiremoth's proxy still
+forwards the encoded bytes unchanged, so the browser and origin server see the
+wire representation. As Burp does by default, Wiremoth also removes content
+codings it cannot decode (`zstd`, for example) from the outgoing
+`Accept-Encoding` header, so servers normally choose gzip, deflate, Brotli, or
+identity. If a server still returns an unsupported coding, the wire bytes are
+shown with a note instead of an empty panel. Binary bodies are shown lossily in
+Raw, with control bytes masked as `·`.
 
 Responses such as `304 Not Modified` and `204 No Content` have no body by
 definition. Raw labels them explicitly, so a force-refreshed page that reuses
@@ -140,6 +151,8 @@ leaves the filter. Clicking a row also selects it.
   an empty scope allows every host.
 - Match/replace body rules apply only to buffered UTF-8 bodies. Rules are
   runtime-only and are not persisted between launches.
+- Compressed-body unpacking is always on for the inspection views and has no
+  UI toggle yet. It affects display only; forwarding keeps the wire encoding.
 - Repeater cannot edit or send requests yet; Intruder has no engine yet.
 - History is in memory only. It is bounded by `--history-limit` and
   `--history-bytes`; captured bodies are capped per message by

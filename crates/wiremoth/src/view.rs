@@ -82,10 +82,17 @@ pub struct MessageViews {
     pub hex: String,
 }
 
+type DecodeResult = Result<Option<decode::DecodedBody>, DecodeError>;
+
 /// The request as it was (or will be) sent to the origin server: origin-form
 /// target, like the raw view in other interception tools.
 pub fn format_request(item: &HistoryItem) -> String {
-    let mut out = format_request_head(item);
+    let decoded = decode_request(item);
+    format_request_with(item, &decoded)
+}
+
+fn format_request_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
+    let mut out = format_request_head_with(item, decoded);
     out.push('\n');
 
     if item.request_body.total_len() == 0 && !item.request_body.is_complete() {
@@ -95,16 +102,19 @@ pub fn format_request(item: &HistoryItem) -> String {
             "(no request body captured)\n"
         });
     } else {
-        out.push_str(&format_raw_body_with_encoding(
-            &item.request_body,
-            header_value(&item.request.headers, "content-encoding"),
-        ));
+        out.push_str(&format_raw_body_with_decoded(&item.request_body, decoded));
     }
     out
 }
 
-/// Request line and headers only.
-pub fn format_request_head(item: &HistoryItem) -> String {
+fn decode_request(item: &HistoryItem) -> DecodeResult {
+    decode_for(
+        &item.request_body,
+        header_value(&item.request.headers, "content-encoding"),
+    )
+}
+
+fn format_request_head_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
     let mut out = String::new();
     let target = if item.is_tunnel() {
         &item.request.host
@@ -115,23 +125,31 @@ pub fn format_request_head(item: &HistoryItem) -> String {
         "{} {} {}\n",
         item.request.method, target, item.request.version
     ));
-    push_headers(&mut out, &item.request.headers);
+    let headers = display_headers(&item.request.headers, decoded, Some(&item.request_body));
+    push_headers(&mut out, &headers);
     out
 }
 
-pub fn format_response(item: &HistoryItem) -> String {
-    let mut out = format_response_head(item);
+fn decode_response(item: &HistoryItem) -> DecodeResult {
+    let content_encoding = item
+        .response
+        .as_ref()
+        .and_then(|head| header_value(&head.headers, "content-encoding"));
+    match item.response_body() {
+        Some(body) => decode_for(body, content_encoding),
+        None => Ok(None),
+    }
+}
+
+fn format_response_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
+    let mut out = format_response_head_with(item, decoded);
     if item.response.is_some() {
         out.push('\n');
-        let content_encoding = item
-            .response
-            .as_ref()
-            .and_then(|head| header_value(&head.headers, "content-encoding"));
         match item.response_body() {
             Some(body) if body.total_len() == 0 && body.is_complete() => {
                 out.push_str(empty_response_note(item));
             }
-            Some(body) => out.push_str(&format_raw_body_with_encoding(body, content_encoding)),
+            Some(body) => out.push_str(&format_raw_body_with_decoded(body, decoded)),
             None => match &item.phase {
                 Phase::InFlight => out.push_str("(response body streaming…)\n"),
                 Phase::Finished { .. } => match item.tunnel_stats() {
@@ -160,8 +178,7 @@ fn empty_response_note(item: &HistoryItem) -> &'static str {
     }
 }
 
-/// Status line and headers only.
-pub fn format_response_head(item: &HistoryItem) -> String {
+fn format_response_head_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
     let mut out = String::new();
     match &item.response {
         Some(head) => {
@@ -169,7 +186,8 @@ pub fn format_response_head(item: &HistoryItem) -> String {
                 "{} {} {}\n",
                 head.version, head.status, head.reason
             ));
-            push_headers(&mut out, &head.headers);
+            let headers = display_headers(&head.headers, decoded, item.response_body());
+            push_headers(&mut out, &headers);
         }
         None => match &item.phase {
             Phase::InFlight => out.push_str("(awaiting response…)\n"),
@@ -180,31 +198,36 @@ pub fn format_response_head(item: &HistoryItem) -> String {
 }
 
 pub fn request_views(item: &HistoryItem) -> MessageViews {
-    let head = format_request_head(item);
-    let raw = format_request(item);
+    let decoded = decode_request(item);
+    let head = format_request_head_with(item, &decoded);
+    let raw = format_request_with(item, &decoded);
     let mut bytes = head.as_bytes().to_vec();
     bytes.push(b'\n');
-    bytes.extend_from_slice(item.request_body.data());
+    bytes.extend_from_slice(display_body_bytes(&item.request_body, &decoded));
     let mut hex = hex_preview(&bytes);
     append_body_notes(&mut hex, &item.request_body, item.is_in_flight());
+    append_decoded_hex_notes(&mut hex, &item.request_body, &decoded);
     MessageViews { raw, head, hex }
 }
 
 pub fn response_views(item: &HistoryItem) -> MessageViews {
-    let head = format_response_head(item);
-    let raw = format_response(item);
+    let decoded = decode_response(item);
+    let head = format_response_head_with(item, &decoded);
+    let raw = format_response_with(item, &decoded);
+    let body = item.response_body();
     let mut hex = if item.response.is_some() {
         let mut bytes = head.as_bytes().to_vec();
         bytes.push(b'\n');
-        if let Some(body) = item.response_body() {
-            bytes.extend_from_slice(body.data());
+        if let Some(body) = body {
+            bytes.extend_from_slice(display_body_bytes(body, &decoded));
         }
         hex_preview(&bytes)
     } else {
         raw.clone()
     };
-    if let Some(body) = item.response_body() {
+    if let Some(body) = body {
         append_body_notes(&mut hex, body, item.is_in_flight());
+        append_decoded_hex_notes(&mut hex, body, &decoded);
     }
     if let Some((up, down)) = item.tunnel_stats() {
         hex.push_str(&format!(
@@ -214,12 +237,72 @@ pub fn response_views(item: &HistoryItem) -> MessageViews {
     MessageViews { raw, head, hex }
 }
 
+fn decode_for(body: &CapturedBody, content_encoding: Option<&str>) -> DecodeResult {
+    if body.total_len() == 0 || body.data().is_empty() {
+        return Ok(None);
+    }
+    let Some(encoding) = content_encoding else {
+        return Ok(None);
+    };
+    decode::decode_body(body.data(), encoding, TEXT_PREVIEW_LIMIT)
+}
+
+/// Return the bytes represented by the inspection views. Supported content
+/// encodings are unpacked for every view, including Hex, matching Burp's
+/// message-editor model. Forwarding still uses the original wire body.
+fn display_body_bytes<'a>(body: &'a CapturedBody, decoded: &'a DecodeResult) -> &'a [u8] {
+    match decoded {
+        Ok(Some(decoded)) => &decoded.bytes,
+        _ => body.data(),
+    }
+}
+
+/// Build the displayed headers for a message.
+///
+/// Burp unpacks compressed bodies before presenting them, rather than keeping a
+/// compressed body underneath a `Content-Encoding` header. Wiremoth follows the
+/// same model: a successfully decoded body removes the encoding header. A
+/// `Content-Length` is rewritten only when we know the complete decoded length;
+/// truncated or streaming captures drop it instead of advertising a length that
+/// does not match the preview.
+fn display_headers(
+    headers: &[(String, String)],
+    decoded: &DecodeResult,
+    body: Option<&CapturedBody>,
+) -> Vec<(String, String)> {
+    let Ok(Some(decoded)) = decoded else {
+        return headers.to_vec();
+    };
+
+    let complete = body.is_some_and(|body| body.is_complete() && !body.is_truncated());
+    let exact_len =
+        (complete && !decoded.truncated && !decoded.incomplete).then_some(decoded.bytes.len());
+    let content_length_name = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .map(|(name, _)| name.clone());
+
+    let mut out = Vec::with_capacity(headers.len());
+    for (name, value) in headers {
+        if name.eq_ignore_ascii_case("content-encoding")
+            || name.eq_ignore_ascii_case("content-length")
+        {
+            continue;
+        }
+        out.push((name.clone(), value.clone()));
+    }
+    if let (Some(name), Some(len)) = (content_length_name, exact_len) {
+        out.push((name, len.to_string()));
+    }
+    out
+}
+
 fn hex_preview(bytes: &[u8]) -> String {
     let shown = &bytes[..bytes.len().min(HEX_PREVIEW_LIMIT)];
     let mut out = hexdump(shown);
     if shown.len() < bytes.len() {
         out.push_str(&format!(
-            "\n[wiremoth: hex preview truncated to {} of {} bytes]\n",
+            "\n[wiremoth: hex preview truncated to {} of {}]\n",
             human_bytes(shown.len() as u64),
             human_bytes(bytes.len() as u64)
         ));
@@ -237,7 +320,7 @@ fn append_body_notes(out: &mut String, body: &CapturedBody, in_flight: bool) {
     }
     if body.is_truncated() {
         out.push_str(&format!(
-            "\n[wiremoth: capture limit reached; {} bytes on the wire]\n",
+            "\n[wiremoth: capture limit reached; {} on the wire]\n",
             human_bytes(body.total_len())
         ));
     }
@@ -252,13 +335,13 @@ fn push_headers(out: &mut String, headers: &[(String, String)]) {
     }
 }
 
-/// Render a raw body, decoding supported `Content-Encoding` values first.
+/// Render a raw body using the same decoded representation as the other views.
 ///
 /// Raw never switches to a hex dump, even for binary bodies: bytes are decoded
 /// lossily, control bytes are shown as visible markers, and a note points at the
 /// Hex view for the byte-offset representation. Requests and responses share
 /// this path so both stay consistent.
-fn format_raw_body_with_encoding(body: &CapturedBody, content_encoding: Option<&str>) -> String {
+fn format_raw_body_with_decoded(body: &CapturedBody, decoded: &DecodeResult) -> String {
     if body.total_len() == 0 {
         return if body.is_complete() {
             "(empty body)\n".to_string()
@@ -267,11 +350,8 @@ fn format_raw_body_with_encoding(body: &CapturedBody, content_encoding: Option<&
         };
     }
 
-    let Some(encoding) = content_encoding else {
-        return format_wire_raw_body(body);
-    };
-    match decode::decode_body(body.data(), encoding, TEXT_PREVIEW_LIMIT) {
-        Ok(Some(decoded)) => format_decoded_raw_body(body, &decoded),
+    match decoded {
+        Ok(Some(decoded)) => format_decoded_raw_body(body, decoded),
         Ok(None) => format_wire_raw_body(body),
         Err(DecodeError::Unsupported(name)) => {
             let mut out = format_wire_raw_body(body);
@@ -294,7 +374,9 @@ fn format_decoded_raw_body(body: &CapturedBody, decoded: &decode::DecodedBody) -
     let mut out = visible_raw_text(&decoded.bytes);
     out.push('\n');
     if looks_binary(&decoded.bytes) {
-        out.push_str("[wiremoth: decoded body shown as lossy text; use Hex for the wire bytes]\n");
+        out.push_str(
+            "[wiremoth: decoded body shown as lossy text; use Hex for a byte-offset view]\n",
+        );
     }
     if decoded.truncated {
         out.push_str(&format!(
@@ -309,7 +391,7 @@ fn format_decoded_raw_body(body: &CapturedBody, decoded: &decode::DecodedBody) -
     }
     if body.is_truncated() {
         out.push_str(&format!(
-            "[wiremoth: capture limit reached; {} bytes on the wire]\n",
+            "[wiremoth: capture limit reached; {} on the wire]\n",
             human_bytes(body.total_len())
         ));
     }
@@ -317,11 +399,45 @@ fn format_decoded_raw_body(body: &CapturedBody, decoded: &decode::DecodedBody) -
         out.push_str("[wiremoth: body did not finish]\n");
     }
     out.push_str(&format!(
-        "[wiremoth: decoded from {} for display; Hex shows the {} wire body]\n",
+        "[wiremoth: decoded from {} for display; {} on the wire]\n",
         decoded.encoding,
         human_bytes(body.total_len())
     ));
     out
+}
+
+fn append_decoded_hex_notes(out: &mut String, body: &CapturedBody, decoded: &DecodeResult) {
+    match decoded {
+        Ok(Some(decoded)) => {
+            if decoded.truncated {
+                out.push_str(&format!(
+                    "\n[wiremoth: decoded preview truncated to {}]\n",
+                    human_bytes(TEXT_PREVIEW_LIMIT as u64)
+                ));
+            }
+            if decoded.incomplete {
+                out.push_str(
+                    "\n[wiremoth: compressed body ended before the decoder finished; preview is partial]\n",
+                );
+            }
+            out.push_str(&format!(
+                "\n[wiremoth: body decoded from {} for display; {} on the wire]\n",
+                decoded.encoding,
+                human_bytes(body.total_len())
+            ));
+        }
+        Ok(None) => {}
+        Err(DecodeError::Unsupported(name)) => {
+            out.push_str(&format!(
+                "\n[wiremoth: content-encoding `{name}` is not decoded; showing wire bytes]\n"
+            ));
+        }
+        Err(DecodeError::Invalid { encoding, .. }) => {
+            out.push_str(&format!(
+                "\n[wiremoth: could not decode content-encoding `{encoding}`; showing wire bytes]\n"
+            ));
+        }
+    }
 }
 
 fn format_wire_raw_body(body: &CapturedBody) -> String {
@@ -384,14 +500,14 @@ fn visible_raw_text(bytes: &[u8]) -> String {
 fn push_body_preview_notes(out: &mut String, body: &CapturedBody, shown: usize, captured: usize) {
     if shown < captured {
         out.push_str(&format!(
-            "\n[wiremoth: preview truncated to {} of {} captured bytes]\n",
+            "\n[wiremoth: preview truncated to {} of {} captured]\n",
             human_bytes(shown as u64),
             human_bytes(captured as u64)
         ));
     }
     if body.is_truncated() {
         out.push_str(&format!(
-            "\n[wiremoth: capture limit reached; {} bytes on the wire]\n",
+            "\n[wiremoth: capture limit reached; {} on the wire]\n",
             human_bytes(body.total_len())
         ));
     }
@@ -454,6 +570,36 @@ mod tests {
         70, 7, 54, 224, 128, 61, 78, 44, 178, 15, 171, 182, 249, 57, 2, 115, 129, 194, 100, 152,
         173, 226, 181, 250, 90, 13, 47,
     ];
+    const HTML: &[u8] = b"<!DOCTYPE html><html><body><h1>Hello, Wiremoth</h1></body></html>";
+
+    /// Pull the byte column back out of a rendered hex dump, ignoring offsets,
+    /// ASCII columns, and trailing wiremoth notes.
+    fn hexdump_bytes(dump: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for line in dump.lines() {
+            let Some((offset, rest)) = line.split_once("  ") else {
+                continue;
+            };
+            if offset.len() != 8 || !offset.bytes().all(|b| b.is_ascii_hexdigit()) {
+                continue;
+            }
+            let Some((hex, _)) = rest.split_once(" |") else {
+                continue;
+            };
+            for byte in hex.split_whitespace() {
+                if byte.len() == 2 && byte.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    bytes.push(u8::from_str_radix(byte, 16).expect("valid hex pair"));
+                }
+            }
+        }
+        bytes
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+    }
 
     fn item_with_bodies(request: Vec<u8>, response: Vec<u8>) -> HistoryItem {
         use wiremoth_proxy::{ExchangeResult, RequestInfo, ResponseHead};
@@ -542,7 +688,7 @@ mod tests {
         let body = CapturedBody::from_bytes(vec![
             0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfe, b'h', b'i',
         ]);
-        let raw = format_raw_body_with_encoding(&body, None);
+        let raw = format_raw_body_with_decoded(&body, &Ok(None));
 
         assert!(!raw.contains('\0'));
         assert!(raw.contains('·'));
@@ -551,13 +697,11 @@ mod tests {
     }
 
     #[test]
-    fn raw_response_decodes_brotli_for_display() {
+    fn all_views_show_brotli_decoded_body() {
         let mut item = item_with_bodies(Vec::new(), BROTLI_HTML.to_vec());
-        item.response
-            .as_mut()
-            .unwrap()
-            .headers
-            .push(("content-encoding".to_string(), "br".to_string()));
+        let headers = &mut item.response.as_mut().unwrap().headers;
+        headers.push(("content-encoding".to_string(), "br".to_string()));
+        headers.push(("content-length".to_string(), BROTLI_HTML.len().to_string()));
 
         let views = response_views(&item);
 
@@ -567,16 +711,23 @@ mod tests {
             views.raw
         );
         assert!(views.raw.contains("decoded from br for display"));
-        assert!(views.raw.contains("Hex shows the"));
+        assert!(!views.raw.contains("Hex shows the"));
         assert!(!views.raw.contains("binary body"));
+        assert!(!views.head.to_ascii_lowercase().contains("content-encoding"));
         assert!(
-            !views.hex.contains("<h1>"),
-            "Hex should keep the compressed wire bytes"
+            views
+                .head
+                .contains(&format!("content-length: {}", HTML.len()))
+        );
+        assert!(
+            contains(&hexdump_bytes(&views.hex), HTML),
+            "Hex should show the decoded response body:\n{}",
+            views.hex
         );
     }
 
     #[test]
-    fn raw_request_decodes_gzip_for_display() {
+    fn all_views_show_gzip_decoded_request_body() {
         let mut item = item_with_bodies(GZIP_HTML.to_vec(), b"ok".to_vec());
         item.request
             .headers
@@ -587,6 +738,26 @@ mod tests {
         assert!(views.raw.contains("<h1>Hello, Wiremoth</h1>"));
         assert!(views.raw.contains("decoded from gzip for display"));
         assert!(!views.raw.contains('\0'));
+        assert!(!views.head.to_ascii_lowercase().contains("content-encoding"));
+        assert!(
+            contains(&hexdump_bytes(&views.hex), HTML),
+            "Hex should show the decoded request body:\n{}",
+            views.hex
+        );
+        assert!(!views.hex.contains("1f 8b"));
+    }
+
+    #[test]
+    fn unsupported_encoding_falls_back_to_wire_bytes() {
+        let mut item = item_with_bodies(GZIP_HTML.to_vec(), b"ok".to_vec());
+        item.request
+            .headers
+            .push(("content-encoding".to_string(), "zstd".to_string()));
+
+        let views = request_views(&item);
+
+        assert!(views.raw.contains("is not decoded; showing wire bytes"));
+        assert!(views.head.to_ascii_lowercase().contains("content-encoding"));
         assert!(views.hex.contains("1f 8b"));
     }
 

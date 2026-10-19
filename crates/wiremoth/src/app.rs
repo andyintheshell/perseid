@@ -46,6 +46,7 @@ use self::widgets::main_tab_button;
 const MAX_EVENTS_PER_FRAME: usize = 1024;
 const FILTER_ID: &str = "wiremoth.filter";
 const PROXY_DETAIL_ID: &str = "wiremoth.proxy.detail";
+const PROXY_REQUEST_ID: &str = "wiremoth.proxy.request";
 const TARGET_TREE_ID: &str = "wiremoth.target.tree";
 const REPEATER_REQUEST_ID: &str = "wiremoth.repeater.request";
 
@@ -154,8 +155,8 @@ pub struct WiremothApp {
     main_tab: MainTab,
     proxy_section: ProxySection,
     target_section: TargetSection,
-    message_pane: MessagePane,
-    message_view: MessageView,
+    request_view: MessageView,
+    response_view: MessageView,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
     scope_enabled: bool,
@@ -239,8 +240,8 @@ impl WiremothApp {
             main_tab: MainTab::default(),
             proxy_section: ProxySection::default(),
             target_section: TargetSection::default(),
-            message_pane: MessagePane::default(),
-            message_view: MessageView::default(),
+            request_view: MessageView::default(),
+            response_view: MessageView::default(),
             site_map: None,
             scope: BTreeSet::new(),
             scope_enabled: false,

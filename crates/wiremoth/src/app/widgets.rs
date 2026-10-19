@@ -53,30 +53,6 @@ pub(super) fn section_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egu
     )
 }
 
-pub(super) fn message_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
-    let text = RichText::new(label).size(13.5).color(if selected {
-        theme::ACCENT_DARK
-    } else {
-        theme::TEXT_MUTED
-    });
-    let text = if selected { text.strong() } else { text };
-    ui.add(
-        egui::Button::new(text)
-            .fill(if selected {
-                theme::ACCENT_WASH
-            } else {
-                Color32::TRANSPARENT
-            })
-            .stroke(if selected {
-                Stroke::new(1.0, theme::ACCENT)
-            } else {
-                Stroke::NONE
-            })
-            .corner_radius(4.0)
-            .min_size(egui::vec2(88.0, 24.0)),
-    )
-}
-
 pub(super) fn message_mode_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
     let text = RichText::new(label).size(12.5).color(if selected {
         theme::ACCENT_DARK
@@ -101,40 +77,57 @@ pub(super) fn message_mode_tab(ui: &mut egui::Ui, selected: bool, label: &str) -
     )
 }
 
-pub(super) fn message_tab_bar(
+pub(super) fn message_toolbar(
     ui: &mut egui::Ui,
-    pane: &mut MessagePane,
+    pane: MessagePane,
     mode: &mut MessageView,
     item: Option<&HistoryItem>,
 ) {
     ui.horizontal(|ui| {
-        if message_tab(ui, *pane == MessagePane::Request, "Request").clicked() {
-            *pane = MessagePane::Request;
-        }
-        if message_tab(ui, *pane == MessagePane::Response, "Response").clicked() {
-            *pane = MessagePane::Response;
-        }
+        let title = match pane {
+            MessagePane::Request => "Request",
+            MessagePane::Response => "Response",
+        };
+        ui.label(RichText::new(title).strong().color(theme::TEXT));
         if let Some(item) = item {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if let Some(duration) = item.duration() {
+            match pane {
+                MessagePane::Request => {
                     ui.label(
-                        RichText::new(view::format_duration(duration))
+                        RichText::new(&item.request.method)
                             .small()
                             .color(theme::TEXT_MUTED),
                     );
                 }
-                ui.label(
-                    RichText::new(view::human_bytes(item.transferred()))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
-                ui.colored_label(view::status_color(item), view::status_text(item));
-                ui.label(
-                    RichText::new(format!("#{} {}", item.id, item.request.method))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
-            });
+                MessagePane::Response => {
+                    ui.colored_label(view::status_color(item), view::status_text(item));
+                }
+            }
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| match pane {
+                    MessagePane::Request => {
+                        ui.label(
+                            RichText::new(format!("#{}", item.id))
+                                .small()
+                                .color(theme::TEXT_MUTED),
+                        );
+                    }
+                    MessagePane::Response => {
+                        if let Some(duration) = item.duration() {
+                            ui.label(
+                                RichText::new(view::format_duration(duration))
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        }
+                        ui.label(
+                            RichText::new(view::human_bytes(item.transferred()))
+                                .small()
+                                .color(theme::TEXT_MUTED),
+                        );
+                    }
+                },
+            );
         }
     });
     ui.add_space(2.0);
@@ -165,7 +158,7 @@ pub(super) fn message_text(
         .corner_radius(4.0)
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
-            ui.set_min_height(ui.available_height());
+            ui.set_min_size(ui.available_size());
             if mode == MessageView::Hex {
                 // A single text galley for a 64 KiB hex dump is surprisingly
                 // expensive to lay out. Virtualize the lines so memory stays
@@ -196,7 +189,7 @@ pub(super) fn message_hex(
     let lines: Vec<&str> = text.lines().collect();
     let row_height = ui.text_style_height(&egui::TextStyle::Monospace) + 2.0;
 
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .id_salt(("wiremoth.hex", id, pane as u8, mode as u8))
         .auto_shrink([false, false])
         .show_rows(ui, row_height, lines.len(), |ui, range| {

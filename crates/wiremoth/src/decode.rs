@@ -1,8 +1,10 @@
 //! Bounded content-encoding decoding for the message views.
 //!
-//! Wiremoth forwards encoded bodies untouched. For inspection, Raw needs to
-//! show what the browser would consume, so gzip, deflate, and Brotli bodies are
-//! decoded into a bounded preview. The Hex view still exposes the wire bytes.
+//! Wiremoth forwards encoded bodies untouched. For inspection, the message
+//! editor needs to show what the browser would consume, so gzip, deflate, and
+//! Brotli bodies are decoded into a bounded preview. Raw, Headers, and Hex all
+//! use that decoded representation, matching Burp's unpacked message editor.
+//! The original wire body remains in the capture and is used for forwarding.
 
 use std::borrow::Cow;
 use std::fmt;

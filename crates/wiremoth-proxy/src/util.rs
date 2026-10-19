@@ -3,7 +3,7 @@
 use std::convert::Infallible;
 
 use bytes::Bytes;
-use http::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
+use http::header::{ACCEPT_ENCODING, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, Version};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
@@ -83,6 +83,47 @@ pub(crate) fn forwarded_headers(headers: &HeaderMap) -> Vec<(HeaderName, HeaderV
         .collect()
 }
 
+/// Keep only content codings the inspection views can decode.
+///
+/// Burp removes unsupported codings from the browser's `Accept-Encoding` by
+/// default so it does not receive bodies it cannot unpack. Wiremoth does the
+/// same. If nothing remains, the header is omitted and the origin server falls
+/// back to identity or its own default.
+pub(crate) fn sanitized_accept_encoding(headers: &HeaderMap) -> Option<HeaderValue> {
+    let mut kept = Vec::new();
+    for value in headers.get_all(ACCEPT_ENCODING) {
+        let Ok(text) = value.to_str() else {
+            continue;
+        };
+        for item in text.split(',') {
+            let mut parts = item.split(';');
+            let name = parts.next().unwrap_or_default().trim();
+            if !is_supported_content_encoding(name) {
+                continue;
+            }
+            let mut token = name.to_string();
+            for parameter in parts {
+                token.push(';');
+                token.push_str(parameter.trim());
+            }
+            kept.push(token);
+        }
+    }
+    if kept.is_empty() {
+        None
+    } else {
+        HeaderValue::from_str(&kept.join(", ")).ok()
+    }
+}
+
+fn is_supported_content_encoding(name: &str) -> bool {
+    name.eq_ignore_ascii_case("gzip")
+        || name.eq_ignore_ascii_case("x-gzip")
+        || name.eq_ignore_ascii_case("deflate")
+        || name.eq_ignore_ascii_case("br")
+        || name.eq_ignore_ascii_case("identity")
+}
+
 /// Host for display: drop the default port for `http` targets.
 pub(crate) fn display_host(authority: &http::uri::Authority) -> String {
     match (authority.host(), authority.port_u16()) {
@@ -148,6 +189,26 @@ mod tests {
         let forwarded = forwarded_headers(&headers);
         let names: Vec<&str> = forwarded.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["x-keep"]);
+    }
+
+    #[test]
+    fn removes_unsupported_accept_encoding_tokens() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT_ENCODING,
+            "deflate, gzip, br;q=0.9, zstd, *".parse().unwrap(),
+        );
+
+        let sanitized = sanitized_accept_encoding(&headers).expect("some codings remain");
+        assert_eq!(sanitized, "deflate, gzip, br;q=0.9");
+    }
+
+    #[test]
+    fn drops_accept_encoding_when_no_supported_coding_remains() {
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT_ENCODING, "zstd, compress".parse().unwrap());
+
+        assert!(sanitized_accept_encoding(&headers).is_none());
     }
 
     #[test]
