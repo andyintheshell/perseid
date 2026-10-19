@@ -43,7 +43,8 @@ application testing — with no embedded browser and memory bounded by design.
 - Live **Memory** indicator in the status bar with allocator memory in use;
   click it for the current and peak values and a rolling graph.
 - Request/response tabs with Raw, Headers, and Hex views, truncation markers,
-  size, and timing.
+  size, and timing. Raw decodes gzip, deflate, and Brotli bodies for display;
+  Hex keeps the original wire bytes.
 - Target site map grouped by host and path, plus an editable scope list shared
   by the view filter and the traffic guardrail.
 - `CONNECT` tunneling for HTTPS with byte counts — no TLS decryption yet.

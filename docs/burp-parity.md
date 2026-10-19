@@ -47,6 +47,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Scope / target allowlist | Yes | View filter plus opt-in HTTP/CONNECT blocking | Working | — |
 | Target site map | Yes | Host/path tree from history | Partial | — |
 | Match/replace rules | Yes | Head and buffered UTF-8 body rules, literal or regex | Working | — |
+| Compressed body inspection | Yes | Bounded Raw decoding for gzip, deflate, and Brotli; Hex keeps wire bytes | Working | — |
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
@@ -67,8 +68,10 @@ Interception, scope enforcement, and match/replace currently cover plain HTTP.
 HTTPS `CONNECT` targets can be blocked by scope, but tunnel contents are still
 passed through without inspection. Interception buffers bodies up to
 `--intercept-limit`; larger or streaming bodies are held for header edits, and
-body rewrite rules apply only to buffered UTF-8 bodies. Scope enforcement is
-opt-in, and an empty scope allows every host.
+body rewrite rules apply only to buffered UTF-8 bodies. Raw decodes gzip,
+deflate, and Brotli bodies for display, but interception and body rules still
+operate on the wire representation. Scope enforcement is opt-in, and an empty
+scope allows every host.
 
 Burp Suite's status bar exposes a memory figure. Wiremoth's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;

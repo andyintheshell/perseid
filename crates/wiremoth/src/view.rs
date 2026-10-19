@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use egui::Color32;
 
+use crate::decode::{self, DecodeError};
 use crate::history::{HistoryItem, Phase};
 use crate::theme;
 use wiremoth_proxy::CapturedBody;
@@ -94,7 +95,10 @@ pub fn format_request(item: &HistoryItem) -> String {
             "(no request body captured)\n"
         });
     } else {
-        out.push_str(&format_raw_body(&item.request_body));
+        out.push_str(&format_raw_body_with_encoding(
+            &item.request_body,
+            header_value(&item.request.headers, "content-encoding"),
+        ));
     }
     out
 }
@@ -119,8 +123,15 @@ pub fn format_response(item: &HistoryItem) -> String {
     let mut out = format_response_head(item);
     if item.response.is_some() {
         out.push('\n');
+        let content_encoding = item
+            .response
+            .as_ref()
+            .and_then(|head| header_value(&head.headers, "content-encoding"));
         match item.response_body() {
-            Some(body) => out.push_str(&format_raw_body(body)),
+            Some(body) if body.total_len() == 0 && body.is_complete() => {
+                out.push_str(empty_response_note(item));
+            }
+            Some(body) => out.push_str(&format_raw_body_with_encoding(body, content_encoding)),
             None => match &item.phase {
                 Phase::InFlight => out.push_str("(response body streaming…)\n"),
                 Phase::Finished { .. } => match item.tunnel_stats() {
@@ -138,6 +149,15 @@ pub fn format_response(item: &HistoryItem) -> String {
         out.push_str(&format!("\n[wiremoth: exchange failed: {error}]\n"));
     }
     out
+}
+
+fn empty_response_note(item: &HistoryItem) -> &'static str {
+    match item.status() {
+        Some(304) => "(no response body: 304 Not Modified; the client reuses its cached copy)\n",
+        Some(204) => "(no response body: 204 No Content)\n",
+        _ if item.request.method.eq_ignore_ascii_case("HEAD") => "(no response body for HEAD)\n",
+        _ => "(empty body)\n",
+    }
 }
 
 /// Status line and headers only.
@@ -232,13 +252,13 @@ fn push_headers(out: &mut String, headers: &[(String, String)]) {
     }
 }
 
-/// Render a captured body for the text-based Raw message view.
+/// Render a raw body, decoding supported `Content-Encoding` values first.
 ///
 /// Raw never switches to a hex dump, even for binary bodies: bytes are decoded
 /// lossily, control bytes are shown as visible markers, and a note points at the
 /// Hex view for the byte-offset representation. Requests and responses share
 /// this path so both stay consistent.
-pub fn format_raw_body(body: &CapturedBody) -> String {
+fn format_raw_body_with_encoding(body: &CapturedBody, content_encoding: Option<&str>) -> String {
     if body.total_len() == 0 {
         return if body.is_complete() {
             "(empty body)\n".to_string()
@@ -247,6 +267,64 @@ pub fn format_raw_body(body: &CapturedBody) -> String {
         };
     }
 
+    let Some(encoding) = content_encoding else {
+        return format_wire_raw_body(body);
+    };
+    match decode::decode_body(body.data(), encoding, TEXT_PREVIEW_LIMIT) {
+        Ok(Some(decoded)) => format_decoded_raw_body(body, &decoded),
+        Ok(None) => format_wire_raw_body(body),
+        Err(DecodeError::Unsupported(name)) => {
+            let mut out = format_wire_raw_body(body);
+            out.push_str(&format!(
+                "\n[wiremoth: content-encoding `{name}` is not decoded; showing wire bytes]\n"
+            ));
+            out
+        }
+        Err(DecodeError::Invalid { encoding, .. }) => {
+            let mut out = format_wire_raw_body(body);
+            out.push_str(&format!(
+                "\n[wiremoth: could not decode content-encoding `{encoding}`; showing wire bytes]\n"
+            ));
+            out
+        }
+    }
+}
+
+fn format_decoded_raw_body(body: &CapturedBody, decoded: &decode::DecodedBody) -> String {
+    let mut out = visible_raw_text(&decoded.bytes);
+    out.push('\n');
+    if looks_binary(&decoded.bytes) {
+        out.push_str("[wiremoth: decoded body shown as lossy text; use Hex for the wire bytes]\n");
+    }
+    if decoded.truncated {
+        out.push_str(&format!(
+            "[wiremoth: decoded preview truncated to {}]\n",
+            human_bytes(TEXT_PREVIEW_LIMIT as u64)
+        ));
+    }
+    if decoded.incomplete {
+        out.push_str(
+            "[wiremoth: compressed body ended before the decoder finished; preview is partial]\n",
+        );
+    }
+    if body.is_truncated() {
+        out.push_str(&format!(
+            "[wiremoth: capture limit reached; {} bytes on the wire]\n",
+            human_bytes(body.total_len())
+        ));
+    }
+    if !body.is_complete() {
+        out.push_str("[wiremoth: body did not finish]\n");
+    }
+    out.push_str(&format!(
+        "[wiremoth: decoded from {} for display; Hex shows the {} wire body]\n",
+        decoded.encoding,
+        human_bytes(body.total_len())
+    ));
+    out
+}
+
+fn format_wire_raw_body(body: &CapturedBody) -> String {
     let data = body.data();
     let shown = &data[..data.len().min(TEXT_PREVIEW_LIMIT)];
     let mut out = visible_raw_text(shown);
@@ -258,6 +336,13 @@ pub fn format_raw_body(body: &CapturedBody) -> String {
     }
     push_body_preview_notes(&mut out, body, shown.len(), data.len());
     out
+}
+
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(header, _)| header.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
 }
 
 /// Render a bounded, read-only hex preview for the interception editor.
@@ -278,9 +363,9 @@ pub fn format_binary_preview(body: &CapturedBody) -> String {
 }
 
 /// Decode bytes for the Raw view without letting control bytes erase the
-/// visible body. Egui has no glyphs for characters such as NUL, so compressed
-/// or binary responses could otherwise render as a blank panel even though the
-/// captured body was complete.
+/// visible body. Egui has no glyphs for characters such as NUL, so binary
+/// responses could otherwise render as a blank panel even though the captured
+/// body was complete.
 fn visible_raw_text(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     let mut out = String::with_capacity(text.len());
@@ -357,6 +442,18 @@ fn hexdump(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const GZIP_HTML: &[u8] = &[
+        31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 179, 81, 116, 241, 119, 14, 137, 12, 112, 85, 200, 40,
+        201, 205, 177, 179, 129, 144, 73, 249, 41, 149, 64, 182, 161, 157, 71, 106, 78, 78, 190,
+        142, 66, 120, 102, 81, 106, 110, 126, 73, 134, 141, 62, 80, 204, 70, 31, 34, 173, 15, 86,
+        11, 0, 140, 83, 160, 197, 65, 0, 0, 0,
+    ];
+    const BROTLI_HTML: &[u8] = &[
+        27, 64, 0, 232, 141, 211, 29, 243, 175, 107, 214, 8, 149, 158, 62, 104, 111, 29, 195, 211,
+        70, 7, 54, 224, 128, 61, 78, 44, 178, 15, 171, 182, 249, 57, 2, 115, 129, 194, 100, 152,
+        173, 226, 181, 250, 90, 13, 47,
+    ];
 
     fn item_with_bodies(request: Vec<u8>, response: Vec<u8>) -> HistoryItem {
         use wiremoth_proxy::{ExchangeResult, RequestInfo, ResponseHead};
@@ -440,17 +537,72 @@ mod tests {
 
     #[test]
     fn raw_binary_body_stays_visible() {
-        // A gzip-like body full of NULs and control bytes used to render as a
-        // blank Raw panel because egui has no glyphs for those characters.
+        // A NUL-heavy binary body used to render as a blank Raw panel because
+        // egui has no glyphs for those characters.
         let body = CapturedBody::from_bytes(vec![
             0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfe, b'h', b'i',
         ]);
-        let raw = format_raw_body(&body);
+        let raw = format_raw_body_with_encoding(&body, None);
 
         assert!(!raw.contains('\0'));
         assert!(raw.contains('·'));
         assert!(raw.contains("hi"));
         assert!(raw.contains("binary body shown as lossy text"));
+    }
+
+    #[test]
+    fn raw_response_decodes_brotli_for_display() {
+        let mut item = item_with_bodies(Vec::new(), BROTLI_HTML.to_vec());
+        item.response
+            .as_mut()
+            .unwrap()
+            .headers
+            .push(("content-encoding".to_string(), "br".to_string()));
+
+        let views = response_views(&item);
+
+        assert!(
+            views.raw.contains("<h1>Hello, Wiremoth</h1>"),
+            "Raw response was not decoded:\n{}",
+            views.raw
+        );
+        assert!(views.raw.contains("decoded from br for display"));
+        assert!(views.raw.contains("Hex shows the"));
+        assert!(!views.raw.contains("binary body"));
+        assert!(
+            !views.hex.contains("<h1>"),
+            "Hex should keep the compressed wire bytes"
+        );
+    }
+
+    #[test]
+    fn raw_request_decodes_gzip_for_display() {
+        let mut item = item_with_bodies(GZIP_HTML.to_vec(), b"ok".to_vec());
+        item.request
+            .headers
+            .push(("content-encoding".to_string(), "gzip".to_string()));
+
+        let views = request_views(&item);
+
+        assert!(views.raw.contains("<h1>Hello, Wiremoth</h1>"));
+        assert!(views.raw.contains("decoded from gzip for display"));
+        assert!(!views.raw.contains('\0'));
+        assert!(views.hex.contains("1f 8b"));
+    }
+
+    #[test]
+    fn raw_response_labels_304_as_bodyless() {
+        let mut item = item_with_bodies(Vec::new(), Vec::new());
+        item.request.method = "GET".to_string();
+        let response = item.response.as_mut().unwrap();
+        response.status = 304;
+        response.reason = "Not Modified".to_string();
+
+        let views = response_views(&item);
+
+        assert!(views.raw.contains("304 Not Modified"));
+        assert!(views.raw.contains("cached copy"));
+        assert!(!views.raw.contains("(empty body)"));
     }
 
     #[test]

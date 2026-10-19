@@ -4,6 +4,7 @@
 
 mod app;
 mod branding;
+mod decode;
 mod history;
 mod memory;
 mod site_map;

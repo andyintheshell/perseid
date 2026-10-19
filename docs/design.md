@@ -130,7 +130,9 @@ Important implementation principles:
 - A bounded interception queue: held bodies are capped by `--intercept-limit`,
   larger or streaming bodies stay header-only, and unresolved messages apply
   backpressure rather than being silently discarded.
-- Virtualized request lists and hex dumps, plus bounded text previews.
+- Virtualized request lists and hex dumps, plus bounded text previews. Raw
+  previews decode gzip, deflate, and Brotli bodies with a hard output cap; Hex
+  previews keep the wire bytes.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply

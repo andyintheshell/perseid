@@ -80,11 +80,19 @@ still needs **Forward** or **Drop**.
 Only bodies up to `--intercept-limit` (1 MiB by default) are buffered for
 editing. Larger or streaming bodies are still held for header edits, but their
 body bytes pass through unchanged and body editing is disabled. In the
-interception editor, binary bodies are shown as a read-only hex preview. In
-history, **Raw** always shows text (using lossy decoding for binary bodies) so
-it never mixes in a hex dump. Control bytes are masked with `·` so compressed
-or binary data cannot make the panel look empty; use **Hex** for the
-byte-offset view.
+interception editor, binary bodies are shown as a read-only hex preview.
+
+In history, **Raw** always shows text so it never mixes in a hex dump. Bodies
+with `Content-Encoding: gzip`, `deflate`, or `br` (Brotli) are decoded for the
+bounded Raw preview, which makes ordinary compressed HTML readable. The proxy
+still forwards the encoded bytes unchanged. Unsupported encodings and binary
+bodies are shown lossily, with control bytes masked as `·` so the panel never
+looks blank. Use **Hex** for the byte-offset view; it keeps the original wire
+bytes.
+
+Responses such as `304 Not Modified` and `204 No Content` have no body by
+definition. Raw labels them explicitly, so a force-refreshed page that reuses
+its cached copy does not look like a failed capture.
 
 HTTPS is still a `CONNECT` passthrough. Scope enforcement can block a tunnel
 before it opens, but Wiremoth cannot edit requests inside it until TLS
