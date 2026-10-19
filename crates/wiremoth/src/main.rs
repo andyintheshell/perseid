@@ -4,6 +4,7 @@
 
 mod app;
 mod branding;
+mod decode;
 mod history;
 mod memory;
 mod site_map;
@@ -32,6 +33,10 @@ pub struct Args {
     /// Maximum bytes of each request/response body to keep in memory.
     #[arg(long, value_name = "BYTES", default_value_t = wiremoth_proxy::DEFAULT_CAPTURE_LIMIT)]
     pub capture_limit: usize,
+
+    /// Maximum body bytes buffered for interception and match/replace editing.
+    #[arg(long, value_name = "BYTES", default_value_t = wiremoth_proxy::DEFAULT_INTERCEPT_LIMIT)]
+    pub intercept_limit: usize,
 
     /// Maximum number of exchanges kept in the in-memory history.
     #[arg(long, value_name = "N", default_value_t = 2000)]

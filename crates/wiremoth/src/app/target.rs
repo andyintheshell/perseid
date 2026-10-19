@@ -139,6 +139,7 @@ impl WiremothApp {
     fn scope_view(&mut self, ui: &mut egui::Ui) {
         let captured_hosts = captured_hosts(&self.history);
         let mut dirty = false;
+        let mut settings_dirty = false;
         let mut clear_scope = false;
 
         egui::ScrollArea::vertical()
@@ -153,8 +154,8 @@ impl WiremothApp {
                             .color(theme::TEXT),
                     );
                     ui.label(
-                        "Scope currently filters the site map and HTTP history. Capture and \
-                         forwarding still apply to every host.",
+                        "Scope filters the site map and HTTP history. It can also block \
+                         out-of-scope traffic before it is forwarded.",
                     );
                     ui.add_space(8.0);
                     let mut enabled = self.scope_enabled;
@@ -165,10 +166,22 @@ impl WiremothApp {
                         self.scope_enabled = enabled;
                         dirty = true;
                     }
-                    if self.scope_enabled && self.scope.is_empty() {
+                    let mut enforce = self.scope_enforce;
+                    if ui
+                        .checkbox(&mut enforce, "Block out-of-scope traffic")
+                        .on_hover_text(
+                            "Return 403 for requests and CONNECT tunnels outside the scope. \
+                             An empty scope allows every host.",
+                        )
+                        .changed()
+                    {
+                        self.scope_enforce = enforce;
+                        settings_dirty = true;
+                    }
+                    if (self.scope_enabled || self.scope_enforce) && self.scope.is_empty() {
                         ui.label(
                             RichText::new(
-                                "No rules yet, so every host is considered in scope.",
+                                "No rules yet, so every host is considered in scope and nothing is blocked.",
                             )
                             .small()
                             .color(theme::TEXT_MUTED),
@@ -191,6 +204,7 @@ impl WiremothApp {
                         {
                             if self.scope.insert(rule) {
                                 dirty = true;
+                                settings_dirty = true;
                             }
                             self.scope_input.clear();
                         }
@@ -211,6 +225,7 @@ impl WiremothApp {
                                 if ui.small_button("Remove").clicked() {
                                     self.scope.remove(&rule);
                                     dirty = true;
+                                    settings_dirty = true;
                                 }
                             });
                         }
@@ -251,7 +266,9 @@ impl WiremothApp {
                                     .small()
                                     .color(theme::TEXT_MUTED),
                             );
-                            if self.scope.contains(host) {
+                            if !self.scope.is_empty()
+                                && site_map::host_in_scope(host, &self.scope)
+                            {
                                 ui.label(
                                     RichText::new("in scope")
                                         .small()
@@ -260,6 +277,7 @@ impl WiremothApp {
                             } else if ui.small_button("Add").clicked() {
                                 self.scope.insert(host.clone());
                                 dirty = true;
+                                settings_dirty = true;
                             }
                         });
                     }
@@ -268,7 +286,9 @@ impl WiremothApp {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(
-                        "Scope is view-only for now; interception and Intruder will honour it in later milestones.",
+                        "When blocking is enabled, scope is checked before interception and again \
+                         after edits, so a rewrite cannot move a request outside the guardrail \
+                         unnoticed.",
                     )
                     .small()
                     .color(theme::TEXT_MUTED),
@@ -278,9 +298,13 @@ impl WiremothApp {
         if clear_scope {
             self.scope.clear();
             dirty = true;
+            settings_dirty = true;
         }
         if dirty {
             self.invalidate_views();
+        }
+        if settings_dirty {
+            self.apply_proxy_settings();
         }
     }
 }

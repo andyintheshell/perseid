@@ -1,5 +1,5 @@
-//! Previews for tools whose engines have not landed yet: Intercept, Intruder,
-//! and Repeater.
+//! Previews for tools whose engines have not landed yet: Intruder and
+//! Repeater.
 
 use egui::Label;
 
@@ -7,114 +7,6 @@ use super::widgets::{badge, card, empty_state, preview_pane};
 use super::*;
 
 impl WiremothApp {
-    pub(super) fn intercept_view(&mut self, ui: &mut egui::Ui) {
-        let mut open_history = false;
-        let mut clear = false;
-        let listener = self
-            .proxy
-            .as_ref()
-            .map(Proxy::local_addr)
-            .unwrap_or(self.listen);
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_max_width(820.0);
-                card(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("Intercept")
-                                .size(17.0)
-                                .strong()
-                                .color(theme::TEXT),
-                        );
-                        badge(ui, "MILESTONE 1");
-                    });
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Requests are forwarded immediately.")
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    ui.label(
-                        "Editable interception - hold, inspect, modify, forward, or drop - is \
-                         part of Milestone 1. Wiremoth currently records every exchange in \
-                         HTTP history without pausing traffic.",
-                    );
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        self.capture_toggle(ui);
-                        if ui.button("Open HTTP history").clicked() {
-                            open_history = true;
-                        }
-                        if ui.button("Clear history").clicked() {
-                            clear = true;
-                        }
-                    });
-                });
-
-                ui.add_space(10.0);
-                card(ui, |ui| {
-                    ui.label(
-                        RichText::new("Proxy listener")
-                            .size(15.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    ui.add_space(2.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(listener.to_string()).monospace());
-                        if self.proxy.is_some() {
-                            ui.colored_label(theme::GREEN, "listening");
-                        } else {
-                            ui.colored_label(theme::RED, "not running");
-                            if ui.button("Retry").clicked() {
-                                let notify = self.notify.clone();
-                                self.start_proxy(notify);
-                            }
-                        }
-                    });
-                    if let Some(error) = &self.proxy_error {
-                        ui.label(RichText::new(error).small().color(theme::RED));
-                    }
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(
-                            "HTTPS uses CONNECT passthrough. Wiremoth tunnels TLS but does not \
-                             decrypt it yet; history shows the tunnel, not the requests inside.",
-                        )
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                    );
-                });
-
-                ui.add_space(10.0);
-                card(ui, |ui| {
-                    ui.label(
-                        RichText::new("Coming with interception")
-                            .size(15.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    for line in [
-                        "Pause matching requests before they reach the origin.",
-                        "Edit headers and bodies in a raw request editor.",
-                        "Forward, drop, or send the request to another tool.",
-                        "Intercept only in-scope hosts.",
-                    ] {
-                        ui.label(format!("- {line}"));
-                    }
-                });
-            });
-
-        if open_history {
-            self.proxy_section = ProxySection::HttpHistory;
-        }
-        if clear {
-            self.clear_history();
-        }
-    }
-
     pub(super) fn intruder_view(&mut self, ui: &mut egui::Ui) {
         let preview = self
             .selected

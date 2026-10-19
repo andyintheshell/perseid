@@ -16,12 +16,14 @@ name = "wiremoth"
 path = "src/main.rs"
 
 [dependencies]
+brotli-decompressor.workspace = true
 chrono.workspace = true
 clap.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 env_logger.workspace = true
+flate2.workspace = true
 image.workspace = true
 libc.workspace = true
 log.workspace = true

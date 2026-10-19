@@ -50,6 +50,28 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
 
     let host = authority.host().to_string();
     let port = authority.port_u16().unwrap_or(443);
+    let policy = ctx.policy();
+
+    if policy.scope_enforced() && !policy.in_scope(authority.as_ref()) {
+        ctx.block_by_scope();
+        let message = "target is outside the configured scope".to_string();
+        if capture {
+            ctx.emit(ProxyEvent::Started {
+                id,
+                timestamp,
+                request: RequestInfo {
+                    method: "CONNECT".to_string(),
+                    uri: raw_uri.to_string(),
+                    host: authority.to_string(),
+                    path: String::new(),
+                    version: version.clone(),
+                    headers: header_list(req.headers()),
+                },
+            });
+            finish_failed(&ctx, id, started, message.clone());
+        }
+        return text_response(StatusCode::FORBIDDEN, &message);
+    }
 
     if capture {
         ctx.emit(ProxyEvent::Started {

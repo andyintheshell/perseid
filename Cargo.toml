@@ -15,6 +15,7 @@ repository = "https://github.com/andyintheshell/wiremoth"
 homepage = "https://github.com/andyintheshell/wiremoth"
 
 [workspace.dependencies]
+brotli-decompressor = "6.1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
@@ -28,6 +29,7 @@ eframe = { version = "0.37", default-features = false, features = [
     "x11",
 ] }
 env_logger = "0.11"
+flate2 = "1.1"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "server", "client"] }
@@ -40,6 +42,7 @@ hyper-util = { version = "0.1", features = [
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 log = "0.4"
+regex = "1"
 thiserror = "2"
 tokio = { version = "1", features = [
     "io-util",

@@ -5,7 +5,7 @@ use egui::{Align, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
 use super::util::{mime_type, request_url};
-use super::widgets::{empty_state, message_tab_bar, message_text, section_tab};
+use super::widgets::{empty_state, message_text, message_toolbar, section_tab};
 use super::*;
 
 impl WiremothApp {
@@ -34,12 +34,33 @@ impl WiremothApp {
                     {
                         self.proxy_section = ProxySection::HttpHistory;
                     }
+                    let rules_label = if self.rules_error.is_some() {
+                        "Match/replace !"
+                    } else {
+                        "Match/replace"
+                    };
+                    let rules_hint = self
+                        .rules_error
+                        .as_deref()
+                        .unwrap_or("Rule changes apply to traffic immediately");
+                    if section_tab(
+                        ui,
+                        self.proxy_section == ProxySection::MatchReplace,
+                        rules_label,
+                    )
+                    .on_hover_text(rules_hint)
+                    .clicked()
+                    {
+                        self.proxy_section = ProxySection::MatchReplace;
+                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                    }
                 });
             });
 
         match self.proxy_section {
             ProxySection::Intercept => self.intercept_view(ui),
             ProxySection::HttpHistory => self.http_history_view(ui),
+            ProxySection::MatchReplace => self.match_replace_view(ui),
         }
     }
 
@@ -277,13 +298,14 @@ impl WiremothApp {
         };
         self.ensure_detail(id);
 
-        let mut pane = self.message_pane;
-        let mut mode = self.message_view;
-        let item = self.history.get(id);
-        message_tab_bar(ui, &mut pane, &mut mode, item);
-        self.message_pane = pane;
-        self.message_view = mode;
-
+        let Some(item) = self.history.get(id) else {
+            empty_state(
+                ui,
+                "Exchange no longer in history",
+                "The selected exchange was evicted or cleared.",
+            );
+            return;
+        };
         let Some(cache) = &self.detail else {
             empty_state(
                 ui,
@@ -292,14 +314,60 @@ impl WiremothApp {
             );
             return;
         };
-        let text = match (pane, mode) {
-            (MessagePane::Request, MessageView::Raw) => &cache.request.raw,
-            (MessagePane::Request, MessageView::Headers) => &cache.request.head,
-            (MessagePane::Request, MessageView::Hex) => &cache.request.hex,
-            (MessagePane::Response, MessageView::Raw) => &cache.response.raw,
-            (MessagePane::Response, MessageView::Headers) => &cache.response.head,
-            (MessagePane::Response, MessageView::Hex) => &cache.response.hex,
-        };
-        message_text(ui, id, pane, mode, text);
+
+        // Burp's default message-editor layout is horizontal: request and
+        // response are both visible, each with its own Raw/Headers/Hex tabs.
+        // Keep the splitter resizable so wide messages still have room.
+        let mut request_view = self.request_view;
+        let mut response_view = self.response_view;
+        let default_width = (ui.available_width() * 0.5).max(240.0);
+
+        egui::Panel::left(PROXY_REQUEST_ID)
+            .resizable(true)
+            .default_size(default_width)
+            .min_size(180.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::same(4)),
+            )
+            .show(ui, |ui| {
+                message_toolbar(ui, MessagePane::Request, &mut request_view, Some(item));
+                message_text(
+                    ui,
+                    id,
+                    MessagePane::Request,
+                    request_view,
+                    message_view_text(&cache.request, request_view),
+                );
+            });
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::same(4)),
+            )
+            .show(ui, |ui| {
+                message_toolbar(ui, MessagePane::Response, &mut response_view, Some(item));
+                message_text(
+                    ui,
+                    id,
+                    MessagePane::Response,
+                    response_view,
+                    message_view_text(&cache.response, response_view),
+                );
+            });
+
+        self.request_view = request_view;
+        self.response_view = response_view;
+    }
+}
+
+fn message_view_text(views: &MessageViews, mode: MessageView) -> &str {
+    match mode {
+        MessageView::Raw => &views.raw,
+        MessageView::Headers => &views.head,
+        MessageView::Hex => &views.hex,
     }
 }

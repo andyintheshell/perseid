@@ -91,25 +91,11 @@ impl SiteMap {
 
 /// Whether a captured host matches the scope. An empty scope includes
 /// everything so an unconfigured scope does not hide the whole workspace.
+///
+/// This delegates to the proxy so the view filter and the forwarding guardrail
+/// cannot drift apart.
 pub fn host_in_scope(host: &str, scope: &BTreeSet<String>) -> bool {
-    if scope.is_empty() {
-        return true;
-    }
-
-    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
-    let host_without_port = without_port(&host);
-
-    scope.iter().any(|rule| {
-        let rule = rule.trim().trim_end_matches('.').to_ascii_lowercase();
-        if rule.is_empty() {
-            return false;
-        }
-        let rule_without_port = without_port(&rule);
-        host == rule
-            || host_without_port == rule_without_port
-            || (!rule_without_port.is_empty()
-                && host_without_port.ends_with(&format!(".{rule_without_port}")))
-    })
+    wiremoth_proxy::host_in_scope(host, scope.iter().map(String::as_str))
 }
 
 /// Normalize user input for the scope list: accept a bare host, a host with a
@@ -120,26 +106,15 @@ pub fn normalize_scope_input(input: &str) -> Option<String> {
         return None;
     }
     let input = input
-        .strip_prefix("http://")
-        .or_else(|| input.strip_prefix("https://"))
-        .unwrap_or(input);
-    let authority = input.split('/').next().unwrap_or(input).trim();
+        .split_once("://")
+        .map_or(input, |(_, authority)| authority);
+    let authority = input.split(['/', '?', '#']).next().unwrap_or(input).trim();
     let authority = authority.trim_end_matches('.');
     if authority.is_empty() {
         None
     } else {
         Some(authority.to_ascii_lowercase())
     }
-}
-
-fn without_port(host: &str) -> &str {
-    if let Some(rest) = host.strip_prefix('[') {
-        return rest.split_once(']').map(|(inner, _)| inner).unwrap_or(host);
-    }
-    if host.matches(':').count() == 1 {
-        return host.split_once(':').map(|(name, _)| name).unwrap_or(host);
-    }
-    host
 }
 
 #[cfg(test)]
@@ -231,6 +206,10 @@ mod tests {
         assert_eq!(
             normalize_scope_input("example.com:8443"),
             Some("example.com:8443".to_string())
+        );
+        assert_eq!(
+            normalize_scope_input("HTTPS://EXAMPLE.com?q=1"),
+            Some("example.com".to_string())
         );
         assert_eq!(normalize_scope_input("   "), None);
     }

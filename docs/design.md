@@ -36,15 +36,19 @@ independent from the proxy and analysis code:
 External browser
       |
       v
-Local proxy / TLS interception
+Local HTTP/1.1 proxy (TLS interception planned)
       |
-      +----> Bounded capture and SQLite history
+      +----> Scope and match/replace policy
+      |
+      +----> Interception queue <----> Hold, edit, forward, drop
+      |
+      +----> Bounded capture and in-memory history
       |                |
       |                +----> Search, filtering, comparison
       |
-      +----> Repeater / request mutation
+      +----> Repeater / request mutation (planned)
       |
-      +----> Optional passive and guided checks
+      +----> Optional passive and guided checks (planned)
                        |
                        v
                Native egui interface
@@ -54,14 +58,16 @@ Current workspace layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/wiremoth-proxy` | Loopback listener, HTTP forwarding, CONNECT tunnels, body teeing, bounded capture events. |
-| `crates/wiremoth` | egui/eframe desktop app: Burp-style workspace, in-memory history, site map, scope filter, message views, keyboard navigation. |
+| `crates/wiremoth-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, body teeing, bounded capture events. |
+| `crates/wiremoth` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, site map, scope and rewrite controls, message views, keyboard navigation. |
 
 Planned additions include a TLS interception layer with a local CA, a
 disk-backed history store, replay/fuzzing workers, and a native extension
 point. Network operations run on their own runtime and communicate with the UI
 through a bounded channel so a slow interface cannot grow memory without
-limit.
+limit. Held messages use a separate bounded interception channel with a
+one-shot decision per message, so capture-event overflow cannot strand an
+exchange that is waiting for the user.
 
 The desktop application does not start or embed a Chromium instance. An
 external browser points at the loopback proxy; this keeps the binary small and
@@ -80,10 +86,13 @@ one theme module so future views stay consistent. HiDPI text and controls are
 first-class requirements, not an afterthought.
 
 Tools that are not implemented yet are shown as explicit previews with the
-milestone that will complete them. Intercept, Intruder, and Repeater do not
-present nonfunctional controls as if they already worked. Scope is implemented
-as a view filter over the site map and history; traffic enforcement belongs to
-the interception milestone.
+milestone that will complete them. Intruder and Repeater do not present
+nonfunctional controls as if they already worked. **Proxy > Intercept** is a
+real editor: held messages show their raw head, editable buffered text body,
+and read-only binary preview, with Burp's single Intercept on/off control plus
+explicit Forward and Drop actions. Scope serves both as a view filter and, when
+enabled, as a traffic guardrail checked before interception and again after
+edits.
 
 The interface is keyboard-friendly: tab switches, history navigation, filtering,
 and zoom all have shortcuts. A mouse remains fully supported. A compact
@@ -98,6 +107,7 @@ Initial technology choices, subject to prototyping and measurement:
 - **Rust** for the application and networking components.
 - **Tokio** for asynchronous networking.
 - **hyper** for HTTP/1.1 forwarding; HTTP/2 and WebSocket handling are planned.
+- **regex** for match/replace rules, with rules compiled once per policy update.
 - **rustls** and a locally generated CA for HTTPS interception (planned).
 - **egui + eframe** for a native desktop interface, using the `glow`
   renderer.
@@ -117,7 +127,12 @@ Important implementation principles:
 - A total retained-body budget for history, independent of the exchange count.
 - Bounded worker queues, concurrent connections and tunnels, and a bounded UI
   event channel with drop counters.
-- Virtualized request lists and hex dumps, plus bounded text previews.
+- A bounded interception queue: held bodies are capped by `--intercept-limit`,
+  larger or streaming bodies stay header-only, and unresolved messages apply
+  backpressure rather than being silently discarded.
+- Virtualized request lists and hex dumps, plus bounded text previews. Raw
+  previews decode gzip, deflate, and Brotli bodies with a hard output cap; Hex
+  previews keep the wire bytes.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply
