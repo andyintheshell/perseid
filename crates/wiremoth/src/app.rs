@@ -135,7 +135,7 @@ pub struct WiremothApp {
     native_ui_scale: f32,
     /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
     base_ui_scale: f32,
-    /// Toolbar brand mark and full logo lockup for the About window.
+    /// Toolbar brand mark; the About lockup is decoded on first use.
     mark: Option<egui::TextureHandle>,
     lockup: Option<egui::TextureHandle>,
     memory: MemoryMeter,
@@ -184,7 +184,6 @@ impl WiremothApp {
         };
 
         let mark = branding::mark_texture(&cc.egui_ctx);
-        let lockup = branding::lockup_texture(&cc.egui_ctx);
 
         let mut app = Self {
             proxy: None,
@@ -212,7 +211,7 @@ impl WiremothApp {
             native_ui_scale,
             base_ui_scale,
             mark,
-            lockup,
+            lockup: None,
             memory: MemoryMeter::new(),
             memory_open: false,
             about_open: false,
@@ -775,8 +774,9 @@ impl WiremothApp {
                 if supported {
                     ui.label(
                         RichText::new(
-                            "Linux process RSS, sampled once per second. Peak is VmHWM; \
-                             GPU and driver memory are not included.",
+                            "Linux process RSS, sampled once per second. Peak is VmHWM. \
+                             RSS includes mapped libraries and graphics-driver code; \
+                             GPU-resident memory is not included.",
                         )
                         .small()
                         .color(theme::TEXT_MUTED),
@@ -798,6 +798,9 @@ impl WiremothApp {
         if ctx.input(|input| input.key_pressed(Key::Escape)) {
             self.about_open = false;
             return;
+        }
+        if self.lockup.is_none() {
+            self.lockup = branding::lockup_texture(ctx);
         }
         let mut open = self.about_open;
         let lockup = self.lockup.clone();

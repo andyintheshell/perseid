@@ -19,5 +19,6 @@ egui.workspace = true
 egui_extras.workspace = true
 env_logger.workspace = true
 image.workspace = true
+libc.workspace = true
 log.workspace = true
 wiremoth-proxy = { path = "../wiremoth-proxy" }

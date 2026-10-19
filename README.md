@@ -72,7 +72,7 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Build, run, proxy setup, options, limitations |
 | [Design](docs/design.md) | Principles, architecture, technology, performance |
-| [Performance and memory](docs/performance.md) | M0 measurements, method, and baseline environment |
+| [Performance and memory](docs/performance.md) | M0 measurements, idle RSS breakdown, and method |
 | [Roadmap](docs/roadmap.md) | Milestones from prototype to Community parity |
 | [Burp Community parity](docs/burp-parity.md) | Definition of parity, capability matrix, deviations |
 | [Safety and privacy](docs/safety.md) | Authorized use, data handling, CA trust |

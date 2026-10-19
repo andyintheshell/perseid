@@ -118,6 +118,8 @@ Important implementation principles:
 - Virtualized request lists and hex dumps, plus bounded text previews.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
+- A fixed, small malloc-arena limit so proxy and UI threads do not multiply
+  allocator overhead.
 - A live process-memory meter so memory behavior is visible during use.
 
 The Milestone 0 baseline and measurement method are published in

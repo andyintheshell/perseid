@@ -19,16 +19,16 @@ in history.
 
 | Scenario | Current RSS | Peak RSS | Notes |
 | --- | ---: | ---: | --- |
-| Idle, empty history | 100.4 MiB | 103.6 MiB | 30 seconds after startup |
-| 2,000 exchanges | 104.7 MiB | 104.7 MiB | 125 KiB in captured bodies; `End` and scrolling checked |
-| 8 MiB text response, Raw | 108.7 MiB | 108.7 MiB | 1 MiB captured; 256 KiB text preview |
-| 8 MiB text response, Hex | 108.7 MiB | 108.7 MiB | 64 KiB hex dump, virtualized by line |
-| 8 MiB binary response, Raw | 115.2 MiB | 115.2 MiB | 1 MiB captured; 8 KiB inline binary preview |
-| 8 MiB binary response, Hex | 115.2 MiB | 115.2 MiB | 64 KiB hex dump, virtualized by line |
+| Idle, empty history | 92.1 MiB | 93.7 MiB | 15 seconds after startup |
+| 2,000 exchanges | 98.9 MiB | 98.9 MiB | 125 KiB in captured bodies; `End` and scrolling checked |
+| 8 MiB text response, Raw | 102.6 MiB | 102.6 MiB | 1 MiB captured; 256 KiB text preview |
+| 8 MiB text response, Hex | 102.6 MiB | 102.6 MiB | 64 KiB hex dump, virtualized by line |
+| 8 MiB binary response, Raw | 104.7 MiB | 108.6 MiB | 1 MiB captured; 8 KiB inline binary preview |
+| 8 MiB binary response, Hex | 104.7 MiB | 108.6 MiB | 64 KiB hex dump, virtualized by line |
 
-The 2,000-entry test added about 4.3 MiB over idle. Both large-response tests
-stayed under 116 MiB even though the wire body was 8 MiB, because capture stops
-at 1 MiB and the detail views render bounded previews.
+The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
+stayed under 109 MiB peak even though the wire body was 8 MiB, because capture
+stops at 1 MiB and the detail views render bounded previews.
 
 ### Findings
 
@@ -39,13 +39,41 @@ at 1 MiB and the detail views render bounded previews.
   same as a 1 MiB response once captured.
 - The hex view is line-virtualized. Before that change, laying out a 64 KiB
   dump as one text galley peaked at about 182.8 MiB in the text-response
-  scenario; the same view now peaks at 108.7 MiB.
+  scenario; with virtualization and allocator tuning, the same view peaks at
+  102.6 MiB.
 - Binary bodies get a smaller 8 KiB inline preview in Raw to keep the
   non-virtualized text view bounded. The Hex tab still exposes a 64 KiB dump.
+- glibc was creating extra malloc arenas for the UI and proxy threads. Limiting
+  the process to two arenas with `mallopt(M_ARENA_MAX, 2)` reduced idle RSS by
+  about 8.3 MiB, from 100.4 to 92.1 MiB.
+- The About lockup is now decoded only when that window opens, instead of
+  keeping a 1200x320 texture ready from startup.
 
-RSS includes shared library pages and the OpenGL driver's CPU-side allocations.
-It does not include GPU/driver memory that is not resident in the process.
-Results will vary with fonts, drivers, desktop settings, and captured content.
+### Where idle RSS goes
+
+Process RSS counts mapped file pages as well as the heap. The idle 92.1 MiB on
+the reference VM breaks down roughly as follows:
+
+| Mapping | RSS |
+| --- | ---: |
+| `libLLVM` (Mesa shader compiler) | 44.6 MiB |
+| `libgallium` (Mesa graphics driver) | 12.0 MiB |
+| Wiremoth executable | 7.8 MiB |
+| Heap | 11.3 MiB |
+| Anonymous mappings (stacks, buffers) | 6.0 MiB |
+| Other libraries and mappings | 10.4 MiB |
+| **Total** | **92.1 MiB** |
+
+The two Mesa mappings are not Wiremoth's data; they are the system graphics
+driver. On this VM, the VMware `vmwgfx` driver uses Mesa's LLVM shader
+compiler. Forcing the llvmpipe software path raised idle RSS to about 186 MiB,
+so it is not a lower-memory fallback here. Other GPUs and driver versions will
+report different totals.
+
+Proportional set size (PSS) at the same moment was 86.9 MiB. RSS is not
+directly comparable to a JVM heap counter: it includes mapped library code and
+driver pages, not just the application's live data. Results will vary with
+fonts, graphics drivers, desktop settings, and captured content.
 
 ## Test environment
 
@@ -78,10 +106,11 @@ PID=$(pgrep -n -f './target/release/wiremoth')
 grep -E 'VmRSS|VmHWM' "/proc/$PID/status"
 ```
 
-Wait 30 seconds after startup for the idle reading. Generate traffic through
+Wait 15 seconds after startup for the idle reading. Generate traffic through
 the proxy and wait a few seconds for the UI to apply the events. The in-app
 **Memory** window shows the same current and peak values, plus the bytes
-retained for captured bodies.
+retained for captured bodies. The mapping breakdown above was read from
+`/proc/<pid>/smaps` and `/proc/<pid>/smaps_rollup`.
 
 History was filled with 2,000 sequential loopback requests:
 

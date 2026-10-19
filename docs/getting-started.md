@@ -55,9 +55,10 @@ Headers, and Hex views. Click a row or use the keyboard to select it.
 
 The status bar also shows a live **Memory** figure on Linux. Click it for
 current and peak resident memory, the bytes retained in captured bodies, and a
-rolling three-minute graph. The measurement is Linux process RSS; it excludes
-GPU and driver memory outside the process. See
-[Performance and memory](performance.md) for the M0 baseline and method.
+rolling three-minute graph. The measurement is Linux process RSS; it includes
+mapped libraries and graphics-driver code, but not GPU-resident memory. See
+[Performance and memory](performance.md) for the M0 baseline, mapping
+breakdown, and method.
 
 ## Pointing a browser at Wiremoth
 

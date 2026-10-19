@@ -67,8 +67,9 @@ Scope rules currently filter the site map and history only. They are not yet a
 traffic guardrail: capture and forwarding still apply to every host until the
 interception milestone enforces scope.
 
-Memory usage uses Linux process RSS (`/proc/self/status`) and excludes GPU and
-driver memory outside the process. Other platforms report it as unavailable.
+Memory usage uses Linux process RSS (`/proc/self/status`). It includes mapped
+libraries and graphics-driver code, but excludes GPU-resident memory. Other
+platforms report it as unavailable.
 
 ## Deliberate deviations
 
