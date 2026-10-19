@@ -53,12 +53,11 @@ path, URI, and status.
 The request/response pane has request and response tabs, each with Raw,
 Headers, and Hex views. Click a row or use the keyboard to select it.
 
-The status bar also shows a live **Memory** figure on Linux. Click it for
-current and peak resident memory, the bytes retained in captured bodies, and a
-rolling three-minute graph. The measurement is Linux process RSS; it includes
-mapped libraries and graphics-driver code, but not GPU-resident memory. See
-[Performance and memory](performance.md) for the M0 baseline, mapping
-breakdown, and method.
+The status bar shows a live **Memory** figure: the bytes currently held by
+Wiremoth's allocator, the closest equivalent to the memory figure in Burp
+Suite's status bar. Click it for the current and peak values and a rolling
+three-minute graph. See [Performance and memory](performance.md) for the M0
+baseline, resident-memory context, and method.
 
 ## Pointing a browser at Wiremoth
 
@@ -86,8 +85,6 @@ leaves the filter. Clicking a row also selects it.
 - Repeater cannot edit or send requests yet; Intruder has no engine yet.
 - History is in memory only. It is bounded by `--history-limit`; captured
   bodies are capped per message by `--capture-limit`.
-- The status-bar memory meter and usage window use Linux `/proc`; other
-  platforms show the measurement as unavailable.
 - There is no disk persistence, project file, or settings persistence yet.
 
 ## HiDPI displays

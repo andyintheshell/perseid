@@ -87,9 +87,9 @@ the interception milestone.
 
 The interface is keyboard-friendly: tab switches, history navigation, filtering,
 and zoom all have shortcuts. A mouse remains fully supported. A compact
-memory indicator in the status bar reports process RSS and opens a details
-window with peak usage and retained-body bytes, following Burp's bottom-bar
-convention.
+memory indicator in the status bar reports allocator memory in use and opens a
+details window with the current and peak values and a rolling graph, following
+Burp's bottom-bar convention.
 
 ## Technology
 
@@ -120,7 +120,7 @@ Important implementation principles:
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply
   allocator overhead.
-- A live process-memory meter so memory behavior is visible during use.
+- A live memory meter so allocator behavior is visible during use.
 
 The Milestone 0 baseline and measurement method are published in
 [Performance and memory](performance.md).

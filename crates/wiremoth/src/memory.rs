@@ -1,47 +1,101 @@
-//! Lightweight process-memory sampling for the status bar.
+//! Allocator heap tracking for the status bar.
 //!
-//! Linux exposes both current and peak resident set size in
-//! `/proc/self/status`. Other platforms report the meter as unavailable rather
-//! than presenting a misleading estimate.
+//! Tracks the bytes currently held by the process allocator, plus a rolling
+//! history for the memory window graph. The counter reflects requested bytes,
+//! not allocator overhead.
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-/// How often the UI refreshes its memory sample.
+/// How often the UI refreshes its heap sample.
 pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// Number of samples kept for the memory window graph (three minutes).
 pub const SAMPLE_HISTORY: usize = 180;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct MemorySample {
-    /// Current resident set size in bytes.
-    pub rss: u64,
-    /// Peak resident set size in bytes.
-    pub peak_rss: u64,
+static HEAP_IN_USE: AtomicUsize = AtomicUsize::new(0);
+static HEAP_PEAK: AtomicUsize = AtomicUsize::new(0);
+
+/// A `System` allocator wrapper that tracks live and peak heap bytes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TrackingAllocator;
+
+impl TrackingAllocator {
+    fn grew(&self, bytes: usize) {
+        let current = HEAP_IN_USE.fetch_add(bytes, Ordering::Relaxed) + bytes;
+        HEAP_PEAK.fetch_max(current, Ordering::Relaxed);
+    }
+
+    fn shrank(&self, bytes: usize) {
+        let _ = HEAP_IN_USE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.saturating_sub(bytes))
+        });
+    }
 }
 
-/// A rolling sampler for the process's resident memory.
+// SAFETY: every method forwards to the system allocator with the caller's
+// pointer and layout, and only updates two atomics afterwards. Pointer
+// validity and layout rules are unchanged.
+unsafe impl GlobalAlloc for TrackingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc(layout) };
+        if !ptr.is_null() {
+            self.grew(layout.size());
+        }
+        ptr
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc_zeroed(layout) };
+        if !ptr.is_null() {
+            self.grew(layout.size());
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) };
+        self.shrank(layout.size());
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let new_ptr = unsafe { System.realloc(ptr, layout, new_size) };
+        if !new_ptr.is_null() {
+            if new_size >= layout.size() {
+                self.grew(new_size - layout.size());
+            } else {
+                self.shrank(layout.size() - new_size);
+            }
+        }
+        new_ptr
+    }
+}
+
+/// Bytes currently held by the process allocator.
+pub fn heap_in_use() -> u64 {
+    HEAP_IN_USE.load(Ordering::Relaxed) as u64
+}
+
+/// Peak bytes held by the process allocator since startup.
+pub fn heap_peak() -> u64 {
+    HEAP_PEAK.load(Ordering::Relaxed) as u64
+}
+
+/// A rolling sampler for the allocator's live heap bytes.
 #[derive(Debug)]
 pub struct MemoryMeter {
-    current: Option<MemorySample>,
     samples: VecDeque<u64>,
     last_sample: Instant,
-    supported: bool,
 }
 
 impl MemoryMeter {
     pub fn new() -> Self {
-        let supported = cfg!(target_os = "linux");
-        let current = sample_process_memory();
         let mut samples = VecDeque::with_capacity(SAMPLE_HISTORY);
-        if let Some(sample) = current {
-            samples.push_back(sample.rss);
-        }
+        samples.push_back(heap_in_use());
         Self {
-            current,
             samples,
             last_sample: Instant::now(),
-            supported,
         }
     }
 
@@ -51,27 +105,15 @@ impl MemoryMeter {
             return;
         }
         self.last_sample = Instant::now();
-        let Some(sample) = sample_process_memory() else {
-            return;
-        };
-        self.current = Some(sample);
         if self.samples.len() == SAMPLE_HISTORY {
             self.samples.pop_front();
         }
-        self.samples.push_back(sample.rss);
+        self.samples.push_back(heap_in_use());
     }
 
-    pub fn current(&self) -> Option<MemorySample> {
-        self.current
-    }
-
-    /// Oldest first. Values are RSS in bytes.
+    /// Oldest first. Values are heap bytes in use.
     pub fn samples(&self) -> &VecDeque<u64> {
         &self.samples
-    }
-
-    pub fn supported(&self) -> bool {
-        self.supported
     }
 
     /// How long until the next automatic sample should be taken.
@@ -83,84 +125,5 @@ impl MemoryMeter {
 impl Default for MemoryMeter {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn sample_process_memory() -> Option<MemorySample> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    parse_linux_status(&status)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn sample_process_memory() -> Option<MemorySample> {
-    None
-}
-
-fn parse_linux_status(status: &str) -> Option<MemorySample> {
-    let mut rss = None;
-    let mut peak = None;
-
-    for line in status.lines() {
-        if let Some(value) = line.strip_prefix("VmRSS:") {
-            rss = parse_kib(value);
-        } else if let Some(value) = line.strip_prefix("VmHWM:") {
-            peak = parse_kib(value);
-        }
-        if rss.is_some() && peak.is_some() {
-            break;
-        }
-    }
-
-    let rss = rss?;
-    Some(MemorySample {
-        rss,
-        peak_rss: peak.unwrap_or(rss),
-    })
-}
-
-fn parse_kib(value: &str) -> Option<u64> {
-    let kib = value.split_whitespace().next()?.parse::<u64>().ok()?;
-    Some(kib.saturating_mul(1024))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_current_and_peak_rss() {
-        let status = "\
-Name:\twiremoth
-VmPeak:\t  987654 kB
-VmHWM:\t    4096 kB
-VmRSS:\t    3072 kB
-Threads:\t4
-";
-        assert_eq!(
-            parse_linux_status(status),
-            Some(MemorySample {
-                rss: 3 * 1024 * 1024,
-                peak_rss: 4 * 1024 * 1024,
-            })
-        );
-    }
-
-    #[test]
-    fn falls_back_to_rss_when_peak_is_missing() {
-        let status = "VmRSS:\t 2048 kB\n";
-        assert_eq!(
-            parse_linux_status(status),
-            Some(MemorySample {
-                rss: 2 * 1024 * 1024,
-                peak_rss: 2 * 1024 * 1024,
-            })
-        );
-    }
-
-    #[test]
-    fn requires_a_current_rss_value() {
-        assert_eq!(parse_linux_status("VmHWM:\t4096 kB\n"), None);
-        assert_eq!(parse_linux_status("VmRSS:\tnot-a-number kB\n"), None);
     }
 }

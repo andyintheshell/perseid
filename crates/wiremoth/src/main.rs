@@ -14,6 +14,10 @@ use std::net::SocketAddr;
 
 use clap::Parser;
 
+/// Track live heap bytes for the status bar memory figure.
+#[global_allocator]
+static GLOBAL_ALLOCATOR: memory::TrackingAllocator = memory::TrackingAllocator;
+
 /// A lightweight, keyboard-first workbench for inspecting, replaying, and
 /// testing HTTP traffic.
 #[derive(Debug, Parser)]

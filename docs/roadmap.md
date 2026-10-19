@@ -12,8 +12,9 @@ definition of done, and deliberate deviations.
   *Complete: on a 4 vCPU / 5.3 GiB Kali arm64 VM at 200% scaling, a release
   build used 92.1 MiB RSS idle, 98.9 MiB with 2,000 exchanges, and at most
   108.6 MiB peak while viewing 8 MiB text and binary responses capped at
-  1 MiB. Method, breakdown, and full results:
-  [Performance and memory](performance.md).*
+  1 MiB. The status bar now reports allocator heap in use (5.8 MiB with 2,000
+  exchanges) with a peak and rolling graph. Method, breakdown, and full
+  results: [Performance and memory](performance.md).*
 
 - [ ] **Milestone 1 — Proxy core:** reliable HTTP/1.1 capture and forwarding,
   request/response interception with edit, forward, and drop, explicit scope

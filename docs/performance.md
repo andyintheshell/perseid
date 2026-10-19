@@ -4,18 +4,18 @@ Wiremoth aims to stay comfortable on modest hardware. This page records the
 Milestone 0 proof-of-concept measurements: idle memory, a full 2,000-entry
 history, and viewing large responses.
 
-![Wiremoth memory window showing current and peak RSS, captured-body bytes, and a rolling graph](images/wiremoth-memory.png)
+![Wiremoth memory window showing current and peak memory with a rolling graph](images/wiremoth-memory.png)
 
 These are development measurements from one Linux VM, not universal
 guarantees. Treat them as a sanity check and a reproducible baseline.
 
 ## Milestone 0 results
 
-All figures are process resident set size (RSS) from Linux
-`/proc/<pid>/status` (`VmRSS` and `VmHWM`). The app's status-bar meter samples
-the same source once per second. The proxy was running, capture was enabled,
-and the default limits were used: 1 MiB per captured body and 2,000 exchanges
-in history.
+All figures in the results table are process resident set size (RSS) from Linux
+`/proc/<pid>/status` (`VmRSS` and `VmHWM`). The status bar separately reports
+allocator heap in use in its **Memory** figure. The proxy was running, capture
+was enabled, and the default limits were used: 1 MiB per captured body and
+2,000 exchanges in history.
 
 | Scenario | Current RSS | Peak RSS | Notes |
 | --- | ---: | ---: | --- |
@@ -29,6 +29,20 @@ in history.
 The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
 stayed under 109 MiB peak even though the wire body was 8 MiB, because capture
 stops at 1 MiB and the detail views render bounded previews.
+
+### Heap in use and resident memory
+
+The status bar's figure is **heap in use**: the bytes currently held by
+Wiremoth's allocator. It is the closest equivalent to the memory figure in
+Burp Suite's status bar. The memory window adds the peak value and a rolling
+three-minute graph; this page keeps RSS for system-level comparison.
+
+With the 2,000-exchange history from the table above, the status bar read
+5.8 MiB heap in use (6.4 MiB peak). At the same moment, `/proc` reported
+97.9 MiB resident memory: 28.2 MiB anonymous and 69.6 MiB file-backed. The
+resident figure is within run-to-run variance of the earlier 98.9 MiB reading.
+Heap in use is much smaller than RSS because RSS also counts file-backed
+library pages that are shared with other processes and can be reclaimed.
 
 ### Findings
 
@@ -59,10 +73,17 @@ the reference VM breaks down roughly as follows:
 | `libLLVM` (Mesa shader compiler) | 44.6 MiB |
 | `libgallium` (Mesa graphics driver) | 12.0 MiB |
 | Wiremoth executable | 7.8 MiB |
-| Heap | 11.3 MiB |
+| `[heap]` mapping | 11.3 MiB |
 | Anonymous mappings (stacks, buffers) | 6.0 MiB |
 | Other libraries and mappings | 10.4 MiB |
 | **Total** | **92.1 MiB** |
+
+`/proc/self/status` also splits the resident total into anonymous and
+file-backed bytes. Idle, roughly 23 MiB is anonymous (allocator heap, thread
+stacks, and private buffers) and the remaining 69 MiB is file-backed (the
+executable, Mesa, and other mapped libraries). The allocator tracker reports
+about 3 MiB in use at idle; anonymous RSS is larger because it also includes
+allocator slack, stacks, and buffers.
 
 The two Mesa mappings are not Wiremoth's data; they are the system graphics
 driver. On this VM, the VMware `vmwgfx` driver uses Mesa's LLVM shader
@@ -70,10 +91,11 @@ compiler. Forcing the llvmpipe software path raised idle RSS to about 186 MiB,
 so it is not a lower-memory fallback here. Other GPUs and driver versions will
 report different totals.
 
-Proportional set size (PSS) at the same moment was 86.9 MiB. RSS is not
-directly comparable to a JVM heap counter: it includes mapped library code and
-driver pages, not just the application's live data. Results will vary with
-fonts, graphics drivers, desktop settings, and captured content.
+Proportional set size (PSS) at the same moment was 86.9 MiB. RSS measures the
+whole process, including mapped library code and driver pages, not just the
+application's live data; that is why the status bar reports heap in use, while
+this page keeps RSS for system-level context. Results will vary with fonts,
+graphics drivers, desktop settings, and captured content.
 
 ## Test environment
 
@@ -103,14 +125,15 @@ For an external reading, locate the process and read its resident memory:
 
 ```sh
 PID=$(pgrep -n -f './target/release/wiremoth')
-grep -E 'VmRSS|VmHWM' "/proc/$PID/status"
+grep -E 'VmRSS|VmHWM|RssAnon|RssFile|RssShmem' "/proc/$PID/status"
 ```
 
 Wait 15 seconds after startup for the idle reading. Generate traffic through
 the proxy and wait a few seconds for the UI to apply the events. The in-app
-**Memory** window shows the same current and peak values, plus the bytes
-retained for captured bodies. The mapping breakdown above was read from
-`/proc/<pid>/smaps` and `/proc/<pid>/smaps_rollup`.
+**Memory** indicator opens the **Memory usage** window, which shows the
+current and peak heap in use and a rolling graph. The resident figures in this
+document came from `/proc`, not the window. The mapping breakdown above was
+read from `/proc/<pid>/smaps` and `/proc/<pid>/smaps_rollup`.
 
 History was filled with 2,000 sequential loopback requests:
 

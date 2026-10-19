@@ -17,7 +17,7 @@ use wiremoth_proxy::{Proxy, ProxyConfig};
 use crate::Args;
 use crate::branding;
 use crate::history::{History, HistoryItem};
-use crate::memory::MemoryMeter;
+use crate::memory::{self, MemoryMeter};
 use crate::site_map::{self, SiteMap};
 use crate::theme;
 use crate::view::{self, MessageViews};
@@ -668,23 +668,7 @@ impl WiremothApp {
     }
 
     fn memory_indicator(&mut self, ui: &mut egui::Ui) {
-        let current = self.memory.current();
-        let label = match current {
-            Some(sample) => format!("Memory {}", view::human_bytes(sample.rss)),
-            None => "Memory n/a".to_owned(),
-        };
-        let hover = if let Some(sample) = current {
-            format!(
-                "Resident memory: {}\nPeak: {}\n\nClick for details",
-                view::human_bytes(sample.rss),
-                view::human_bytes(sample.peak_rss)
-            )
-        } else if self.memory.supported() {
-            "Waiting for a memory sample. Click for details.".to_owned()
-        } else {
-            "Process memory measurement is available on Linux only.".to_owned()
-        };
-
+        let label = format!("Memory {}", view::human_bytes(memory::heap_in_use()));
         let mut text = RichText::new(label).small().color(if self.memory_open {
             theme::ACCENT_DARK
         } else {
@@ -695,8 +679,7 @@ impl WiremothApp {
         }
         let response = ui
             .add(Label::new(text).sense(egui::Sense::click()))
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(hover);
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {
             self.memory_open = !self.memory_open;
         }
@@ -711,11 +694,9 @@ impl WiremothApp {
             return;
         }
 
-        let current = self.memory.current();
+        let current = memory::heap_in_use();
+        let peak = memory::heap_peak();
         let samples: Vec<u64> = self.memory.samples().iter().copied().collect();
-        let supported = self.memory.supported();
-        let exchanges = self.history.len();
-        let body_bytes = self.history.retained_body_bytes();
         let mut open = self.memory_open;
 
         egui::Window::new("Memory usage")
@@ -727,30 +708,14 @@ impl WiremothApp {
             .show(ctx, |ui| {
                 ui.set_min_width(440.0);
                 ui.horizontal(|ui| {
-                    memory_metric(
-                        ui,
-                        "Current",
-                        current.map(|sample| sample.rss),
-                        theme::ACCENT_DARK,
-                    );
+                    memory_metric(ui, "Current", current, theme::ACCENT_DARK);
                     ui.add_space(24.0);
-                    memory_metric(
-                        ui,
-                        "Peak",
-                        current.map(|sample| sample.peak_rss),
-                        theme::TEXT,
-                    );
-                    ui.add_space(24.0);
-                    memory_metric(ui, "Captured bodies", Some(body_bytes), theme::TEXT);
+                    memory_metric(ui, "Peak", peak, theme::TEXT);
                 });
 
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Resident memory")
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                    );
+                    ui.label(RichText::new("Memory").small().color(theme::TEXT_MUTED));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let window = if samples.len() > 1 {
                             format!("last {}s", samples.len() - 1)
@@ -761,32 +726,6 @@ impl WiremothApp {
                     });
                 });
                 memory_graph(ui, &samples);
-
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(format!(
-                        "{exchanges} exchanges · {} retained in captured bodies",
-                        view::human_bytes(body_bytes)
-                    ))
-                    .small()
-                    .color(theme::TEXT_MUTED),
-                );
-                if supported {
-                    ui.label(
-                        RichText::new(
-                            "Linux process RSS, sampled once per second. Peak is VmHWM. \
-                             RSS includes mapped libraries and graphics-driver code; \
-                             GPU-resident memory is not included.",
-                        )
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                    );
-                } else {
-                    ui.colored_label(
-                        theme::AMBER,
-                        "Process memory measurement is available on Linux only.",
-                    );
-                }
             });
         self.memory_open = open;
     }
@@ -1731,9 +1670,7 @@ impl eframe::App for WiremothApp {
         {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
-        if self.memory.supported() {
-            ctx.request_repaint_after(self.memory.time_until_next_sample());
-        }
+        ctx.request_repaint_after(self.memory.time_until_next_sample());
     }
 }
 
@@ -1948,18 +1885,14 @@ fn preview_pane(ui: &mut egui::Ui, title: &str, subtitle: &str, text: &str, salt
         });
 }
 
-fn memory_metric(ui: &mut egui::Ui, label: &str, value: Option<u64>, color: Color32) {
+fn memory_metric(ui: &mut egui::Ui, label: &str, value: u64, color: Color32) {
     ui.vertical(|ui| {
         ui.label(RichText::new(label).small().color(theme::TEXT_MUTED));
         ui.label(
-            RichText::new(
-                value
-                    .map(view::human_bytes)
-                    .unwrap_or_else(|| "n/a".to_owned()),
-            )
-            .size(17.0)
-            .strong()
-            .color(color),
+            RichText::new(view::human_bytes(value))
+                .size(17.0)
+                .strong()
+                .color(color),
         );
     });
 }
@@ -1999,13 +1932,13 @@ fn memory_graph(ui: &mut egui::Ui, samples: &[u64]) {
     let points: Vec<egui::Pos2> = samples
         .iter()
         .enumerate()
-        .map(|(index, rss)| {
+        .map(|(index, value)| {
             let x = if samples.len() == 1 {
                 chart.center().x
             } else {
                 chart.left() + chart.width() * index as f32 / denominator
             };
-            let y = chart.bottom() - chart.height() * (*rss as f64 / ceiling).min(1.0) as f32;
+            let y = chart.bottom() - chart.height() * (*value as f64 / ceiling).min(1.0) as f32;
             egui::pos2(x, y)
         })
         .collect();

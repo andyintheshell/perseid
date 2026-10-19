@@ -29,8 +29,8 @@ application testing — with no embedded browser and memory bounded by design.
   **Repeater** tabs in the familiar order, in a warm light theme.
 - Bounded in-memory history with filtering, a view-only scope filter, and
   keyboard navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`).
-- Live **Memory** indicator in the status bar with current and peak RSS;
-  click it for retained-body bytes and a rolling three-minute graph.
+- Live **Memory** indicator in the status bar with allocator memory in use;
+  click it for the current and peak values and a rolling graph.
 - Request/response tabs with Raw, Headers, and Hex views, truncation markers,
   size, and timing.
 - Target site map grouped by host and path, plus an editable scope list that

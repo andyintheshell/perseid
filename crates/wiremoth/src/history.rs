@@ -138,19 +138,6 @@ impl History {
         self.evicted
     }
 
-    /// Bytes retained for captured request and response bodies.
-    pub fn retained_body_bytes(&self) -> u64 {
-        self.items
-            .values()
-            .map(|item| {
-                item.request_body.data().len() as u64
-                    + item
-                        .response_body()
-                        .map_or(0, |body| body.data().len() as u64)
-            })
-            .sum()
-    }
-
     pub fn clear(&mut self) {
         self.items.clear();
         self.order.clear();
