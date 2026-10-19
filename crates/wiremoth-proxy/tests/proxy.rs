@@ -289,6 +289,34 @@ async fn forwards_and_captures_plain_http() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn captures_chunked_responses_without_interception() {
+    let origin = spawn_origin(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n\
+         5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+            .to_string(),
+    )
+    .await;
+    let proxy = test_proxy(64 * 1024, 64);
+    let request = format!(
+        "GET http://{origin}/chunked HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n"
+    );
+
+    let response = raw_exchange(proxy.local_addr(), &request).await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.contains("hello"), "raw response was: {text}");
+
+    let events = drain_until_finished(&proxy);
+    match &finished_of(&events).result {
+        ExchangeResult::Response { body } => {
+            assert_eq!(body.data(), b"hello world");
+            assert_eq!(body.total_len(), 11);
+            assert!(body.is_complete());
+        }
+        other => panic!("expected a response result, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn captures_request_bodies() {
     let origin = spawn_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
     let proxy = test_proxy(64 * 1024, 64);

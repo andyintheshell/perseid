@@ -64,7 +64,8 @@ library pages that are shared with other processes and can be reclaimed.
   102.6 MiB.
 - Binary bodies used to get a smaller 8 KiB inline hex preview in Raw. Raw now
   uses the bounded text preview (up to 256 KiB) for every body so it never
-  mixes representations; the Hex tab still exposes a 64 KiB dump.
+  mixes representations, and masks control bytes so compressed bodies remain
+  visibly non-empty; the Hex tab still exposes a 64 KiB dump.
 - glibc was creating extra malloc arenas for the UI and proxy threads. Limiting
   the process to two arenas with `mallopt(M_ARENA_MAX, 2)` reduced idle RSS by
   about 8.3 MiB, from 100.4 to 92.1 MiB.

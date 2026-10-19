@@ -235,8 +235,9 @@ fn push_headers(out: &mut String, headers: &[(String, String)]) {
 /// Render a captured body for the text-based Raw message view.
 ///
 /// Raw never switches to a hex dump, even for binary bodies: bytes are decoded
-/// lossily and a note points at the Hex view for the byte-offset representation.
-/// Requests and responses share this path so both stay consistent.
+/// lossily, control bytes are shown as visible markers, and a note points at the
+/// Hex view for the byte-offset representation. Requests and responses share
+/// this path so both stay consistent.
 pub fn format_raw_body(body: &CapturedBody) -> String {
     if body.total_len() == 0 {
         return if body.is_complete() {
@@ -248,7 +249,7 @@ pub fn format_raw_body(body: &CapturedBody) -> String {
 
     let data = body.data();
     let shown = &data[..data.len().min(TEXT_PREVIEW_LIMIT)];
-    let mut out = String::from_utf8_lossy(shown).into_owned();
+    let mut out = visible_raw_text(shown);
     out.push('\n');
     if looks_binary(shown) {
         out.push_str(
@@ -273,6 +274,25 @@ pub fn format_binary_preview(body: &CapturedBody) -> String {
     let shown = &data[..data.len().min(INTERCEPT_BINARY_PREVIEW_LIMIT)];
     let mut out = hexdump(shown);
     push_body_preview_notes(&mut out, body, shown.len(), data.len());
+    out
+}
+
+/// Decode bytes for the Raw view without letting control bytes erase the
+/// visible body. Egui has no glyphs for characters such as NUL, so compressed
+/// or binary responses could otherwise render as a blank panel even though the
+/// captured body was complete.
+fn visible_raw_text(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '\n' | '\r' | '\t') {
+            out.push(ch);
+        } else if ch.is_control() {
+            out.push('·');
+        } else {
+            out.push(ch);
+        }
+    }
     out
 }
 
@@ -387,6 +407,14 @@ mod tests {
                 "Raw view contains a hex dump:\n{raw}"
             );
             assert!(
+                !raw.contains('\0'),
+                "Raw view contains a NUL that egui cannot render:\n{raw:?}"
+            );
+            assert!(
+                raw.contains('·'),
+                "Raw view masks no control bytes:\n{raw:?}"
+            );
+            assert!(
                 raw.contains("binary body shown as lossy text"),
                 "Raw view is missing the binary-body note:\n{raw}"
             );
@@ -408,6 +436,21 @@ mod tests {
         assert!(response.raw.ends_with("hello\n"));
         assert!(!request.raw.contains("binary body"));
         assert!(!response.raw.contains("binary body"));
+    }
+
+    #[test]
+    fn raw_binary_body_stays_visible() {
+        // A gzip-like body full of NULs and control bytes used to render as a
+        // blank Raw panel because egui has no glyphs for those characters.
+        let body = CapturedBody::from_bytes(vec![
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfe, b'h', b'i',
+        ]);
+        let raw = format_raw_body(&body);
+
+        assert!(!raw.contains('\0'));
+        assert!(raw.contains('·'));
+        assert!(raw.contains("hi"));
+        assert!(raw.contains("binary body shown as lossy text"));
     }
 
     #[test]

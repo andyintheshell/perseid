@@ -82,7 +82,9 @@ editing. Larger or streaming bodies are still held for header edits, but their
 body bytes pass through unchanged and body editing is disabled. In the
 interception editor, binary bodies are shown as a read-only hex preview. In
 history, **Raw** always shows text (using lossy decoding for binary bodies) so
-it never mixes in a hex dump; use **Hex** for the byte-offset view.
+it never mixes in a hex dump. Control bytes are masked with `·` so compressed
+or binary data cannot make the panel look empty; use **Hex** for the
+byte-offset view.
 
 HTTPS is still a `CONNECT` passthrough. Scope enforcement can block a tunnel
 before it opens, but Wiremoth cannot edit requests inside it until TLS
