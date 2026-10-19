@@ -5,7 +5,7 @@ and `wiremoth` (the desktop application).
 
 ## Requirements
 
-- A recent stable Rust toolchain (edition 2024, Rust 1.85 or newer).
+- Rust 1.95.0, as pinned in `rust-toolchain.toml` (edition 2024).
 - A Linux desktop session with OpenGL support (X11 or Wayland).
 - A browser or HTTP client that can be configured to use a proxy.
 
