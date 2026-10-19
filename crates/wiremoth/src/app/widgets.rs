@@ -187,7 +187,14 @@ pub(super) fn message_hex(
     text: &str,
 ) {
     let lines: Vec<&str> = text.lines().collect();
-    let row_height = ui.text_style_height(&egui::TextStyle::Monospace) + 2.0;
+    // `show_rows` estimates both the scrollable content height and the visible
+    // row range from this pitch, so it has to match the height the rows
+    // actually occupy. Use the plain monospace row height and zero out the
+    // spacing on the *outer* ui before the estimate is taken: the old extra
+    // padding made the estimate too tall, so long dumps stopped short of the
+    // viewport bottom and left a large blank area when scrolled to the end.
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
 
     egui::ScrollArea::both()
         .id_salt(("wiremoth.hex", id, pane as u8, mode as u8))
