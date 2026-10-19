@@ -3641,6 +3641,7 @@ dependencies = [
  "egui_extras",
  "env_logger",
  "image",
+ "libc",
  "log",
  "wiremoth-proxy",
 ]

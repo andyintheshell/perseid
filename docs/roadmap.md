@@ -6,11 +6,15 @@ definition of done, and deliberate deviations.
 
 ## Milestones
 
-- [ ] **Milestone 0 — Proof of concept:** benchmark idle memory, history
+- [x] **Milestone 0 — Proof of concept:** benchmark idle memory, history
   rendering, and large-response viewing on modest Linux hardware.
 
-  *Status: the prototype runs on Kali/X11 at 200% scaling; formal
-  measurements are still pending.*
+  *Complete: on a 4 vCPU / 5.3 GiB Kali arm64 VM at 200% scaling, a release
+  build used 92.1 MiB RSS idle, 98.9 MiB with 2,000 exchanges, and at most
+  108.6 MiB peak while viewing 8 MiB text and binary responses capped at
+  1 MiB. The status bar now reports allocator heap in use (5.8 MiB with 2,000
+  exchanges) with a peak and rolling graph. Method, breakdown, and full
+  results: [Performance and memory](performance.md).*
 
 - [ ] **Milestone 1 — Proxy core:** reliable HTTP/1.1 capture and forwarding,
   request/response interception with edit, forward, and drop, explicit scope
@@ -43,8 +47,8 @@ definition of done, and deliberate deviations.
   handling of sensitive traffic, accessibility, performance benchmarks, and a
   documented parity audit.
 
-  *Status: tests, rustfmt, clippy, and CI are in place; packaging and
-  benchmarks are not.*
+  *Status: tests, rustfmt, clippy, CI, and the M0 memory baseline are in
+  place; packaging and the broader parity benchmarks are not.*
 
 - [ ] **After parity:** native extension point, passive and guided checks,
   import/export, integrations, and additional protocol coverage.

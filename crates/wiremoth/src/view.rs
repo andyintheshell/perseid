@@ -12,6 +12,9 @@ use wiremoth_proxy::CapturedBody;
 pub const TEXT_PREVIEW_LIMIT: usize = 256 * 1024;
 /// Maximum body bytes rendered as a hex dump (hex is far bulkier than text).
 pub const HEX_PREVIEW_LIMIT: usize = 64 * 1024;
+/// Binary bodies get a shorter inline hex preview in Raw; the Hex tab has the
+/// larger virtualized dump.
+const RAW_BINARY_PREVIEW_LIMIT: usize = 8 * 1024;
 
 pub fn human_bytes(n: u64) -> String {
     const KIB: f64 = 1024.0;
@@ -243,7 +246,7 @@ pub fn format_body(body: &CapturedBody) -> String {
     let data = body.data();
     let binary = looks_binary(data);
     let limit = if binary {
-        HEX_PREVIEW_LIMIT
+        RAW_BINARY_PREVIEW_LIMIT
     } else {
         TEXT_PREVIEW_LIMIT
     };

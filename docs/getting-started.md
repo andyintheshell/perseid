@@ -5,7 +5,7 @@ and `wiremoth` (the desktop application).
 
 ## Requirements
 
-- A recent stable Rust toolchain (edition 2024, Rust 1.85 or newer).
+- Rust 1.95.0, as pinned in `rust-toolchain.toml` (edition 2024).
 - A Linux desktop session with OpenGL support (X11 or Wayland).
 - A browser or HTTP client that can be configured to use a proxy.
 
@@ -52,6 +52,12 @@ path, URI, and status.
 
 The request/response pane has request and response tabs, each with Raw,
 Headers, and Hex views. Click a row or use the keyboard to select it.
+
+The status bar shows a live **Memory** figure: the bytes currently held by
+Wiremoth's allocator, the closest equivalent to the memory figure in Burp
+Suite's status bar. Click it for the current and peak values and a rolling
+three-minute graph. See [Performance and memory](performance.md) for the M0
+baseline, resident-memory context, and method.
 
 ## Pointing a browser at Wiremoth
 

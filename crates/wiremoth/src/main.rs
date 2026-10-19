@@ -5,6 +5,7 @@
 mod app;
 mod branding;
 mod history;
+mod memory;
 mod site_map;
 mod theme;
 mod view;
@@ -12,6 +13,10 @@ mod view;
 use std::net::SocketAddr;
 
 use clap::Parser;
+
+/// Track live heap bytes for the status bar memory figure.
+#[global_allocator]
+static GLOBAL_ALLOCATOR: memory::TrackingAllocator = memory::TrackingAllocator;
 
 /// A lightweight, keyboard-first workbench for inspecting, replaying, and
 /// testing HTTP traffic.
@@ -43,6 +48,7 @@ pub struct Args {
 }
 
 fn main() -> eframe::Result {
+    tune_allocator();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
 
@@ -67,3 +73,20 @@ fn main() -> eframe::Result {
         Box::new(move |cc| Ok(Box::new(app::WiremothApp::new(cc, args)))),
     )
 }
+
+/// Keep glibc from creating a separate malloc arena for every proxy/UI thread.
+///
+/// Wiremoth is a small process with a few threads. The default arena policy
+/// was worth about 8 MiB of idle RSS on the reference VM, while two arenas
+/// leave enough room for concurrent allocation.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn tune_allocator() {
+    // SAFETY: this only changes glibc malloc configuration, before the UI and
+    // proxy threads are started.
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn tune_allocator() {}

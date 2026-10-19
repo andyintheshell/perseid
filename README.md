@@ -29,6 +29,8 @@ application testing — with no embedded browser and memory bounded by design.
   **Repeater** tabs in the familiar order, in a warm light theme.
 - Bounded in-memory history with filtering, a view-only scope filter, and
   keyboard navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`).
+- Live **Memory** indicator in the status bar with allocator memory in use;
+  click it for the current and peak values and a rolling graph.
 - Request/response tabs with Raw, Headers, and Hex views, truncation markers,
   size, and timing.
 - Target site map grouped by host and path, plus an editable scope list that
@@ -70,6 +72,7 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Build, run, proxy setup, options, limitations |
 | [Design](docs/design.md) | Principles, architecture, technology, performance |
+| [Performance and memory](docs/performance.md) | M0 measurements, idle RSS breakdown, and method |
 | [Roadmap](docs/roadmap.md) | Milestones from prototype to Community parity |
 | [Burp Community parity](docs/burp-parity.md) | Definition of parity, capability matrix, deviations |
 | [Safety and privacy](docs/safety.md) | Authorized use, data handling, CA trust |

@@ -17,6 +17,7 @@ use wiremoth_proxy::{Proxy, ProxyConfig};
 use crate::Args;
 use crate::branding;
 use crate::history::{History, HistoryItem};
+use crate::memory::{self, MemoryMeter};
 use crate::site_map::{self, SiteMap};
 use crate::theme;
 use crate::view::{self, MessageViews};
@@ -134,9 +135,11 @@ pub struct WiremothApp {
     native_ui_scale: f32,
     /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
     base_ui_scale: f32,
-    /// Toolbar brand mark and full logo lockup for the About window.
+    /// Toolbar brand mark; the About lockup is decoded on first use.
     mark: Option<egui::TextureHandle>,
     lockup: Option<egui::TextureHandle>,
+    memory: MemoryMeter,
+    memory_open: bool,
     about_open: bool,
 }
 
@@ -181,7 +184,6 @@ impl WiremothApp {
         };
 
         let mark = branding::mark_texture(&cc.egui_ctx);
-        let lockup = branding::lockup_texture(&cc.egui_ctx);
 
         let mut app = Self {
             proxy: None,
@@ -209,7 +211,9 @@ impl WiremothApp {
             native_ui_scale,
             base_ui_scale,
             mark,
-            lockup,
+            lockup: None,
+            memory: MemoryMeter::new(),
+            memory_open: false,
             about_open: false,
         };
         if !args.no_proxy {
@@ -644,6 +648,14 @@ impl WiremothApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.memory_indicator(ui);
+                ui.separator();
+                ui.label(
+                    RichText::new(format!("UI {:.0}%", ui.ctx().pixels_per_point() * 100.0))
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+                ui.separator();
                 ui.label(
                     RichText::new(
                         "HTTPS: CONNECT passthrough - TLS interception not implemented yet",
@@ -651,14 +663,71 @@ impl WiremothApp {
                     .small()
                     .color(theme::TEXT_MUTED),
                 );
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("UI {:.0}%", ui.ctx().pixels_per_point() * 100.0))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
             });
         });
+    }
+
+    fn memory_indicator(&mut self, ui: &mut egui::Ui) {
+        let label = format!("Memory {}", view::human_bytes(memory::heap_in_use()));
+        let mut text = RichText::new(label).small().color(if self.memory_open {
+            theme::ACCENT_DARK
+        } else {
+            theme::TEXT_MUTED
+        });
+        if self.memory_open {
+            text = text.underline();
+        }
+        let response = ui
+            .add(Label::new(text).sense(egui::Sense::click()))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            self.memory_open = !self.memory_open;
+        }
+    }
+
+    fn memory_window(&mut self, ctx: &egui::Context) {
+        if !self.memory_open {
+            return;
+        }
+        if ctx.input(|input| input.key_pressed(Key::Escape)) {
+            self.memory_open = false;
+            return;
+        }
+
+        let current = memory::heap_in_use();
+        let peak = memory::heap_peak();
+        let samples: Vec<u64> = self.memory.samples().iter().copied().collect();
+        let mut open = self.memory_open;
+
+        egui::Window::new("Memory usage")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(470.0)
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -44.0))
+            .show(ctx, |ui| {
+                ui.set_min_width(440.0);
+                ui.horizontal(|ui| {
+                    memory_metric(ui, "Current", current, theme::ACCENT_DARK);
+                    ui.add_space(24.0);
+                    memory_metric(ui, "Peak", peak, theme::TEXT);
+                });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Memory").small().color(theme::TEXT_MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let window = if samples.len() > 1 {
+                            format!("last {}s", samples.len() - 1)
+                        } else {
+                            "collecting...".to_owned()
+                        };
+                        ui.label(RichText::new(window).small().color(theme::TEXT_MUTED));
+                    });
+                });
+                memory_graph(ui, &samples);
+            });
+        self.memory_open = open;
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {
@@ -668,6 +737,9 @@ impl WiremothApp {
         if ctx.input(|input| input.key_pressed(Key::Escape)) {
             self.about_open = false;
             return;
+        }
+        if self.lockup.is_none() {
+            self.lockup = branding::lockup_texture(ctx);
         }
         let mut open = self.about_open;
         let lockup = self.lockup.clone();
@@ -1554,6 +1626,7 @@ impl WiremothApp {
 impl eframe::App for WiremothApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.memory.sample_if_due();
         self.drain_events(&ctx);
         self.keyboard(&ctx);
         self.rebuild_visible();
@@ -1586,6 +1659,7 @@ impl eframe::App for WiremothApp {
             )
             .show(ui, |ui| self.main_content(ui));
 
+        self.memory_window(&ctx);
         self.about_window(&ctx);
 
         // Keep the fetch loop honest about dropped events even while idle.
@@ -1596,6 +1670,7 @@ impl eframe::App for WiremothApp {
         {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
+        ctx.request_repaint_after(self.memory.time_until_next_sample());
     }
 }
 
@@ -1753,16 +1828,42 @@ fn message_text(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: MessageView
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
             ui.set_min_height(ui.available_height());
-            egui::ScrollArea::both()
-                .id_salt(("wiremoth.message", id, pane as u8, mode as u8))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.add(
-                        Label::new(RichText::new(text).monospace().color(theme::TEXT))
-                            .selectable(true)
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                    );
-                });
+            if mode == MessageView::Hex {
+                // A single text galley for a 64 KiB hex dump is surprisingly
+                // expensive to lay out. Virtualize the lines so memory stays
+                // proportional to the visible page rather than the whole dump.
+                message_hex(ui, id, pane, mode, text);
+            } else {
+                egui::ScrollArea::both()
+                    .id_salt(("wiremoth.message", id, pane as u8, mode as u8))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            Label::new(RichText::new(text).monospace().color(theme::TEXT))
+                                .selectable(true)
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        );
+                    });
+            }
+        });
+}
+
+fn message_hex(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: MessageView, text: &str) {
+    let lines: Vec<&str> = text.lines().collect();
+    let row_height = ui.text_style_height(&egui::TextStyle::Monospace) + 2.0;
+
+    egui::ScrollArea::vertical()
+        .id_salt(("wiremoth.hex", id, pane as u8, mode as u8))
+        .auto_shrink([false, false])
+        .show_rows(ui, row_height, lines.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for line in &lines[range] {
+                ui.add(
+                    Label::new(RichText::new(*line).monospace().color(theme::TEXT))
+                        .selectable(true)
+                        .wrap_mode(egui::TextWrapMode::Extend),
+                );
+            }
         });
 }
 
@@ -1782,6 +1883,73 @@ fn preview_pane(ui: &mut egui::Ui, title: &str, subtitle: &str, text: &str, salt
                     .wrap_mode(egui::TextWrapMode::Extend),
             );
         });
+}
+
+fn memory_metric(ui: &mut egui::Ui, label: &str, value: u64, color: Color32) {
+    ui.vertical(|ui| {
+        ui.label(RichText::new(label).small().color(theme::TEXT_MUTED));
+        ui.label(
+            RichText::new(view::human_bytes(value))
+                .size(17.0)
+                .strong()
+                .color(color),
+        );
+    });
+}
+
+fn memory_graph(ui: &mut egui::Ui, samples: &[u64]) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 132.0),
+        egui::Sense::hover(),
+    );
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, egui::CornerRadius::same(6), theme::SURFACE_TINT);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        Stroke::new(1.0, theme::BORDER),
+        egui::StrokeKind::Inside,
+    );
+
+    let chart = rect.shrink2(egui::vec2(10.0, 12.0));
+    for row in 0..=4 {
+        let y = chart.top() + chart.height() * row as f32 / 4.0;
+        painter.line_segment(
+            [egui::pos2(chart.left(), y), egui::pos2(chart.right(), y)],
+            Stroke::new(1.0, theme::BORDER),
+        );
+    }
+
+    let Some(max) = samples.iter().copied().max().filter(|max| *max > 0) else {
+        return;
+    };
+    let ceiling = (max as f64 * 1.1).max(1.0);
+    let denominator = samples.len().saturating_sub(1).max(1) as f32;
+    let points: Vec<egui::Pos2> = samples
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let x = if samples.len() == 1 {
+                chart.center().x
+            } else {
+                chart.left() + chart.width() * index as f32 / denominator
+            };
+            let y = chart.bottom() - chart.height() * (*value as f64 / ceiling).min(1.0) as f32;
+            egui::pos2(x, y)
+        })
+        .collect();
+
+    painter.add(egui::Shape::line(
+        points.clone(),
+        Stroke::new(1.5, theme::ACCENT),
+    ));
+    if let Some(last) = points.last() {
+        painter.circle_filled(*last, 3.0, theme::ACCENT);
+    }
 }
 
 fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
