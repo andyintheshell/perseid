@@ -36,7 +36,7 @@ independent from the proxy and analysis code:
 External browser
       |
       v
-Local HTTP/1.1 proxy (TLS interception planned)
+Local HTTP/1.1 proxy (opt-in TLS interception)
       |
       +----> Scope and match/replace policy
       |
@@ -58,16 +58,24 @@ Current workspace layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/wiremoth-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, body teeing, bounded capture events. |
-| `crates/wiremoth` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, site map, scope and rewrite controls, message views, keyboard navigation. |
+| `crates/wiremoth-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events. |
+| `crates/wiremoth` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
 
-Planned additions include a TLS interception layer with a local CA, a
-disk-backed history store, replay/fuzzing workers, and a native extension
-point. Network operations run on their own runtime and communicate with the UI
-through a bounded channel so a slow interface cannot grow memory without
-limit. Held messages use a separate bounded interception channel with a
-one-shot decision per message, so capture-event overflow cannot strand an
-exchange that is waiting for the user.
+HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
+per-host certificates, rustls terminates the browser connection inside a
+`CONNECT` tunnel, and decrypted HTTP/1.1 requests flow through the same
+forwarding, interception, scope, and rewrite pipeline as plain HTTP. Upstream
+connections verify origin certificates against the platform trust store. The
+CA private key is loaded by the app from disk; trust is installed and removed by
+the user in the browser, never by Wiremoth. Interception is off by default and
+pass-through hosts remain opaque.
+
+Planned additions include a disk-backed history store, replay/fuzzing workers,
+and a native extension point. Network operations run on their own runtime and
+communicate with the UI through a bounded channel so a slow interface cannot
+grow memory without limit. Held messages use a separate bounded interception
+channel with a one-shot decision per message, so capture-event overflow cannot
+strand an exchange that is waiting for the user.
 
 The desktop application does not start or embed a Chromium instance. An
 external browser points at the loopback proxy; this keeps the binary small and
@@ -92,7 +100,9 @@ real editor: held messages show their raw head, editable buffered text body,
 and read-only binary preview, with Burp's single Intercept on/off control plus
 explicit Forward and Drop actions. Scope serves both as a view filter and, when
 enabled, as a traffic guardrail checked before interception and again after
-edits.
+edits. **Proxy > TLS** manages the local certificate authority, the HTTPS
+decryption toggle, and the pass-through host list, with inline trust and removal
+guidance.
 
 The interface is keyboard-friendly: tab switches, history navigation, filtering,
 and zoom all have shortcuts. A mouse remains fully supported. A compact
@@ -108,7 +118,8 @@ Initial technology choices, subject to prototyping and measurement:
 - **Tokio** for asynchronous networking.
 - **hyper** for HTTP/1.1 forwarding; HTTP/2 and WebSocket handling are planned.
 - **regex** for match/replace rules, with rules compiled once per policy update.
-- **rustls** and a locally generated CA for HTTPS interception (planned).
+- **rustls** and a locally generated CA for HTTPS interception. Interception is
+  opt-in, and the user installs and removes browser trust manually.
 - **egui + eframe** for a native desktop interface, using the `glow`
   renderer.
 - **SQLite** for searchable, disk-backed history (planned).

@@ -81,6 +81,19 @@ impl HistoryItem {
         }
     }
 
+    /// How many HTTP requests were decrypted inside a TLS-intercepted CONNECT
+    /// tunnel. `None` for every other kind of exchange, including untouched
+    /// passthrough tunnels.
+    pub fn tls_intercepted_requests(&self) -> Option<u64> {
+        match &self.phase {
+            Phase::Finished {
+                result: ExchangeResult::InterceptedTls { requests },
+                ..
+            } => Some(*requests),
+            _ => None,
+        }
+    }
+
     pub fn error(&self) -> Option<&str> {
         match &self.phase {
             Phase::Finished {
@@ -293,6 +306,7 @@ mod tests {
             request: RequestInfo {
                 method: method.to_string(),
                 uri: format!("http://example.com/{id}"),
+                scheme: "http".to_string(),
                 host: "example.com".to_string(),
                 path: format!("/{id}"),
                 version: "HTTP/1.1".to_string(),

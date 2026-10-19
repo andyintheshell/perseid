@@ -152,13 +152,22 @@ fn format_response_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
             Some(body) => out.push_str(&format_raw_body_with_decoded(body, decoded)),
             None => match &item.phase {
                 Phase::InFlight => out.push_str("(response body streaming…)\n"),
-                Phase::Finished { .. } => match item.tunnel_stats() {
-                    Some((up, down)) => out.push_str(&format!(
-                        "[wiremoth: TLS passthrough tunnel; relayed {} to server, {} to client; payload not decrypted]\n",
-                        human_bytes(up),
-                        human_bytes(down),
+                Phase::Finished { .. } => match item.tls_intercepted_requests() {
+                    Some(0) => out.push_str(
+                        "[wiremoth: TLS intercepted; the client closed before sending a request]\n",
+                    ),
+                    Some(requests) => out.push_str(&format!(
+                        "[wiremoth: TLS intercepted; {requests} HTTP request{} decrypted into separate history entries]\n",
+                        if requests == 1 { "" } else { "s" },
                     )),
-                    None => out.push_str("(no response body captured)\n"),
+                    None => match item.tunnel_stats() {
+                        Some((up, down)) => out.push_str(&format!(
+                            "[wiremoth: TLS passthrough tunnel; relayed {} to server, {} to client; payload not decrypted]\n",
+                            human_bytes(up),
+                            human_bytes(down),
+                        )),
+                        None => out.push_str("(no response body captured)\n"),
+                    },
                 },
             },
         }
@@ -229,7 +238,12 @@ pub fn response_views(item: &HistoryItem) -> MessageViews {
         append_body_notes(&mut hex, body, item.is_in_flight());
         append_decoded_hex_notes(&mut hex, body, &decoded);
     }
-    if let Some((up, down)) = item.tunnel_stats() {
+    if let Some(requests) = item.tls_intercepted_requests() {
+        hex.push_str(&format!(
+            "\n[wiremoth: TLS intercepted; {requests} HTTP request{} decrypted into separate history entries]\n",
+            if requests == 1 { "" } else { "s" },
+        ));
+    } else if let Some((up, down)) = item.tunnel_stats() {
         hex.push_str(&format!(
             "\n[wiremoth: TLS passthrough tunnel; {up} bytes to server, {down} bytes to client; payload not decrypted]\n"
         ));
@@ -610,6 +624,7 @@ mod tests {
             request: RequestInfo {
                 method: "POST".to_string(),
                 uri: "http://example.com/upload".to_string(),
+                scheme: "http".to_string(),
                 host: "example.com".to_string(),
                 path: "/upload".to_string(),
                 version: "HTTP/1.1".to_string(),

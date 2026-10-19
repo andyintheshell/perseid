@@ -258,6 +258,7 @@ mod tests {
         RequestInfo {
             method: "POST".to_string(),
             uri: "http://example.com/".to_string(),
+            scheme: "http".to_string(),
             host: "example.com".to_string(),
             path: "/".to_string(),
             version: "HTTP/1.1".to_string(),

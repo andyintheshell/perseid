@@ -24,12 +24,14 @@
 //! - Plain HTTP/1.1 proxying with full request/response capture.
 //! - Request and response interception with editable heads and buffered UTF-8
 //!   bodies, plus explicit forward and drop decisions.
-//! - Opt-in scope enforcement for plain HTTP and CONNECT targets, and
+//! - Opt-in scope enforcement for HTTP, HTTPS, and CONNECT targets, and
 //!   request/response match/replace rules compiled from
 //!   [`ProxySettings`].
-//! - HTTPS via CONNECT **passthrough** (no TLS interception yet): history
-//!   shows the tunnel, not its contents. Scope enforcement can block a tunnel
-//!   before it opens.
+//! - HTTPS via CONNECT either passes through as an opaque tunnel (the
+//!   default) or is decrypted when [`ProxySettings::tls_intercept`] is on and
+//!   a [`CertificateAuthority`] is supplied in [`ProxyConfig::tls`]. Each
+//!   decrypted request travels the same interception, scope, rewriting, and
+//!   capture pipeline as plain HTTP.
 //!
 //! # Example
 //!
@@ -51,12 +53,14 @@ mod message;
 mod policy;
 mod rules;
 mod server;
+mod tls;
 mod tunnel;
 mod util;
 
 pub use config::{
     DEFAULT_CAPTURE_LIMIT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_EVENT_QUEUE, DEFAULT_INTERCEPT_LIMIT,
     DEFAULT_LISTEN, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_TUNNELS, ProxyConfig, ProxySettings,
+    TlsConfig,
 };
 pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
@@ -64,6 +68,7 @@ pub use events::{
 pub use intercept::{InterceptError, InterceptItem, InterceptKind};
 pub use policy::host_in_scope;
 pub use rules::{MatchReplaceRule, RuleDirection, RuleError, RulePart};
+pub use tls::{CaError, CertificateAuthority, UpstreamTlsError};
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -72,6 +77,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use hyper_rustls::{DefaultServerNameResolver, HttpsConnector};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
@@ -95,6 +101,8 @@ pub enum StartError {
     #[error("could not initialize the proxy runtime: {0}")]
     Runtime(#[source] std::io::Error),
     #[error(transparent)]
+    Tls(#[from] UpstreamTlsError),
+    #[error(transparent)]
     Rule(#[from] RuleError),
     #[error("the proxy thread stopped before it was ready")]
     Startup,
@@ -109,6 +117,7 @@ pub struct Proxy {
     events: Receiver<ProxyEvent>,
     intercepts: mpsc::Receiver<InterceptItem>,
     policy: Arc<RwLock<Policy>>,
+    tls_ca: Arc<RwLock<Option<Arc<CertificateAuthority>>>>,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
     blocked_by_scope: Arc<AtomicU64>,
@@ -158,15 +167,27 @@ impl Proxy {
         let connection_slots = Arc::new(Semaphore::new(config.max_connections.max(1)));
         let tunnel_slots = Arc::new(Semaphore::new(config.max_tunnels.max(1)));
 
+        let upstream_tls = tls::upstream_client_config(&config.tls.extra_roots_pem)?;
         let mut connector = HttpConnector::new();
         connector.set_connect_timeout(Some(config.connect_timeout));
-        connector.enforce_http(true);
-        let client: Client<HttpConnector, ProxyBody> = Client::builder(TokioExecutor::new())
-            .http1_preserve_header_case(true)
-            .build(connector);
+        // Scheme enforcement lives in the HTTPS connector, which knows how to
+        // route `http` and `https` targets.
+        connector.enforce_http(false);
+        let connector = HttpsConnector::new(
+            connector,
+            upstream_tls,
+            false,
+            Arc::new(DefaultServerNameResolver::default()),
+        );
+        let client: Client<HttpsConnector<HttpConnector>, ProxyBody> =
+            Client::builder(TokioExecutor::new())
+                .http1_preserve_header_case(true)
+                .build(connector);
 
+        let tls_ca = Arc::new(RwLock::new(config.tls.authority.clone()));
         let ctx = Arc::new(server::Ctx {
             client,
+            tls_ca: tls_ca.clone(),
             tx: tx as SyncSender<ProxyEvent>,
             notify: config.notify.clone(),
             dropped: dropped.clone(),
@@ -230,6 +251,7 @@ impl Proxy {
             events,
             intercepts,
             policy,
+            tls_ca,
             dropped,
             paused,
             blocked_by_scope,
@@ -292,6 +314,18 @@ impl Proxy {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
         Ok(())
+    }
+
+    /// Replace the certificate authority used for TLS interception.
+    ///
+    /// Existing tunnels keep the authority they started with; new CONNECT
+    /// requests pick this one up immediately. Pass `None` to fall back to
+    /// passthrough without restarting the proxy.
+    pub fn set_tls_authority(&self, authority: Option<Arc<CertificateAuthority>>) {
+        *self
+            .tls_ca
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = authority;
     }
 
     /// Exchanges blocked because they were outside the enforced scope.

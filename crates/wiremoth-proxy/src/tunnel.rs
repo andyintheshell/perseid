@@ -1,23 +1,36 @@
-//! CONNECT tunneling (HTTPS passthrough).
+//! CONNECT handling: passthrough tunnels and TLS interception.
 //!
-//! Wiremoth does not yet perform TLS interception: an intercepted `CONNECT`
-//! results in a raw byte tunnel between client and origin. The tunnel is
-//! visible in history, but its contents are not.
+//! With a certificate authority configured and [`ProxySettings::tls_intercept`]
+//! enabled, Wiremoth terminates the client TLS session with a certificate
+//! minted for the requested host, serves HTTP/1.1 inside the tunnel, and sends
+//! each decrypted request through the same interception, scope, rewriting, and
+//! capture pipeline as plain HTTP. Without interception, or for hosts on the
+//! pass-through list, the CONNECT stays an opaque byte tunnel.
+//!
+//! [`ProxySettings::tls_intercept`]: crate::ProxySettings::tls_intercept
 
+use std::convert::Infallible;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime};
 
 use http::{Request, Response, StatusCode};
 use hyper::body::Incoming;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use log::debug;
+use log::{debug, warn};
+use rustls::ServerConfig;
 use tokio::net::TcpStream;
+use tokio::sync::OwnedSemaphorePermit;
+use tokio_rustls::TlsAcceptor;
 
 use crate::events::{
-    CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
+    CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
 };
+use crate::forward;
 use crate::server::Ctx;
+use crate::tls::CertificateAuthority;
 use crate::util::{ProxyBody, empty_body, header_list, text_response, version_str};
 
 pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<ProxyBody> {
@@ -27,6 +40,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
     let capture = ctx.capture_enabled();
     let version = version_str(req.version());
     let raw_uri = req.uri().clone();
+    let headers = header_list(req.headers());
 
     let Some(authority) = raw_uri.authority().cloned() else {
         let message = "CONNECT requires a host:port target".to_string();
@@ -34,14 +48,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
             ctx.emit(ProxyEvent::Started {
                 id,
                 timestamp,
-                request: RequestInfo {
-                    method: "CONNECT".to_string(),
-                    uri: raw_uri.to_string(),
-                    host: raw_uri.to_string(),
-                    path: String::new(),
-                    version,
-                    headers: header_list(req.headers()),
-                },
+                request: connect_request_info(&raw_uri, version.clone(), &headers),
             });
             finish_failed(&ctx, id, started, message.clone());
         }
@@ -49,6 +56,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
     };
 
     let host = authority.host().to_string();
+    let authority_text = authority.to_string();
     let port = authority.port_u16().unwrap_or(443);
     let policy = ctx.policy();
 
@@ -59,14 +67,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
             ctx.emit(ProxyEvent::Started {
                 id,
                 timestamp,
-                request: RequestInfo {
-                    method: "CONNECT".to_string(),
-                    uri: raw_uri.to_string(),
-                    host: authority.to_string(),
-                    path: String::new(),
-                    version: version.clone(),
-                    headers: header_list(req.headers()),
-                },
+                request: connect_request_info(&raw_uri, version.clone(), &headers),
             });
             finish_failed(&ctx, id, started, message.clone());
         }
@@ -77,14 +78,7 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
         ctx.emit(ProxyEvent::Started {
             id,
             timestamp,
-            request: RequestInfo {
-                method: "CONNECT".to_string(),
-                uri: raw_uri.to_string(),
-                host: authority.to_string(),
-                path: String::new(),
-                version: version.clone(),
-                headers: header_list(req.headers()),
-            },
+            request: connect_request_info(&raw_uri, version.clone(), &headers),
         });
     }
 
@@ -99,6 +93,24 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
             return text_response(StatusCode::SERVICE_UNAVAILABLE, &message);
         }
     };
+
+    if let Some(ca) = ctx.tls_authority()
+        && policy.tls_intercept()
+        && !policy.tls_passthrough(authority.as_ref())
+    {
+        return intercept(
+            ctx,
+            req,
+            ca,
+            host,
+            authority_text,
+            tunnel_permit,
+            id,
+            started,
+            capture,
+            version,
+        );
+    }
 
     // Connect upstream before answering 200 so failures surface as a clean
     // proxy error rather than a tunnel that dies immediately.
@@ -176,6 +188,122 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
     let mut response = Response::new(empty_body());
     *response.status_mut() = StatusCode::OK;
     response
+}
+
+/// Answer the CONNECT, upgrade, then terminate TLS and serve HTTP/1.1 inside
+/// the tunnel. The upgrade work happens in a task: the intercepted exchange's
+/// lifetime is the TLS session, which can carry many requests.
+#[allow(clippy::too_many_arguments)]
+fn intercept(
+    ctx: Arc<Ctx>,
+    req: Request<Incoming>,
+    ca: Arc<CertificateAuthority>,
+    host: String,
+    authority: String,
+    tunnel_permit: OwnedSemaphorePermit,
+    id: u64,
+    started: Instant,
+    capture: bool,
+    version: String,
+) -> Response<ProxyBody> {
+    debug!("intercepting TLS for CONNECT {id} ({authority})");
+    let server_config = ca.server_config(Some(host));
+
+    if capture {
+        ctx.emit(ProxyEvent::ResponseHead {
+            id,
+            head: ResponseHead {
+                version,
+                status: 200,
+                reason: "Connection Established".to_string(),
+                headers: Vec::new(),
+            },
+        });
+    }
+
+    tokio::spawn(async move {
+        // The tunnel permit stays with the task that owns the TLS session.
+        let _permit = tunnel_permit;
+        let requests = Arc::new(AtomicU64::new(0));
+        let outcome =
+            serve_intercepted(ctx.clone(), req, server_config, authority, requests.clone()).await;
+        let count = requests.load(Ordering::Relaxed);
+        let result = match outcome {
+            Ok(()) => ExchangeResult::InterceptedTls { requests: count },
+            // A session that carried requests ended when the client went away;
+            // that is normal browsing, not a proxy failure.
+            Err(err) if count > 0 => {
+                debug!("CONNECT interception {id} ended after {count} requests: {err}");
+                ExchangeResult::InterceptedTls { requests: count }
+            }
+            Err(err) => {
+                warn!("CONNECT interception {id} failed: {err}");
+                ExchangeResult::Failed { error: err }
+            }
+        };
+        if capture {
+            let end = ExchangeEnd {
+                duration: started.elapsed(),
+                request_body: CapturedBody::default(),
+                result,
+            };
+            ctx.emit(ProxyEvent::Finished { id, end });
+        }
+    });
+
+    let mut response = Response::new(empty_body());
+    *response.status_mut() = StatusCode::OK;
+    response
+}
+
+/// Complete the client upgrade, perform the TLS handshake, and serve requests
+/// until the client closes the tunnel. `authority` is the CONNECT target and
+/// becomes the fallback when a decrypted request omits its `Host` header.
+async fn serve_intercepted(
+    ctx: Arc<Ctx>,
+    req: Request<Incoming>,
+    server_config: Arc<ServerConfig>,
+    authority: String,
+    requests: Arc<AtomicU64>,
+) -> Result<(), String> {
+    let upgraded = hyper::upgrade::on(req)
+        .await
+        .map_err(|err| format!("client upgrade failed: {err}"))?;
+    let acceptor = TlsAcceptor::from(server_config);
+    let tls = acceptor
+        .accept(TokioIo::new(upgraded))
+        .await
+        .map_err(|err| format!("TLS handshake failed: {err}"))?;
+    let io = TokioIo::new(tls);
+    debug!("TLS intercepted session established for {authority}");
+
+    let service = service_fn(move |req: Request<Incoming>| {
+        let ctx = ctx.clone();
+        let authority = authority.clone();
+        let requests = requests.clone();
+        async move {
+            requests.fetch_add(1, Ordering::Relaxed);
+            Ok::<_, Infallible>(forward::handle_intercepted(ctx, req, authority).await)
+        }
+    });
+
+    http1::Builder::new()
+        .preserve_header_case(true)
+        .serve_connection(io, service)
+        .await
+        .map_err(|err| format!("intercepted connection error: {err}"))
+}
+
+fn connect_request_info(uri: &http::Uri, version: String, headers: &HeaderList) -> RequestInfo {
+    RequestInfo {
+        method: "CONNECT".to_string(),
+        uri: uri.to_string(),
+        scheme: "https".to_string(),
+        host: uri.to_string(),
+        path: String::new(),
+        version,
+        headers: headers.clone(),
+    }
 }
 
 fn finish_failed(ctx: &Ctx, id: u64, started: Instant, message: String) {

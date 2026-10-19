@@ -1,8 +1,8 @@
 //! Site map derived from captured HTTP exchanges for the Target tab.
 //!
-//! The map groups plain-HTTP exchanges by host and path, keeping the latest
-//! exchange for each path. CONNECT tunnels are omitted because their contents
-//! are not decrypted yet.
+//! The map groups captured exchanges by host and path, keeping the latest
+//! exchange for each path. CONNECT tunnels are omitted because they carry no
+//! HTTP request of their own; decrypted requests appear as their own entries.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -136,6 +136,7 @@ mod tests {
                 request: RequestInfo {
                     method: method.to_string(),
                     uri: format!("http://{host}{path}"),
+                    scheme: "http".to_string(),
                     host: host.to_string(),
                     path: path.to_string(),
                     version: "HTTP/1.1".to_string(),

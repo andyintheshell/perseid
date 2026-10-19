@@ -53,6 +53,10 @@ fn main() -> Result<(), wiremoth_proxy::StartError> {
                         client_to_server,
                         server_to_client
                     ),
+                    ExchangeResult::InterceptedTls { requests } => println!(
+                        "{id:>4} == TLS-intercepted tunnel closed after {} ms ({requests} requests)",
+                        end.duration.as_millis(),
+                    ),
                     ExchangeResult::Failed { error } => {
                         println!("{id:>4} !! {error}")
                     }

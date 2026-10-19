@@ -1,7 +1,7 @@
 //! Editable interception queue and raw message editor.
 
 use egui::{Label, TextEdit};
-use wiremoth_proxy::{CapturedBody, InterceptItem, InterceptKind};
+use wiremoth_proxy::{CapturedBody, InterceptError, InterceptItem, InterceptKind};
 
 use super::widgets::{card, empty_state};
 use super::*;
@@ -131,7 +131,7 @@ impl WiremothApp {
                             .on_hover_text(if on {
                                 "Turn interception off. Already held messages still need Forward or Drop."
                             } else {
-                                "Hold plain-HTTP requests and responses before they are forwarded."
+                                "Hold HTTP and decrypted HTTPS messages before they are forwarded."
                             })
                             .clicked()
                         {
@@ -169,22 +169,33 @@ impl WiremothApp {
                         });
                     });
                     ui.add_space(4.0);
+                    let decrypting = self.tls_intercept && self.tls_ca.is_some();
+                    let holding_message = if self.intercept_enabled {
+                        if decrypting {
+                            "New HTTP and decrypted HTTPS messages will wait here."
+                        } else {
+                            "New HTTP messages will wait here. HTTPS stays an opaque CONNECT tunnel."
+                        }
+                    } else {
+                        "New HTTP traffic is forwarded automatically."
+                    };
                     ui.label(
-                        RichText::new(if self.intercept_enabled {
-                            "New plain-HTTP requests and responses will wait here."
-                        } else {
-                            "New plain-HTTP traffic is forwarded automatically."
-                        })
-                        .small()
-                        .color(if self.intercept_enabled {
-                            theme::ACCENT_DARK
-                        } else {
-                            theme::TEXT_MUTED
-                        }),
+                        RichText::new(holding_message)
+                            .small()
+                            .color(if self.intercept_enabled {
+                                theme::ACCENT_DARK
+                            } else {
+                                theme::TEXT_MUTED
+                            }),
                     );
+                    let https_hint = if decrypting {
+                        "HTTPS is decrypted into ordinary HTTP messages."
+                    } else {
+                        "HTTPS is CONNECT passthrough; enable decryption in Proxy > TLS."
+                    };
                     ui.label(
                         RichText::new(format!(
-                            "HTTPS is CONNECT passthrough. Bodies over {} are held for header edits only.",
+                            "{https_hint} Bodies over {} are held for header edits only.",
                             view::human_bytes(self.intercept_limit as u64)
                         ))
                         .small()
@@ -201,13 +212,13 @@ impl WiremothApp {
                         empty_state(
                             ui,
                             "Waiting for traffic",
-                            "The next plain-HTTP request or response will appear here before it is forwarded.",
+                            "The next HTTP request or response will appear here before it is forwarded.",
                         );
                     } else {
                         empty_state(
                             ui,
                             "Interception is off",
-                            "Click Intercept is off above to start holding plain-HTTP requests and responses.",
+                            "Click Intercept is off above to start holding HTTP requests and responses.",
                         );
                     }
                     return;
@@ -374,6 +385,16 @@ impl WiremothApp {
                     };
                     match result {
                         Ok(()) => {
+                            self.intercept_queue.pop_front();
+                            self.intercept_draft = None;
+                            self.sync_intercept_draft();
+                            ui.ctx().request_repaint();
+                        }
+                        // The exchange ended while the message was held; the
+                        // client closed the connection before a decision could
+                        // be delivered. Discard it so newer messages are not
+                        // stuck behind a dead one.
+                        Err(InterceptError::Closed | InterceptError::AlreadyResolved) => {
                             self.intercept_queue.pop_front();
                             self.intercept_draft = None;
                             self.sync_intercept_draft();

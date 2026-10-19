@@ -13,6 +13,8 @@ pub(crate) struct Policy {
     intercept_responses: bool,
     scope_enforce: bool,
     scope_rules: Vec<String>,
+    tls_intercept: bool,
+    tls_passthrough: Vec<String>,
     rules: Vec<CompiledRule>,
 }
 
@@ -30,6 +32,8 @@ impl Policy {
             intercept_responses: settings.intercept_responses,
             scope_enforce: settings.scope_enforce,
             scope_rules: settings.scope_rules.clone(),
+            tls_intercept: settings.tls_intercept,
+            tls_passthrough: settings.tls_passthrough.clone(),
             rules,
         })
     }
@@ -40,6 +44,8 @@ impl Policy {
             intercept_responses: self.intercept_responses,
             scope_enforce: self.scope_enforce,
             scope_rules: self.scope_rules.clone(),
+            tls_intercept: self.tls_intercept,
+            tls_passthrough: self.tls_passthrough.clone(),
             rules: self.rules.clone(),
         }
     }
@@ -52,6 +58,8 @@ pub(crate) struct PolicySnapshot {
     intercept_responses: bool,
     scope_enforce: bool,
     scope_rules: Vec<String>,
+    tls_intercept: bool,
+    tls_passthrough: Vec<String>,
     rules: Vec<CompiledRule>,
 }
 
@@ -72,6 +80,18 @@ impl PolicySnapshot {
 
     pub(crate) fn in_scope(&self, host: &str) -> bool {
         host_in_scope(host, self.scope_rules.iter().map(String::as_str))
+    }
+
+    /// Whether TLS interception is enabled in principle. The proxy still
+    /// requires a certificate authority before it can terminate TLS.
+    pub(crate) fn tls_intercept(&self) -> bool {
+        self.tls_intercept
+    }
+
+    /// Whether `host` is excluded from TLS interception. An empty list excludes
+    /// nothing.
+    pub(crate) fn tls_passthrough(&self, host: &str) -> bool {
+        any_host_matches(host, self.tls_passthrough.iter().map(String::as_str))
     }
 
     pub(crate) fn has_request_rules(&self) -> bool {
@@ -173,8 +193,6 @@ fn apply_body_rule(rule: &CompiledRule, body: &mut Vec<u8>) {
 /// Whether a host matches a scope. Rules are authorities; matching covers
 /// subdomains and ignores ports. An empty rule set includes everything.
 pub fn host_in_scope<'a>(host: &str, rules: impl IntoIterator<Item = &'a str>) -> bool {
-    let host = normalize_host(host);
-    let host_without_port = without_port(&host);
     let mut any_rule = false;
     let mut matched = false;
 
@@ -184,18 +202,32 @@ pub fn host_in_scope<'a>(host: &str, rules: impl IntoIterator<Item = &'a str>) -
             continue;
         }
         any_rule = true;
-        let rule_without_port = without_port(&rule);
-        if host == rule
-            || host_without_port == rule_without_port
-            || (!rule_without_port.is_empty()
-                && host_without_port.ends_with(&format!(".{rule_without_port}")))
-        {
+        if host_matches(host, &rule) {
             matched = true;
             break;
         }
     }
 
     !any_rule || matched
+}
+
+/// Whether a host matches any non-empty rule. Used for exclusions such as the
+/// TLS pass-through list, where an empty list matches nothing.
+pub(crate) fn any_host_matches<'a>(host: &str, rules: impl IntoIterator<Item = &'a str>) -> bool {
+    rules
+        .into_iter()
+        .any(|rule| !rule.trim().is_empty() && host_matches(host, rule))
+}
+
+fn host_matches(host: &str, rule: &str) -> bool {
+    let host = normalize_host(host);
+    let rule = normalize_host(rule);
+    let host_without_port = without_port(&host);
+    let rule_without_port = without_port(&rule);
+    host == rule
+        || host_without_port == rule_without_port
+        || (!rule_without_port.is_empty()
+            && host_without_port.ends_with(&format!(".{rule_without_port}")))
 }
 
 fn normalize_host(host: &str) -> String {
@@ -239,6 +271,36 @@ mod tests {
         let policy = Policy::from_settings(&settings).unwrap().snapshot();
         assert!(!policy.scope_enforced());
         assert!(policy.in_scope("anything.test"));
+    }
+
+    #[test]
+    fn tls_interception_is_off_until_enabled() {
+        let policy = Policy::from_settings(&settings()).unwrap().snapshot();
+        assert!(!policy.tls_intercept());
+
+        let mut enabled = settings();
+        enabled.tls_intercept = true;
+        let policy = Policy::from_settings(&enabled).unwrap().snapshot();
+        assert!(policy.tls_intercept());
+    }
+
+    #[test]
+    fn tls_passthrough_matches_subdomains_and_ignores_ports() {
+        let mut settings = settings();
+        settings.tls_passthrough = vec!["banking.example".to_string(), "10.0.0.5".to_string()];
+        let policy = Policy::from_settings(&settings).unwrap().snapshot();
+
+        assert!(policy.tls_passthrough("banking.example"));
+        assert!(policy.tls_passthrough("banking.example:443"));
+        assert!(policy.tls_passthrough("login.banking.example"));
+        assert!(policy.tls_passthrough("10.0.0.5:8443"));
+        assert!(!policy.tls_passthrough("example.com"));
+        assert!(!policy.tls_passthrough("notbanking.example"));
+
+        // An empty list excludes nothing, so every tunnel is a candidate.
+        settings.tls_passthrough.clear();
+        let policy = Policy::from_settings(&settings).unwrap().snapshot();
+        assert!(!policy.tls_passthrough("example.com"));
     }
 
     #[test]

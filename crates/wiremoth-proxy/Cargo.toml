@@ -16,12 +16,23 @@ bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
+hyper-rustls.workspace = true
 hyper-util.workspace = true
 log.workspace = true
+rcgen.workspace = true
 regex.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+rustls-pemfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 env_logger = "0.11"
+rcgen.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio-rustls.workspace = true

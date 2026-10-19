@@ -4,6 +4,7 @@
 
 mod app;
 mod branding;
+mod ca_store;
 mod decode;
 mod history;
 mod memory;
@@ -49,6 +50,20 @@ pub struct Args {
     /// Start without the proxy (UI only).
     #[arg(long)]
     pub no_proxy: bool,
+
+    /// Directory holding the TLS interception certificate authority
+    /// (`wiremoth-ca.pem` and its private key). Defaults to
+    /// `$WIREMOTH_CA_DIR`, then `$XDG_DATA_HOME/wiremoth`.
+    #[arg(long, value_name = "DIR")]
+    pub ca_dir: Option<std::path::PathBuf>,
+
+    /// Start with HTTPS interception enabled (requires an existing CA).
+    #[arg(long)]
+    pub tls_intercept: bool,
+
+    /// Host that is never TLS-intercepted; repeat the flag for more hosts.
+    #[arg(long, value_name = "HOST")]
+    pub tls_passthrough: Vec<String>,
 
     /// Scale for the whole UI, e.g. 2 on a HiDPI display. By default the
     /// system scale is used; on desktops that report no scaling to the
