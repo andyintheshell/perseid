@@ -28,9 +28,19 @@ impl TrackingAllocator {
     }
 
     fn shrank(&self, bytes: usize) {
-        let _ = HEAP_IN_USE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            Some(current.saturating_sub(bytes))
-        });
+        let mut current = HEAP_IN_USE.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_sub(bytes);
+            match HEAP_IN_USE.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
     }
 }
 
