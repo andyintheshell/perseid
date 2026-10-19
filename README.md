@@ -24,11 +24,12 @@ application testing — with no embedded browser and memory bounded by design.
 ## What works today
 
 - Loopback HTTP/1.1 proxy with configurable listen address, capture limit,
-  and history bound.
+  and count/byte history bounds.
 - Burp-style workspace with **Target**, **Proxy**, **Intruder**, and
   **Repeater** tabs in the familiar order, in a warm light theme.
-- Bounded in-memory history with filtering, a view-only scope filter, and
-  keyboard navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`).
+- Bounded in-memory history (exchange count and total captured-body bytes)
+  with filtering, a view-only scope filter, and keyboard navigation (`j`/`k`,
+  arrows, `Home`/`End`, `Ctrl`+`F`).
 - Live **Memory** indicator in the status bar with allocator memory in use;
   click it for the current and peak values and a rolling graph.
 - Request/response tabs with Raw, Headers, and Hex views, truncation markers,

@@ -5,13 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "A lightweight, keyboard-first workbench for inspecting HTTP traffic"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["http", "proxy", "security", "egui", "burp"]
+categories = ["gui", "network-programming", "development-tools::testing"]
 
 [[bin]]
 name = "wiremoth"
 path = "src/main.rs"
 
 [dependencies]
-anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 eframe.workspace = true
@@ -21,4 +25,4 @@ env_logger.workspace = true
 image.workspace = true
 libc.workspace = true
 log.workspace = true
-wiremoth-proxy = { path = "../wiremoth-proxy" }
+wiremoth-proxy = { version = "0.1.0", path = "../wiremoth-proxy" }

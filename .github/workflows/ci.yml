@@ -40,3 +40,6 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace
+
+      - name: Check packaging
+        run: cargo package --workspace --allow-dirty --locked

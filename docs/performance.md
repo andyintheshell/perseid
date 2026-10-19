@@ -30,6 +30,13 @@ The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
 stayed under 109 MiB peak even though the wire body was 8 MiB, because capture
 stops at 1 MiB and the detail views render bounded previews.
 
+History also has a total retained-body budget. The default is 256 MiB across
+request and response bodies (`--history-bytes`), so a worst case of 2,000
+exchanges with two full 1 MiB bodies each cannot retain the full 4 GiB. The
+oldest exchanges are evicted when either the exchange count or the byte budget
+is reached. The M0 workload retained only 125 KiB, so this budget did not bind
+in the measurements above.
+
 ### Heap in use and resident memory
 
 The status bar's figure is **heap in use**: the bytes currently held by

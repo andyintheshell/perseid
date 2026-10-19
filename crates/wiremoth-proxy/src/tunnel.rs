@@ -5,6 +5,7 @@
 //! visible in history, but its contents are not.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Instant, SystemTime};
 
 use http::{Request, Response, StatusCode};
@@ -23,49 +24,59 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
     let id = ctx.next_id();
     let started = Instant::now();
     let timestamp = SystemTime::now();
+    let capture = ctx.capture_enabled();
     let version = version_str(req.version());
     let raw_uri = req.uri().clone();
 
     let Some(authority) = raw_uri.authority().cloned() else {
         let message = "CONNECT requires a host:port target".to_string();
-        ctx.emit(ProxyEvent::Started {
-            id,
-            timestamp,
-            request: RequestInfo {
-                method: "CONNECT".to_string(),
-                uri: raw_uri.to_string(),
-                host: raw_uri.to_string(),
-                path: String::new(),
-                version,
-                headers: header_list(req.headers()),
-            },
-        });
-        let end = ExchangeEnd {
-            duration: started.elapsed(),
-            request_body: CapturedBody::default(),
-            result: ExchangeResult::Failed {
-                error: message.clone(),
-            },
-        };
-        ctx.emit(ProxyEvent::Finished { id, end });
+        if capture {
+            ctx.emit(ProxyEvent::Started {
+                id,
+                timestamp,
+                request: RequestInfo {
+                    method: "CONNECT".to_string(),
+                    uri: raw_uri.to_string(),
+                    host: raw_uri.to_string(),
+                    path: String::new(),
+                    version,
+                    headers: header_list(req.headers()),
+                },
+            });
+            finish_failed(&ctx, id, started, message.clone());
+        }
         return text_response(StatusCode::BAD_REQUEST, &message);
     };
 
     let host = authority.host().to_string();
     let port = authority.port_u16().unwrap_or(443);
 
-    ctx.emit(ProxyEvent::Started {
-        id,
-        timestamp,
-        request: RequestInfo {
-            method: "CONNECT".to_string(),
-            uri: raw_uri.to_string(),
-            host: authority.to_string(),
-            path: String::new(),
-            version: version.clone(),
-            headers: header_list(req.headers()),
-        },
-    });
+    if capture {
+        ctx.emit(ProxyEvent::Started {
+            id,
+            timestamp,
+            request: RequestInfo {
+                method: "CONNECT".to_string(),
+                uri: raw_uri.to_string(),
+                host: authority.to_string(),
+                path: String::new(),
+                version: version.clone(),
+                headers: header_list(req.headers()),
+            },
+        });
+    }
+
+    let tunnel_permit = match ctx.tunnel_slots.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            ctx.rejected_tunnels.fetch_add(1, Ordering::Relaxed);
+            let message = "CONNECT tunnel limit reached".to_string();
+            if capture {
+                finish_failed(&ctx, id, started, message.clone());
+            }
+            return text_response(StatusCode::SERVICE_UNAVAILABLE, &message);
+        }
+    };
 
     // Connect upstream before answering 200 so failures surface as a clean
     // proxy error rather than a tunnel that dies immediately.
@@ -78,28 +89,36 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
         Ok(Ok(stream)) => stream,
         Ok(Err(err)) => {
             let message = format!("could not connect to {host}:{port}: {err}");
-            finish_failed(&ctx, id, started, message.clone());
+            if capture {
+                finish_failed(&ctx, id, started, message.clone());
+            }
             return text_response(StatusCode::BAD_GATEWAY, &message);
         }
         Err(_) => {
             let message = format!("connection to {host}:{port} timed out");
-            finish_failed(&ctx, id, started, message.clone());
+            if capture {
+                finish_failed(&ctx, id, started, message.clone());
+            }
             return text_response(StatusCode::GATEWAY_TIMEOUT, &message);
         }
     };
     let _ = upstream.set_nodelay(true);
 
-    ctx.emit(ProxyEvent::ResponseHead {
-        id,
-        head: ResponseHead {
-            version,
-            status: 200,
-            reason: "Connection Established".to_string(),
-            headers: Vec::new(),
-        },
-    });
+    if capture {
+        ctx.emit(ProxyEvent::ResponseHead {
+            id,
+            head: ResponseHead {
+                version,
+                status: 200,
+                reason: "Connection Established".to_string(),
+                headers: Vec::new(),
+            },
+        });
+    }
 
     tokio::spawn(async move {
+        // The tunnel permit stays with the task that owns the upgraded socket.
+        let _permit = tunnel_permit;
         let result = match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
                 debug!("CONNECT upgrade resolved for {id}");
@@ -122,18 +141,19 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
                 error: format!("client upgrade failed: {err}"),
             },
         };
-        let end = ExchangeEnd {
-            duration: started.elapsed(),
-            request_body: CapturedBody::default(),
-            result,
-        };
-        ctx.emit(ProxyEvent::Finished { id, end });
+        if capture {
+            let end = ExchangeEnd {
+                duration: started.elapsed(),
+                request_body: CapturedBody::default(),
+                result,
+            };
+            ctx.emit(ProxyEvent::Finished { id, end });
+        }
     });
 
-    Response::builder()
-        .status(StatusCode::OK)
-        .body(empty_body())
-        .expect("valid CONNECT response")
+    let mut response = Response::new(empty_body());
+    *response.status_mut() = StatusCode::OK;
+    response
 }
 
 fn finish_failed(ctx: &Ctx, id: u64, started: Instant, message: String) {

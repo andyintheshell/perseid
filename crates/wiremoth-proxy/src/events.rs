@@ -76,9 +76,25 @@ impl CapturedBody {
         self.complete
     }
 
-    /// Whether the body had zero bytes.
+    /// Whether the body was observed to have zero bytes.
+    ///
+    /// An unread or incomplete body is not empty: it may still grow.
     pub fn is_empty(&self) -> bool {
-        self.total == 0
+        self.complete && self.total == 0
+    }
+
+    /// Build a complete, untruncated body from bytes that are already bounded.
+    ///
+    /// The streaming capture path builds bodies incrementally; this constructor
+    /// is useful for tools and tests that already hold a bounded body.
+    pub fn from_bytes(data: Vec<u8>) -> Self {
+        let total = data.len() as u64;
+        Self {
+            data,
+            total,
+            truncated: false,
+            complete: true,
+        }
     }
 
     pub(crate) fn append(&mut self, chunk: &[u8], limit: usize) {
@@ -185,5 +201,18 @@ mod tests {
         body.append(b"", 4);
         assert!(!body.is_truncated());
         assert_eq!(body.data(), b"abcd");
+    }
+
+    #[test]
+    fn unread_body_is_not_empty() {
+        let mut body = CapturedBody::default();
+        assert!(!body.is_empty());
+        body.mark_complete();
+        assert!(body.is_empty());
+
+        let body = CapturedBody::from_bytes(Vec::new());
+        assert!(body.is_empty());
+        assert!(!CapturedBody::from_bytes(b"x".to_vec()).is_empty());
+        assert!(!CapturedBody::default().is_empty());
     }
 }

@@ -19,4 +19,9 @@
 
 These SVGs use live text with a system-font fallback (`Inter`). For critical print usage, convert the text to vector outlines using your preferred vector editor. No fonts are bundled.
 
+The application embeds `crates/wiremoth/assets/icon-128.png` and
+`crates/wiremoth/assets/logo-light.png`. Keep those packaged copies in sync
+with `wiremoth-icon-128.png` and `wiremoth-logo-light.png` when the brand
+assets change.
+
 This is a first creative concept, not a legal trademark or distinctiveness clearance.

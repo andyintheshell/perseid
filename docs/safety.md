@@ -16,7 +16,12 @@ an arbitrary host, and scope is not yet enforced on traffic (see below).
   have a specific reason and understand the exposure.
 - Captured request and response bodies are capped by `--capture-limit`
   (1 MiB per message by default) with explicit truncation markers.
-- History is bounded by `--history-limit` (2000 exchanges by default).
+- History is bounded by `--history-limit` (2000 exchanges by default) and
+  `--history-bytes` (256 MiB of retained request/response body bytes by
+  default). The oldest exchanges are evicted when either bound is reached.
+- The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
+  once by default. Excess connections are closed; excess CONNECT requests get
+  a 503 response. Both limits are library configuration, not browser settings.
 - Scope filtering is currently view-only: it hides out-of-scope hosts from the
   Target site map and HTTP history, but it does not block, drop, or modify
   traffic. Treat it as an analysis aid until interception enforcement lands.

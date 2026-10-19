@@ -27,6 +27,7 @@ proxy is running and lets you retry if the address is already in use.
 --listen <ADDR>         address for the proxy to listen on [default: 127.0.0.1:8080]
 --capture-limit <BYTES> maximum body bytes kept per request/response [default: 1048576]
 --history-limit <N>     maximum number of exchanges kept in memory [default: 2000]
+--history-bytes <BYTES> maximum total body bytes retained by history [default: 268435456]
 --no-proxy              start the UI without the proxy
 --ui-scale <FACTOR>     UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
 ```
@@ -83,8 +84,10 @@ leaves the filter. Clicking a row also selects it.
 - Requests and responses are captured and forwarded, not paused for editing.
 - Scope filtering is view-only. It does not block, drop, or modify traffic.
 - Repeater cannot edit or send requests yet; Intruder has no engine yet.
-- History is in memory only. It is bounded by `--history-limit`; captured
-  bodies are capped per message by `--capture-limit`.
+- History is in memory only. It is bounded by `--history-limit` and
+  `--history-bytes`; captured bodies are capped per message by
+  `--capture-limit`. The oldest exchanges are evicted when either history
+  bound is reached.
 - There is no disk persistence, project file, or settings persistence yet.
 
 ## HiDPI displays

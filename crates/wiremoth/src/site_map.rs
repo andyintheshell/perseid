@@ -150,9 +150,10 @@ mod tests {
     use wiremoth_proxy::{ProxyEvent, RequestInfo};
 
     use super::*;
+    use crate::history::DEFAULT_HISTORY_BYTES;
 
     fn history(entries: &[(&str, &str, &str)]) -> History {
-        let mut history = History::new(100);
+        let mut history = History::new(100, DEFAULT_HISTORY_BYTES);
         for (index, (method, host, path)) in entries.iter().enumerate() {
             history.apply(ProxyEvent::Started {
                 id: index as u64 + 1,

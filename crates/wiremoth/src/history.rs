@@ -9,6 +9,13 @@ use std::time::{Duration, SystemTime};
 
 use wiremoth_proxy::{CapturedBody, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
 
+/// Default cap on captured request/response body bytes retained by history.
+///
+/// The exchange-count limit alone allowed a worst case of roughly 4 GiB with
+/// 1 MiB per body and 2,000 exchanges. This budget bounds the bodies themselves;
+/// exchange metadata and display caches add a small amount on top.
+pub const DEFAULT_HISTORY_BYTES: usize = 256 * 1024 * 1024;
+
 /// Where an exchange is in its lifecycle.
 #[derive(Debug)]
 pub enum Phase {
@@ -103,17 +110,21 @@ pub struct History {
     items: HashMap<u64, HistoryItem>,
     order: VecDeque<u64>,
     limit: usize,
+    byte_limit: usize,
+    retained_bytes: usize,
     evicted: u64,
     in_flight: usize,
     revision: u64,
 }
 
 impl History {
-    pub fn new(limit: usize) -> Self {
+    pub fn new(limit: usize, byte_limit: usize) -> Self {
         Self {
             items: HashMap::new(),
             order: VecDeque::new(),
             limit: limit.max(1),
+            byte_limit: byte_limit.max(1),
+            retained_bytes: 0,
             evicted: 0,
             in_flight: 0,
             revision: 0,
@@ -133,17 +144,57 @@ impl History {
         self.in_flight
     }
 
-    /// Number of entries dropped because of the history limit.
+    /// Number of entries dropped because of the history limits.
     pub fn evicted(&self) -> u64 {
         self.evicted
+    }
+
+    /// Captured request/response body bytes currently retained.
+    pub fn retained_bytes(&self) -> usize {
+        self.retained_bytes
     }
 
     pub fn clear(&mut self) {
         self.items.clear();
         self.order.clear();
+        self.retained_bytes = 0;
         self.evicted = 0;
         self.in_flight = 0;
         self.revision += 1;
+    }
+
+    /// Resolve every in-flight exchange as failed.
+    ///
+    /// This is a recovery path for a lossy event channel or a stopped proxy:
+    /// the terminal event may never arrive, but a row must not stay in flight
+    /// forever. A later [`ProxyEvent::Finished`] for the same id still updates
+    /// the row normally.
+    pub fn interrupt_in_flight(&mut self, error: &str) -> usize {
+        if self.in_flight == 0 {
+            return 0;
+        }
+        let now = SystemTime::now();
+        let mut interrupted = 0;
+        for id in &self.order {
+            let Some(item) = self.items.get_mut(id) else {
+                continue;
+            };
+            if item.is_in_flight() {
+                let duration = now.duration_since(item.timestamp).unwrap_or_default();
+                item.phase = Phase::Finished {
+                    duration,
+                    result: ExchangeResult::Failed {
+                        error: error.to_string(),
+                    },
+                };
+                interrupted += 1;
+            }
+        }
+        if interrupted > 0 {
+            self.in_flight = 0;
+            self.revision += 1;
+        }
+        interrupted
     }
 
     pub fn get(&self, id: u64) -> Option<&HistoryItem> {
@@ -177,16 +228,7 @@ impl History {
                 );
                 self.order.push_back(id);
                 self.in_flight += 1;
-                while self.order.len() > self.limit {
-                    if let Some(oldest) = self.order.pop_front()
-                        && let Some(item) = self.items.remove(&oldest)
-                    {
-                        if item.is_in_flight() {
-                            self.in_flight = self.in_flight.saturating_sub(1);
-                        }
-                        self.evicted += 1;
-                    }
-                }
+                self.evict_to_limits();
             }
             ProxyEvent::ResponseHead { id, head } => {
                 if let Some(item) = self.items.get_mut(&id) {
@@ -195,18 +237,47 @@ impl History {
             }
             ProxyEvent::Finished { id, end } => {
                 if let Some(item) = self.items.get_mut(&id) {
+                    let previous_bytes = item_body_bytes(item);
                     item.request_body = end.request_body;
                     item.phase = Phase::Finished {
                         duration: end.duration,
                         result: end.result,
                     };
+                    let current_bytes = item_body_bytes(item);
+                    self.retained_bytes = self
+                        .retained_bytes
+                        .saturating_sub(previous_bytes)
+                        .saturating_add(current_bytes);
                     self.in_flight = self.in_flight.saturating_sub(1);
+                    self.evict_to_limits();
                 }
             }
         }
         self.revision += 1;
         id
     }
+
+    fn evict_to_limits(&mut self) {
+        while self.order.len() > self.limit
+            || (self.retained_bytes > self.byte_limit && self.order.len() > 1)
+        {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            let Some(item) = self.items.remove(&oldest) else {
+                continue;
+            };
+            self.retained_bytes = self.retained_bytes.saturating_sub(item_body_bytes(&item));
+            if item.is_in_flight() {
+                self.in_flight = self.in_flight.saturating_sub(1);
+            }
+            self.evicted += 1;
+        }
+    }
+}
+
+fn item_body_bytes(item: &HistoryItem) -> usize {
+    item.request_body.data().len() + item.response_body().map_or(0, |body| body.data().len())
 }
 
 #[cfg(test)]
@@ -231,13 +302,17 @@ mod tests {
     }
 
     fn finished(id: u64) -> ProxyEvent {
+        finished_with_bodies(id, Vec::new(), Vec::new())
+    }
+
+    fn finished_with_bodies(id: u64, request: Vec<u8>, response: Vec<u8>) -> ProxyEvent {
         ProxyEvent::Finished {
             id,
             end: ExchangeEnd {
                 duration: Duration::from_millis(5),
-                request_body: CapturedBody::default(),
+                request_body: CapturedBody::from_bytes(request),
                 result: ExchangeResult::Response {
-                    body: CapturedBody::default(),
+                    body: CapturedBody::from_bytes(response),
                 },
             },
         }
@@ -245,7 +320,7 @@ mod tests {
 
     #[test]
     fn folds_events_into_items() {
-        let mut history = History::new(10);
+        let mut history = History::new(10, DEFAULT_HISTORY_BYTES);
         history.apply(started(1, "GET"));
         assert_eq!(history.len(), 1);
         assert_eq!(history.in_flight(), 1);
@@ -272,7 +347,7 @@ mod tests {
 
     #[test]
     fn evicts_oldest_beyond_limit() {
-        let mut history = History::new(2);
+        let mut history = History::new(2, DEFAULT_HISTORY_BYTES);
         for id in 1..=5 {
             history.apply(started(id, "GET"));
         }
@@ -286,12 +361,62 @@ mod tests {
 
     #[test]
     fn finisher_after_eviction_is_ignored() {
-        let mut history = History::new(1);
+        let mut history = History::new(1, DEFAULT_HISTORY_BYTES);
         history.apply(started(1, "GET"));
         history.apply(started(2, "GET"));
         history.apply(finished(1));
         assert_eq!(history.len(), 1);
         assert_eq!(history.in_flight(), 1);
         assert!(history.get(2).unwrap().is_in_flight());
+    }
+
+    #[test]
+    fn byte_budget_evicts_oldest_bodies() {
+        let mut history = History::new(10, 20);
+
+        history.apply(started(1, "GET"));
+        history.apply(finished_with_bodies(1, vec![0; 8], vec![0; 8]));
+        assert_eq!(history.retained_bytes(), 16);
+        assert_eq!(history.len(), 1);
+
+        history.apply(started(2, "GET"));
+        history.apply(finished_with_bodies(2, vec![0; 8], vec![0; 8]));
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.retained_bytes(), 16);
+        assert!(history.get(1).is_none());
+        assert!(history.get(2).is_some());
+        assert_eq!(history.evicted(), 1);
+
+        history.apply(started(3, "GET"));
+        history.apply(finished_with_bodies(3, vec![0; 4], vec![0; 4]));
+        assert_eq!(history.retained_bytes(), 8);
+        assert_eq!(history.len(), 1);
+        assert!(history.get(3).is_some());
+    }
+
+    #[test]
+    fn single_exchange_can_exceed_byte_budget_without_vanishing() {
+        let mut history = History::new(10, 4);
+        history.apply(started(1, "GET"));
+        history.apply(finished_with_bodies(1, vec![0; 8], Vec::new()));
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.retained_bytes(), 8);
+    }
+
+    #[test]
+    fn interrupts_in_flight_rows_and_accepts_late_finish() {
+        let mut history = History::new(10, DEFAULT_HISTORY_BYTES);
+        history.apply(started(1, "GET"));
+        history.apply(started(2, "GET"));
+
+        assert_eq!(history.interrupt_in_flight("events dropped"), 2);
+        assert_eq!(history.in_flight(), 0);
+        assert_eq!(history.get(1).unwrap().error(), Some("events dropped"));
+        assert_eq!(history.get(2).unwrap().error(), Some("events dropped"));
+
+        history.apply(finished(1));
+        assert_eq!(history.in_flight(), 0);
+        assert!(history.get(1).unwrap().error().is_none());
+        assert_eq!(history.interrupt_in_flight("again"), 0);
     }
 }

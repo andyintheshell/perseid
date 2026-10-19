@@ -14,6 +14,8 @@ use std::net::SocketAddr;
 
 use clap::Parser;
 
+use crate::history::DEFAULT_HISTORY_BYTES;
+
 /// Track live heap bytes for the status bar memory figure.
 #[global_allocator]
 static GLOBAL_ALLOCATOR: memory::TrackingAllocator = memory::TrackingAllocator;
@@ -34,6 +36,10 @@ pub struct Args {
     /// Maximum number of exchanges kept in the in-memory history.
     #[arg(long, value_name = "N", default_value_t = 2000)]
     pub history_limit: usize,
+
+    /// Maximum total request/response body bytes retained by history.
+    #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_HISTORY_BYTES)]
+    pub history_bytes: usize,
 
     /// Start without the proxy (UI only).
     #[arg(long)]

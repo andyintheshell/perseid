@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use wiremoth_proxy::{ExchangeResult, Proxy, ProxyConfig, ProxyEvent, RequestInfo};
+use tokio::sync::oneshot;
+use wiremoth_proxy::{ExchangeResult, Proxy, ProxyConfig, ProxyEvent, RequestInfo, StartError};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -100,6 +101,42 @@ async fn read_http_head(stream: &mut TcpStream) -> String {
         }
     }
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Read until the accumulated response contains `needle`.
+async fn read_until_contains(stream: &mut TcpStream, needle: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    while !buf.windows(needle.len()).any(|window| window == needle) {
+        let n = tokio::time::timeout(TIMEOUT, stream.read(&mut chunk))
+            .await
+            .expect("proxy should answer before the test timeout")
+            .expect("proxy connection should remain readable");
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    buf
+}
+
+/// Origin that sends a response head plus `hello`, waits for a release signal,
+/// then sends `world`. This gives tests a deterministic in-flight exchange.
+async fn spawn_chunked_origin() -> (SocketAddr, oneshot::Sender<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (release_tx, release_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let _ = read_request(&mut stream).await;
+        let _ = stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhello")
+            .await;
+        let _ = release_rx.await;
+        let _ = stream.write_all(b"world").await;
+        let _ = stream.shutdown().await;
+    });
+    (addr, release_tx)
 }
 
 /// Collect events until the exchange reports `Finished`.
@@ -338,4 +375,245 @@ async fn failed_upstream_connect_yields_502_and_failed_event() {
         }
         other => panic!("expected a failed result, got {other:?}"),
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pausing_capture_does_not_strand_an_in_flight_exchange() {
+    let (origin, release) = spawn_chunked_origin().await;
+    let proxy = test_proxy(64 * 1024, 64);
+    let mut stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let request =
+        format!("GET http://{origin}/slow HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let seen = read_until_contains(&mut stream, b"hello").await;
+    assert!(
+        seen.windows(5).any(|window| window == b"hello"),
+        "response did not contain the first chunk"
+    );
+
+    // Consume the start of the exchange, then pause before its body finishes.
+    let mut early = Vec::new();
+    let deadline = Instant::now() + TIMEOUT;
+    while Instant::now() < deadline {
+        let event = proxy
+            .recv_timeout(Duration::from_millis(100))
+            .expect("started/head events should arrive");
+        let saw_head = matches!(event, ProxyEvent::ResponseHead { .. });
+        early.push(event);
+        if saw_head {
+            break;
+        }
+    }
+    assert!(
+        early
+            .iter()
+            .any(|event| matches!(event, ProxyEvent::Started { .. }))
+    );
+    assert!(
+        early
+            .iter()
+            .any(|event| matches!(event, ProxyEvent::ResponseHead { .. }))
+    );
+
+    proxy.set_paused(true);
+    assert!(proxy.is_paused());
+    release.send(()).unwrap();
+
+    let mut rest = Vec::new();
+    tokio::time::timeout(TIMEOUT, stream.read_to_end(&mut rest))
+        .await
+        .expect("proxy should finish forwarding after release")
+        .unwrap();
+    assert!(rest.ends_with(b"world"), "rest was: {rest:?}");
+
+    let finished = drain_until_finished(&proxy);
+    match &finished_of(&finished).result {
+        ExchangeResult::Response { body } => {
+            assert_eq!(body.data(), b"helloworld");
+            assert_eq!(body.total_len(), 10);
+            assert!(body.is_complete());
+        }
+        other => panic!("expected a response result, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paused_capture_ignores_new_exchanges_until_resumed() {
+    let origin = spawn_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let proxy = test_proxy(64 * 1024, 64);
+    proxy.set_paused(true);
+
+    let request = format!(
+        "GET http://{origin}/ignored HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n"
+    );
+    let response = raw_exchange(proxy.local_addr(), &request).await;
+    assert_eq!(body_after_head(&response), b"ok");
+    assert!(
+        proxy
+            .recv_timeout(Duration::from_millis(250))
+            .is_err_and(|err| err == std::sync::mpsc::RecvTimeoutError::Timeout),
+        "paused capture should not emit events for a new exchange"
+    );
+    assert_eq!(proxy.dropped_events(), 0);
+
+    proxy.set_paused(false);
+    let request = format!(
+        "GET http://{origin}/resumed HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n"
+    );
+    let response = raw_exchange(proxy.local_addr(), &request).await;
+    assert_eq!(body_after_head(&response), b"ok");
+
+    let events = drain_until_finished(&proxy);
+    assert_eq!(started_of(&events).path, "/resumed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rejects_connections_above_the_limit() {
+    let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr = origin.local_addr().unwrap();
+    let origin_task = tokio::spawn(async move {
+        let (_stream, _) = origin.accept().await.unwrap();
+        tokio::time::sleep(TIMEOUT * 2).await;
+    });
+
+    let proxy = Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().expect("valid test address"),
+        max_connections: 1,
+        max_tunnels: 1,
+        ..ProxyConfig::default()
+    })
+    .expect("proxy should start on an ephemeral port");
+
+    let mut first = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let request = format!("GET http://{origin_addr}/hold HTTP/1.1\r\nHost: {origin_addr}\r\n\r\n");
+    first.write_all(request.as_bytes()).await.unwrap();
+    let first_event = proxy
+        .recv_timeout(TIMEOUT)
+        .expect("first request should start");
+    assert!(matches!(first_event, ProxyEvent::Started { .. }));
+
+    let mut second = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    second
+        .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        .await
+        .unwrap();
+    let mut buf = Vec::new();
+    let _ = tokio::time::timeout(TIMEOUT, second.read_to_end(&mut buf))
+        .await
+        .expect("rejected connection should close promptly");
+    assert!(
+        buf.is_empty(),
+        "rejected connection should not receive a response"
+    );
+    assert_eq!(proxy.rejected_connections(), 1);
+
+    drop(first);
+    origin_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rejects_connect_tunnels_above_the_limit() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let (mut read_half, mut write_half) = stream.split();
+                let _ = tokio::io::copy(&mut read_half, &mut write_half).await;
+            });
+        }
+    });
+
+    let proxy = Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().expect("valid test address"),
+        max_connections: 4,
+        max_tunnels: 1,
+        ..ProxyConfig::default()
+    })
+    .expect("proxy should start on an ephemeral port");
+
+    let mut first = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let connect = format!("CONNECT {echo_addr} HTTP/1.1\r\nHost: {echo_addr}\r\n\r\n");
+    first.write_all(connect.as_bytes()).await.unwrap();
+    let first_head = read_http_head(&mut first).await;
+    assert!(
+        first_head.starts_with("HTTP/1.1 200"),
+        "unexpected first CONNECT response: {first_head}"
+    );
+    first.write_all(b"ping").await.unwrap();
+    let mut echoed = [0u8; 4];
+    tokio::time::timeout(TIMEOUT, first.read_exact(&mut echoed))
+        .await
+        .expect("first tunnel should relay bytes")
+        .unwrap();
+    assert_eq!(&echoed, b"ping");
+
+    let mut second = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    second.write_all(connect.as_bytes()).await.unwrap();
+    let second_head = read_http_head(&mut second).await;
+    assert!(
+        second_head.starts_with("HTTP/1.1 503"),
+        "unexpected limited CONNECT response: {second_head}"
+    );
+    assert_eq!(proxy.rejected_tunnels(), 1);
+
+    let events = drain_until_finished(&proxy);
+    match &finished_of(&events).result {
+        ExchangeResult::Failed { error } => {
+            assert!(error.contains("tunnel limit"), "error was: {error}")
+        }
+        other => panic!("expected a failed result, got {other:?}"),
+    }
+
+    drop(first);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_targets_get_proxy_errors_instead_of_panics() {
+    let proxy = test_proxy(64 * 1024, 64);
+    let response = raw_exchange(
+        proxy.local_addr(),
+        "GET / HTTP/1.1\r\nHost: bad host\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.starts_with("HTTP/1.1 400"), "response was: {text}");
+    let events = drain_until_finished(&proxy);
+    match &finished_of(&events).result {
+        ExchangeResult::Failed { error } => assert!(error.contains("Host")),
+        other => panic!("expected a failed result, got {other:?}"),
+    }
+
+    let response = raw_exchange(
+        proxy.local_addr(),
+        "GET ftp://example.com/ HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.starts_with("HTTP/1.1 501"), "response was: {text}");
+    let events = drain_until_finished(&proxy);
+    assert!(matches!(
+        finished_of(&events).result,
+        ExchangeResult::Failed { .. }
+    ));
+}
+
+#[test]
+fn start_reports_bind_conflicts() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let error = Proxy::start(ProxyConfig::new(addr)).unwrap_err();
+    assert!(matches!(error, StartError::Bind { addr: bound, .. } if bound == addr));
+}
+
+#[test]
+fn start_returns_only_after_the_proxy_is_running() {
+    let proxy = Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().expect("valid test address"),
+        ..ProxyConfig::default()
+    })
+    .expect("proxy should start on an ephemeral port");
+    assert!(proxy.is_running());
+    assert!(proxy.local_addr().port() > 0);
 }
