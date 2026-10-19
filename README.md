@@ -15,30 +15,39 @@ the responses. It is built for web security learning, CTFs, and authorized
 application testing — with no embedded browser and memory bounded by design.
 
 > [!IMPORTANT]
-> **Status: early prototype.** A loopback-only HTTP/1.1 proxy and a Burp-style
-> Target/Proxy workspace work today. HTTPS is tunneled as TLS passthrough;
-> local-CA interception is next. See the [roadmap](docs/roadmap.md).
+> **Status: early prototype.** A loopback-only HTTP/1.1 proxy with editable
+> request/response interception, opt-in scope enforcement, match/replace rules,
+> and a Burp-style Target/Proxy workspace work today. HTTPS is tunneled as TLS
+> passthrough; local-CA interception is next. See the [roadmap](docs/roadmap.md).
 
 ![Wiremoth HTTP history with request and response detail](docs/images/wiremoth-main.png)
 
 ## What works today
 
 - Loopback HTTP/1.1 proxy with configurable listen address, capture limit,
-  and count/byte history bounds.
+  interception limit, and count/byte history bounds.
+- Editable request and response interception: hold plain-HTTP messages, edit
+  the head and buffered body, then forward or drop. Bodies over the intercept
+  limit stay header-only instead of being silently modified.
+- Opt-in scope enforcement for HTTP and `CONNECT`, returning `403` for
+  out-of-scope hosts. An empty scope allows every host, and enforcement is off
+  by default.
+- Match/replace rules for request and response heads and buffered UTF-8 bodies,
+  using literal text or Rust regular expressions with capture references.
 - Burp-style workspace with **Target**, **Proxy**, **Intruder**, and
   **Repeater** tabs in the familiar order, in a warm light theme.
 - Bounded in-memory history (exchange count and total captured-body bytes)
-  with filtering, a view-only scope filter, and keyboard navigation (`j`/`k`,
+  with filtering, a scope view filter, and keyboard navigation (`j`/`k`,
   arrows, `Home`/`End`, `Ctrl`+`F`).
 - Live **Memory** indicator in the status bar with allocator memory in use;
   click it for the current and peak values and a rolling graph.
 - Request/response tabs with Raw, Headers, and Hex views, truncation markers,
   size, and timing.
-- Target site map grouped by host and path, plus an editable scope list that
-  filters the site map and HTTP history.
+- Target site map grouped by host and path, plus an editable scope list shared
+  by the view filter and the traffic guardrail.
 - `CONNECT` tunneling for HTTPS with byte counts — no TLS decryption yet.
-- Read-only Repeater preview and clearly labelled Intercept/Intruder previews;
-  no fake controls are presented as working features.
+- Read-only Repeater preview and a clearly labelled Intruder preview; no fake
+  controls are presented as working features.
 
 ## Goal: Burp Suite Community parity
 
@@ -59,7 +68,8 @@ cargo run -p wiremoth
 
 The proxy listens on `127.0.0.1:8080` and the Wiremoth window opens. Point your
 browser — or an extension such as FoxyProxy — at that address for HTTP and
-HTTPS.
+HTTPS. To hold plain-HTTP traffic, open **Proxy > Intercept** and enable
+request and/or response interception.
 
 > Only test systems you own or have explicit permission to test. See
 > [Safety and privacy](docs/safety.md).

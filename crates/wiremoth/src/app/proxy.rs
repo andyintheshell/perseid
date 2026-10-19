@@ -34,12 +34,33 @@ impl WiremothApp {
                     {
                         self.proxy_section = ProxySection::HttpHistory;
                     }
+                    let rules_label = if self.rules_error.is_some() {
+                        "Match/replace !"
+                    } else {
+                        "Match/replace"
+                    };
+                    let rules_hint = self
+                        .rules_error
+                        .as_deref()
+                        .unwrap_or("Rule changes apply to traffic immediately");
+                    if section_tab(
+                        ui,
+                        self.proxy_section == ProxySection::MatchReplace,
+                        rules_label,
+                    )
+                    .on_hover_text(rules_hint)
+                    .clicked()
+                    {
+                        self.proxy_section = ProxySection::MatchReplace;
+                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                    }
                 });
             });
 
         match self.proxy_section {
             ProxySection::Intercept => self.intercept_view(ui),
             ProxySection::HttpHistory => self.http_history_view(ui),
+            ProxySection::MatchReplace => self.match_replace_view(ui),
         }
     }
 

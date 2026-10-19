@@ -16,19 +16,22 @@ definition of done, and deliberate deviations.
   exchanges) with a peak and rolling graph. Method, breakdown, and full
   results: [Performance and memory](performance.md).*
 
-- [ ] **Milestone 1 — Proxy core:** reliable HTTP/1.1 capture and forwarding,
+- [x] **Milestone 1 — Proxy core:** reliable HTTP/1.1 capture and forwarding,
   request/response interception with edit, forward, and drop, explicit scope
   configuration, and match/replace rules.
 
-  *Status: capture, forwarding, the history UI, the Target site map, and a
-  view-only scope filter work; editable interception, scope enforcement, and
-  match/replace are not implemented.*
+  *Complete: plain-HTTP requests and responses can be held, edited, forwarded,
+  or dropped through a bounded, backpressured interception queue. Scope rules
+  can filter the workspace and optionally block out-of-scope HTTP requests and
+  `CONNECT` tunnels with a `403`. Match/replace rules run after interception on
+  heads and buffered UTF-8 bodies. Requests and responses larger than the
+  interception limit stay header-only. HTTPS remains CONNECT passthrough.*
 
 - [ ] **Milestone 2 — HTTPS:** local CA generation, TLS interception,
   documented browser trust setup, and pass-through controls.
 
   *Status: `CONNECT` tunneling works as TLS passthrough with byte counts;
-  interception is not implemented.*
+  TLS interception is not implemented.*
 
 - [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
   search, Repeater, Decoder, and response diff (Comparer).

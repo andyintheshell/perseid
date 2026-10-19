@@ -2,9 +2,9 @@
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use hyper::body::Incoming;
@@ -16,22 +16,26 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioIo;
 use log::{debug, info, warn};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::capture::TeeBody;
 use crate::events::ProxyEvent;
+use crate::intercept::{InterceptDecision, InterceptItem};
+use crate::policy::{Policy, PolicySnapshot};
 use crate::util::ProxyBody;
 use crate::{forward, tunnel};
 
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
-    pub(crate) client: Client<HttpConnector, TeeBody<Incoming>>,
+    pub(crate) client: Client<HttpConnector, ProxyBody>,
     pub(crate) tx: SyncSender<ProxyEvent>,
     pub(crate) notify: Option<Arc<dyn Fn() + Send + Sync>>,
-    pub(crate) next_id: AtomicU64,
     pub(crate) dropped: Arc<AtomicU64>,
     pub(crate) paused: Arc<AtomicBool>,
     pub(crate) capture_limit: usize,
+    pub(crate) intercept_limit: usize,
+    pub(crate) policy: Arc<RwLock<Policy>>,
+    pub(crate) intercepts: mpsc::Sender<InterceptItem>,
+    pub(crate) blocked_by_scope: Arc<AtomicU64>,
     pub(crate) connect_timeout: Duration,
     pub(crate) connection_slots: Arc<Semaphore>,
     pub(crate) tunnel_slots: Arc<Semaphore>,
@@ -40,8 +44,11 @@ pub(crate) struct Ctx {
 }
 
 impl Ctx {
+    /// Exchange ids are unique for the lifetime of the process, so a retained
+    /// history stays coherent when the proxy is restarted.
     pub(crate) fn next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::Relaxed)
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Capture is decided when an exchange starts, so pausing never strands
@@ -57,16 +64,46 @@ impl Ctx {
     /// paused; this method deliberately does not re-check the pause state.
     pub(crate) fn emit(&self, event: ProxyEvent) {
         match self.tx.try_send(event) {
-            Ok(()) => {
-                if let Some(notify) = &self.notify {
-                    notify();
-                }
-            }
+            Ok(()) => self.wake(),
             Err(TrySendError::Full(_)) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
             }
             Err(TrySendError::Disconnected(_)) => {}
         }
+    }
+
+    pub(crate) fn wake(&self) {
+        if let Some(notify) = &self.notify {
+            notify();
+        }
+    }
+
+    pub(crate) fn policy(&self) -> PolicySnapshot {
+        self.policy
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot()
+    }
+
+    /// Hold a message for a UI decision. The intercept channel applies
+    /// backpressure when the UI is not keeping up, instead of dropping the
+    /// message and hanging the connection forever.
+    pub(crate) async fn ask_interceptor(
+        &self,
+        item: InterceptItem,
+        decision: oneshot::Receiver<InterceptDecision>,
+    ) -> InterceptDecision {
+        match self.intercepts.send(item).await {
+            Ok(()) => {
+                self.wake();
+                decision.await.unwrap_or(InterceptDecision::Abort)
+            }
+            Err(_) => InterceptDecision::Abort,
+        }
+    }
+
+    pub(crate) fn block_by_scope(&self) {
+        self.blocked_by_scope.fetch_add(1, Ordering::Relaxed);
     }
 }
 

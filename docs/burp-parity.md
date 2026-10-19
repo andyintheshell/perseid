@@ -4,7 +4,7 @@
 Edition (CE) for manual web security testing: the same capabilities, adapted
 to a Rust-native, memory-bounded, keyboard-first tool.
 
-This is a direction, not a claim. Most capabilities below are still planned.
+This is a direction, not a claim. Several capabilities below are still planned.
 
 ## What parity means
 
@@ -43,10 +43,10 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Capability | Burp CE | Wiremoth | Status | Milestone |
 | --- | --- | --- | --- | --- |
 | Loopback HTTP/1.1 proxy and forwarding | Yes | Yes | Working | — |
-| Intercept, edit, forward, or drop messages | Yes | Capture only | Partial | M1 |
-| Scope / target allowlist | Yes | View filter over history and site map | Partial | M1 |
-| Target site map | Yes | Host/path tree from history | Partial | M1 |
-| Match/replace rules | Yes | No | Planned | M1 |
+| Intercept, edit, forward, or drop messages | Yes | Plain HTTP, head and buffered-body editing | Working | — |
+| Scope / target allowlist | Yes | View filter plus opt-in HTTP/CONNECT blocking | Working | — |
+| Target site map | Yes | Host/path tree from history | Partial | — |
+| Match/replace rules | Yes | Head and buffered UTF-8 body rules, literal or regex | Working | — |
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
@@ -63,9 +63,12 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Project files | No (Pro feature) | SQLite persistence planned | Beyond CE | M3 |
 | Automated scanner, crawler, Collaborator/OAST | No (Pro features) | No | Non-goal | — |
 
-Scope rules currently filter the site map and history only. They are not yet a
-traffic guardrail: capture and forwarding still apply to every host until the
-interception milestone enforces scope.
+Interception, scope enforcement, and match/replace currently cover plain HTTP.
+HTTPS `CONNECT` targets can be blocked by scope, but tunnel contents are still
+passed through without inspection. Interception buffers bodies up to
+`--intercept-limit`; larger or streaming bodies are held for header edits, and
+body rewrite rules apply only to buffered UTF-8 bodies. Scope enforcement is
+opt-in, and an empty scope allows every host.
 
 Burp Suite's status bar exposes a memory figure. Wiremoth's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;
@@ -109,7 +112,7 @@ or are explicitly authorized to test.
 
 | Milestone | Parity outcome |
 | --- | --- |
-| **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and session history. |
+| **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete for plain HTTP; HTTPS contents arrive in M2.)* |
 | **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. |
 | **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. |
 | **M4 — Protocols and testing tools** | HTTP/2, WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. |

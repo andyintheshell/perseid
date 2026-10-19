@@ -1,30 +1,34 @@
 //! The egui application: a Burp-style workspace over the captured traffic.
 //!
 //! The navigation intentionally mirrors the tools Burp users already know:
-//! Target, Proxy, Intruder, and Repeater. Proxy history and the Target site map
-//! are live today; Intruder and Repeater are clearly marked previews until
-//! their engines land.
+//! Target, Proxy, Intruder, and Repeater. Proxy history, editable interception,
+//! the Target site map, scope enforcement, and match/replace rules are live;
+//! Intruder and Repeater are clearly marked previews until their engines land.
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
-//! [`proxy`], [`target`], [`previews`], [`windows`], [`widgets`], [`util`],
-//! and [`scale`].
+//! [`intercept`], [`proxy`], [`rules`], [`target`], [`previews`], [`windows`],
+//! [`widgets`], [`util`], and [`scale`].
 
+mod intercept;
 mod previews;
 mod proxy;
+mod rules;
 mod scale;
 mod target;
 mod util;
 mod widgets;
 mod windows;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Color32, Key, RichText, Stroke};
-use wiremoth_proxy::{Proxy, ProxyConfig};
+use wiremoth_proxy::{InterceptItem, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings};
+
+use self::intercept::InterceptDraft;
 
 use crate::Args;
 use crate::branding;
@@ -100,6 +104,7 @@ enum ProxySection {
     Intercept,
     #[default]
     HttpHistory,
+    MatchReplace,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -130,9 +135,17 @@ pub struct WiremothApp {
     notify: Arc<dyn Fn() + Send + Sync>,
     listen: SocketAddr,
     capture_limit: usize,
+    intercept_limit: usize,
     history: History,
     dropped_seen: u64,
     paused: bool,
+    intercept_requests: bool,
+    intercept_responses: bool,
+    intercept_queue: VecDeque<InterceptItem>,
+    intercept_draft: Option<InterceptDraft>,
+    scope_enforce: bool,
+    match_replace: Vec<MatchReplaceRule>,
+    rules_error: Option<String>,
     filter: String,
     visible: Vec<u64>,
     visible_key: Option<(String, u64)>,
@@ -208,9 +221,17 @@ impl WiremothApp {
             notify,
             listen: args.listen,
             capture_limit: args.capture_limit,
+            intercept_limit: args.intercept_limit,
             history: History::new(args.history_limit, args.history_bytes),
             dropped_seen: 0,
             paused: false,
+            intercept_requests: false,
+            intercept_responses: false,
+            intercept_queue: VecDeque::new(),
+            intercept_draft: None,
+            scope_enforce: false,
+            match_replace: Vec::new(),
+            rules_error: None,
             filter: String::new(),
             visible: Vec::new(),
             visible_key: None,
@@ -242,9 +263,13 @@ impl WiremothApp {
     }
 
     fn start_proxy(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
+        let (settings, rule_error) = self.sanitized_proxy_settings();
+        self.rules_error = rule_error;
         let config = ProxyConfig {
             listen: self.listen,
             capture_limit: self.capture_limit,
+            intercept_limit: self.intercept_limit,
+            settings,
             notify: Some(notify),
             ..ProxyConfig::default()
         };
@@ -255,6 +280,8 @@ impl WiremothApp {
                 self.proxy = Some(proxy);
                 self.proxy_error = None;
                 self.dropped_seen = 0;
+                self.intercept_queue.clear();
+                self.intercept_draft = None;
             }
             Err(err) => {
                 log::error!("could not start the proxy: {err}");
@@ -264,8 +291,48 @@ impl WiremothApp {
         }
     }
 
+    fn proxy_settings(&self) -> ProxySettings {
+        ProxySettings {
+            intercept_requests: self.intercept_requests,
+            intercept_responses: self.intercept_responses,
+            scope_enforce: self.scope_enforce,
+            scope_rules: self.scope.iter().cloned().collect(),
+            match_replace: self.match_replace.clone(),
+        }
+    }
+
+    /// Settings sent to the proxy: enabled rules that compile. A broken regex
+    /// stays visible in the editor but never becomes part of the live policy.
+    fn sanitized_proxy_settings(&self) -> (ProxySettings, Option<String>) {
+        let mut settings = self.proxy_settings();
+        let error = settings.validate().err().map(|err| err.to_string());
+        if error.is_some() {
+            settings
+                .match_replace
+                .retain(|rule| rule.validate().is_ok());
+        }
+        (settings, error)
+    }
+
+    /// Push interception, scope, and rewrite settings to the running proxy.
+    /// Invalid regular expressions stay visible in the UI while valid rules
+    /// and toggles remain active.
+    fn apply_proxy_settings(&mut self) {
+        let (settings, rule_error) = self.sanitized_proxy_settings();
+        let applied = if let Some(proxy) = &self.proxy {
+            proxy.set_settings(settings)
+        } else {
+            Ok(())
+        };
+        self.rules_error = match (rule_error, applied) {
+            (Some(err), _) => Some(err),
+            (None, Ok(())) => None,
+            (None, Err(err)) => Some(err.to_string()),
+        };
+    }
+
     fn drain_events(&mut self, ctx: &egui::Context) {
-        let Some(proxy) = &self.proxy else {
+        let Some(proxy) = self.proxy.as_mut() else {
             return;
         };
         let dropped = proxy.dropped_events();
@@ -285,6 +352,15 @@ impl WiremothApp {
                 selected_changed = true;
             }
         }
+        // Interception has its own bounded, backpressured channel. Draining it
+        // here keeps held requests moving even when the history event queue is
+        // full or capture is paused.
+        for _ in 0..MAX_EVENTS_PER_FRAME {
+            let Some(item) = proxy.try_recv_intercept() else {
+                break;
+            };
+            self.intercept_queue.push_back(item);
+        }
         // Drain what the proxy queued before declaring it stopped, then
         // resolve any exchange whose terminal event never made it through.
         let stopped = !proxy.is_running();
@@ -293,6 +369,8 @@ impl WiremothApp {
             self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
             self.history
                 .interrupt_in_flight("proxy stopped before the exchange finished");
+            self.intercept_queue.clear();
+            self.intercept_draft = None;
         }
         if selected_changed {
             self.detail = None;
@@ -304,6 +382,7 @@ impl WiremothApp {
             self.selected = None;
             self.detail = None;
         }
+        self.sync_intercept_draft();
         // Keep durations and in-flight rows ticking while anything is open.
         if self.history.in_flight() > 0 {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -629,6 +708,20 @@ impl WiremothApp {
                 ui.colored_label(theme::BLUE, format!("{in_flight} in flight"));
             }
 
+            let pending = self.intercept_queue.len();
+            if pending > 0 {
+                ui.separator();
+                ui.colored_label(theme::AMBER, format!("{pending} awaiting intercept"));
+            } else if self.proxy.is_some() && (self.intercept_requests || self.intercept_responses)
+            {
+                ui.separator();
+                ui.label(
+                    RichText::new("intercept armed")
+                        .small()
+                        .color(theme::ACCENT_DARK),
+                );
+            }
+
             if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
                 ui.separator();
                 ui.label(
@@ -667,6 +760,11 @@ impl WiremothApp {
                         theme::AMBER,
                         format!("{rejected} rejected by connection limits"),
                     );
+                }
+                let blocked = proxy.blocked_by_scope();
+                if blocked > 0 {
+                    ui.separator();
+                    ui.colored_label(theme::AMBER, format!("{blocked} blocked by scope"));
                 }
             }
             let evicted = self.history.evicted();

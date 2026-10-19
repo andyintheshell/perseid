@@ -3,11 +3,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::rules::{MatchReplaceRule, RuleError};
+
 /// Loopback-only by default: captured traffic may contain credentials.
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 /// Bytes retained per body. Bodies larger than this are forwarded in full but
 /// only the leading bytes are captured.
 pub const DEFAULT_CAPTURE_LIMIT: usize = 1024 * 1024;
+/// Maximum body bytes buffered for interception. Larger or streaming bodies
+/// are still held for header editing, but their bodies cannot be edited.
+pub const DEFAULT_INTERCEPT_LIMIT: usize = 1024 * 1024;
 /// Bound on queued [`crate::ProxyEvent`]s; when full, events are dropped and
 /// counted rather than growing memory without limit.
 pub const DEFAULT_EVENT_QUEUE: usize = 256;
@@ -18,6 +23,34 @@ pub const DEFAULT_MAX_CONNECTIONS: usize = 128;
 /// until its HTTP upgrade completes.
 pub const DEFAULT_MAX_TUNNELS: usize = 64;
 
+/// Runtime policy shared by interception, scope enforcement, and rewriting.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProxySettings {
+    /// Hold plain-HTTP requests for inspection and forwarding.
+    pub intercept_requests: bool,
+    /// Hold plain-HTTP responses for inspection and forwarding.
+    pub intercept_responses: bool,
+    /// Block HTTP requests and CONNECT tunnels whose host is outside
+    /// [`ProxySettings::scope_rules`].
+    pub scope_enforce: bool,
+    /// Host authorities that make up the target scope. Matching covers
+    /// subdomains and ignores ports. Empty means everything.
+    pub scope_rules: Vec<String>,
+    /// Rules applied after interception, in list order.
+    pub match_replace: Vec<MatchReplaceRule>,
+}
+
+impl ProxySettings {
+    /// Validate all enabled rules so a bad regular expression is reported
+    /// before it reaches the proxy runtime.
+    pub fn validate(&self) -> Result<(), RuleError> {
+        for rule in &self.match_replace {
+            rule.validate()?;
+        }
+        Ok(())
+    }
+}
+
 /// Configuration for [`crate::Proxy::start`].
 #[derive(Clone)]
 pub struct ProxyConfig {
@@ -25,6 +58,10 @@ pub struct ProxyConfig {
     pub listen: SocketAddr,
     /// Per-body capture limit in bytes.
     pub capture_limit: usize,
+    /// Maximum body bytes buffered for interception or body rewriting.
+    pub intercept_limit: usize,
+    /// Interception, scope, and match/replace policy.
+    pub settings: ProxySettings,
     /// Maximum number of events queued towards the consumer.
     pub event_queue: usize,
     /// Timeout for establishing upstream TCP connections.
@@ -54,6 +91,8 @@ impl Default for ProxyConfig {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
             capture_limit: DEFAULT_CAPTURE_LIMIT,
+            intercept_limit: DEFAULT_INTERCEPT_LIMIT,
+            settings: ProxySettings::default(),
             event_queue: DEFAULT_EVENT_QUEUE,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
@@ -68,6 +107,8 @@ impl fmt::Debug for ProxyConfig {
         f.debug_struct("ProxyConfig")
             .field("listen", &self.listen)
             .field("capture_limit", &self.capture_limit)
+            .field("intercept_limit", &self.intercept_limit)
+            .field("settings", &self.settings)
             .field("event_queue", &self.event_queue)
             .field("connect_timeout", &self.connect_timeout)
             .field("max_connections", &self.max_connections)

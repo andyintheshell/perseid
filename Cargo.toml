@@ -40,6 +40,7 @@ hyper-util = { version = "0.1", features = [
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 log = "0.4"
+regex = "1"
 thiserror = "2"
 tokio = { version = "1", features = [
     "io-util",

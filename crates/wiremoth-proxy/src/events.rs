@@ -97,6 +97,14 @@ impl CapturedBody {
         }
     }
 
+    /// Build a complete body from bytes, retaining at most `limit` bytes.
+    pub(crate) fn from_bytes_limited(data: &[u8], limit: usize) -> Self {
+        let mut body = Self::default();
+        body.append(data, limit);
+        body.mark_complete();
+        body
+    }
+
     pub(crate) fn append(&mut self, chunk: &[u8], limit: usize) {
         self.total += chunk.len() as u64;
         if self.data.len() < limit {

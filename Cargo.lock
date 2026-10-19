@@ -3650,6 +3650,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "log",
+ "regex",
  "thiserror 2.0.21",
  "tokio",
 ]

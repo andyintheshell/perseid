@@ -12,11 +12,24 @@
 //! work is capped by [`ProxyConfig::max_connections`] and
 //! [`ProxyConfig::max_tunnels`], and the consumer owns the resulting history.
 //!
+//! Interception uses a separate bounded queue of [`InterceptItem`]s. The
+//! proxy waits for each item to be forwarded or dropped, and the producer
+//! applies backpressure instead of dropping a held exchange. Bodies are
+//! buffered only when their size is known and within
+//! [`ProxyConfig::intercept_limit`]; larger or streaming messages are held for
+//! header edits while their bodies pass through untouched.
+//!
 //! # Current scope
 //!
 //! - Plain HTTP/1.1 proxying with full request/response capture.
+//! - Request and response interception with editable heads and buffered UTF-8
+//!   bodies, plus explicit forward and drop decisions.
+//! - Opt-in scope enforcement for plain HTTP and CONNECT targets, and
+//!   request/response match/replace rules compiled from
+//!   [`ProxySettings`].
 //! - HTTPS via CONNECT **passthrough** (no TLS interception yet): history
-//!   shows the tunnel, not its contents.
+//!   shows the tunnel, not its contents. Scope enforcement can block a tunnel
+//!   before it opens.
 //!
 //! # Example
 //!
@@ -33,33 +46,40 @@ mod capture;
 mod config;
 mod events;
 mod forward;
+mod intercept;
+mod message;
+mod policy;
+mod rules;
 mod server;
 mod tunnel;
 mod util;
 
 pub use config::{
-    DEFAULT_CAPTURE_LIMIT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_EVENT_QUEUE, DEFAULT_LISTEN,
-    DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_TUNNELS, ProxyConfig,
+    DEFAULT_CAPTURE_LIMIT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_EVENT_QUEUE, DEFAULT_INTERCEPT_LIMIT,
+    DEFAULT_LISTEN, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_TUNNELS, ProxyConfig, ProxySettings,
 };
 pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
 };
+pub use intercept::{InterceptError, InterceptItem, InterceptKind};
+pub use policy::host_in_scope;
+pub use rules::{MatchReplaceRule, RuleDirection, RuleError, RulePart};
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
-use hyper::body::Incoming;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
-use tokio::sync::{Semaphore, oneshot};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
-use crate::capture::TeeBody;
+use crate::policy::Policy;
+use crate::util::ProxyBody;
 
 /// Failure to start the proxy itself (the listener, not individual requests).
 #[derive(Debug, thiserror::Error)]
@@ -74,6 +94,8 @@ pub enum StartError {
     Spawn(#[source] std::io::Error),
     #[error("could not initialize the proxy runtime: {0}")]
     Runtime(#[source] std::io::Error),
+    #[error(transparent)]
+    Rule(#[from] RuleError),
     #[error("the proxy thread stopped before it was ready")]
     Startup,
 }
@@ -85,8 +107,11 @@ pub enum StartError {
 pub struct Proxy {
     addr: SocketAddr,
     events: Receiver<ProxyEvent>,
+    intercepts: mpsc::Receiver<InterceptItem>,
+    policy: Arc<RwLock<Policy>>,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
+    blocked_by_scope: Arc<AtomicU64>,
     rejected_connections: Arc<AtomicU64>,
     rejected_tunnels: Arc<AtomicU64>,
     shutdown: Option<oneshot::Sender<()>>,
@@ -101,6 +126,9 @@ impl Proxy {
     /// call also waits for the runtime thread to become ready, so a successful
     /// return means the proxy is actually accepting connections.
     pub fn start(config: ProxyConfig) -> Result<Self, StartError> {
+        config.settings.validate()?;
+        let policy = Arc::new(RwLock::new(Policy::from_settings(&config.settings)?));
+
         let listener =
             std::net::TcpListener::bind(config.listen).map_err(|source| StartError::Bind {
                 addr: config.listen,
@@ -118,11 +146,13 @@ impl Proxy {
         })?;
 
         let (tx, events) = std::sync::mpsc::sync_channel(config.event_queue.max(1));
+        let (intercept_tx, intercepts) = mpsc::channel(config.max_connections.max(1));
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
 
         let dropped = Arc::new(AtomicU64::new(0));
         let paused = Arc::new(AtomicBool::new(false));
+        let blocked_by_scope = Arc::new(AtomicU64::new(0));
         let rejected_connections = Arc::new(AtomicU64::new(0));
         let rejected_tunnels = Arc::new(AtomicU64::new(0));
         let connection_slots = Arc::new(Semaphore::new(config.max_connections.max(1)));
@@ -131,19 +161,21 @@ impl Proxy {
         let mut connector = HttpConnector::new();
         connector.set_connect_timeout(Some(config.connect_timeout));
         connector.enforce_http(true);
-        let client: Client<HttpConnector, TeeBody<Incoming>> =
-            Client::builder(TokioExecutor::new())
-                .http1_preserve_header_case(true)
-                .build(connector);
+        let client: Client<HttpConnector, ProxyBody> = Client::builder(TokioExecutor::new())
+            .http1_preserve_header_case(true)
+            .build(connector);
 
         let ctx = Arc::new(server::Ctx {
             client,
             tx: tx as SyncSender<ProxyEvent>,
             notify: config.notify.clone(),
-            next_id: AtomicU64::new(1),
             dropped: dropped.clone(),
             paused: paused.clone(),
             capture_limit: config.capture_limit,
+            intercept_limit: config.intercept_limit,
+            policy: policy.clone(),
+            intercepts: intercept_tx,
+            blocked_by_scope: blocked_by_scope.clone(),
             connect_timeout: config.connect_timeout,
             connection_slots,
             tunnel_slots,
@@ -196,8 +228,11 @@ impl Proxy {
         Ok(Self {
             addr,
             events,
+            intercepts,
+            policy,
             dropped,
             paused,
+            blocked_by_scope,
             rejected_connections,
             rejected_tunnels,
             shutdown: Some(shutdown_tx),
@@ -232,6 +267,36 @@ impl Proxy {
     /// Blocking receive, mainly useful for tests and headless tooling.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<ProxyEvent, RecvTimeoutError> {
         self.events.recv_timeout(timeout)
+    }
+
+    /// Take the next message waiting for an interception decision.
+    pub fn try_recv_intercept(&mut self) -> Option<InterceptItem> {
+        self.intercepts.try_recv().ok()
+    }
+
+    /// Await the next message waiting for an interception decision.
+    ///
+    /// This is mainly useful for tests and headless consumers. The desktop UI
+    /// uses [`Proxy::try_recv_intercept`] from its frame loop.
+    pub async fn recv_intercept(&mut self) -> Option<InterceptItem> {
+        self.intercepts.recv().await
+    }
+
+    /// Replace the runtime interception, scope, and match/replace policy.
+    ///
+    /// The previous policy stays in effect when a rule fails to compile.
+    pub fn set_settings(&self, settings: ProxySettings) -> Result<(), RuleError> {
+        let policy = Policy::from_settings(&settings)?;
+        *self
+            .policy
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
+        Ok(())
+    }
+
+    /// Exchanges blocked because they were outside the enforced scope.
+    pub fn blocked_by_scope(&self) -> u64 {
+        self.blocked_by_scope.load(Ordering::Relaxed)
     }
 
     /// Events dropped so far because the consumer did not keep up.

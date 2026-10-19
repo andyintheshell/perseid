@@ -7,8 +7,8 @@ passwords, session tokens, cookies, or personal data.
 ## Authorized use
 
 Do not point Wiremoth at third-party systems without permission. The
-loopback-only default and scope filters are safety aids, not permission to test
-an arbitrary host, and scope is not yet enforced on traffic (see below).
+loopback-only default, scope filters, and optional scope enforcement are safety
+aids, not permission to test an arbitrary host.
 
 ## Defaults
 
@@ -22,17 +22,25 @@ an arbitrary host, and scope is not yet enforced on traffic (see below).
 - The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
   once by default. Excess connections are closed; excess CONNECT requests get
   a 503 response. Both limits are library configuration, not browser settings.
-- Scope filtering is currently view-only: it hides out-of-scope hosts from the
-  Target site map and HTTP history, but it does not block, drop, or modify
-  traffic. Treat it as an analysis aid until interception enforcement lands.
+- Interception buffers at most `--intercept-limit` body bytes per held message
+  (1 MiB by default). Larger or streaming bodies are held for header edits only
+  and pass through unchanged.
+- Scope filtering is always available as a view filter. **Block out-of-scope
+  traffic** is opt-in and off by default; when enabled, HTTP requests and
+  `CONNECT` tunnels outside the list receive a `403`. An empty scope allows
+  every host. Scope is checked again after interception and rewriting, so an
+  edit cannot move a request outside the guardrail unnoticed. HTTPS tunnel
+  contents are not decrypted, so only the tunnel target can be checked.
 - The prototype has no telemetry. Apart from proxied traffic, the application
   does not make network requests; opening the project link in the About window
   is an explicit user action.
 
 ## Data handling
 
-For now, captured history lives in memory only and disappears when the process
-exits. There is no disk persistence, export, or background upload.
+For now, captured history and held interception messages live in memory only
+and disappear when the process exits. Dropping the proxy handle or closing the
+application releases held messages and aborts their exchanges. There is no disk
+persistence, export, or background upload.
 
 When persistent history and exports are added:
 

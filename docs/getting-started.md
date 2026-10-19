@@ -24,12 +24,13 @@ proxy is running and lets you retry if the address is already in use.
 ### Options
 
 ```text
---listen <ADDR>         address for the proxy to listen on [default: 127.0.0.1:8080]
---capture-limit <BYTES> maximum body bytes kept per request/response [default: 1048576]
---history-limit <N>     maximum number of exchanges kept in memory [default: 2000]
---history-bytes <BYTES> maximum total body bytes retained by history [default: 268435456]
---no-proxy              start the UI without the proxy
---ui-scale <FACTOR>     UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
+--listen <ADDR>           address for the proxy to listen on [default: 127.0.0.1:8080]
+--capture-limit <BYTES>   maximum body bytes kept per request/response [default: 1048576]
+--intercept-limit <BYTES> maximum body bytes buffered for interception or rewriting [default: 1048576]
+--history-limit <N>       maximum number of exchanges kept in memory [default: 2000]
+--history-bytes <BYTES>   maximum total body bytes retained by history [default: 268435456]
+--no-proxy                start the UI without the proxy
+--ui-scale <FACTOR>       UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
 ```
 
 Run `cargo run -p wiremoth -- --help` for the authoritative list.
@@ -41,15 +42,18 @@ The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
 
 | Tab | Available today |
 | --- | --- |
-| **Target** | A host/path site map built from captured HTTP, and an editable scope list. Scope hides out-of-scope hosts from the site map and history. It is currently a view filter only: forwarding and capture are unchanged. |
-| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** documents the planned hold/edit/forward workflow; editable interception is not implemented yet. |
+| **Target** | A host/path site map built from captured HTTP, and an editable scope list. Scope can filter the site map and history, and can optionally block out-of-scope traffic before it is forwarded. |
+| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds plain-HTTP requests and responses for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. |
 | **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
 | **Repeater** | A read-only preview of the selected request and response. Editing and resending arrive in Milestone 3. |
 
 The scope input accepts a bare host, a `host:port` authority, or a full URL;
-matching also covers subdomains. Toggle **Filter views to the scope** in
-**Target > Scope** to apply it. The HTTP history filter matches method, host,
-path, URI, and status.
+matching also covers subdomains and ignores ports. Toggle **Filter views to the
+scope** in **Target > Scope** to hide out-of-scope hosts from the workspace.
+Enable **Block out-of-scope traffic** to return `403` for HTTP requests and
+`CONNECT` tunnels outside the list. Enforcement is off by default, and an empty
+scope allows every host. The HTTP history filter matches method, host, path,
+URI, and status.
 
 The request/response pane has request and response tabs, each with Raw,
 Headers, and Hex views. Click a row or use the keyboard to select it.
@@ -60,6 +64,38 @@ Suite's status bar. Click it for the current and peak values and a rolling
 three-minute graph. See [Performance and memory](performance.md) for the M0
 baseline, resident-memory context, and method.
 
+## Intercepting traffic
+
+Open **Proxy > Intercept** and enable **Intercept requests**, **Intercept
+responses**, or both. Matching plain-HTTP messages are held before they are
+forwarded and appear in a queue; the status bar shows how many are waiting.
+Edit the raw head, edit the body when it is buffered UTF-8 text, then choose
+**Forward** or **Drop**. **Forward** applies match/replace rules and re-checks
+the scope before sending. Holding a request does not stop unrelated
+connections from progressing.
+
+Only bodies up to `--intercept-limit` (1 MiB by default) are buffered for
+editing. Larger or streaming bodies are still held for header edits, but their
+body bytes pass through unchanged and body editing is disabled. Binary bodies
+are shown as a read-only hex preview.
+
+HTTPS is still a `CONNECT` passthrough. Scope enforcement can block a tunnel
+before it opens, but Wiremoth cannot edit requests inside it until TLS
+interception lands.
+
+## Match/replace rules
+
+Open **Proxy > Match/replace** to add request or response rules. Each rule
+chooses the head, the body, or both, and uses literal matching or a Rust regular
+expression. Regex replacements support `$1`-style capture references. Rules run
+in list order after interception and before the message is sent, so the history
+reflects the edited result.
+
+Body rules apply only to buffered UTF-8 bodies. Binary, streaming, and
+over-limit bodies are left untouched. Empty patterns are ignored. An invalid
+regular expression stays visible in the editor and is skipped while the rest of
+the policy, including interception toggles and valid rules, remains active.
+
 ## Pointing a browser at Wiremoth
 
 Configure your browser — or an extension such as FoxyProxy — to use an HTTP
@@ -67,7 +103,8 @@ proxy at `127.0.0.1:8080` for HTTP and HTTPS.
 
 - Plain HTTP requests are forwarded and captured: method, headers, bounded
   bodies, status, size, duration, and capture truncation are visible in the
-  history table and detail pane.
+  history table and detail pane. They can also be held and edited when
+  interception is enabled.
 - HTTPS requests arrive as `CONNECT` tunnels. Wiremoth relays the bytes in
   both directions and records the exchange with byte counts, but does not
   decrypt TLS yet (Milestone 2). Browsers therefore keep seeing the site's
@@ -80,14 +117,20 @@ leaves the filter. Clicking a row also selects it.
 ## Current limitations
 
 - HTTP/1.1 only; HTTP/2 and WebSocket-specific handling are still planned.
-- HTTPS is TLS passthrough; there is no interception, editing, or replay yet.
-- Requests and responses are captured and forwarded, not paused for editing.
-- Scope filtering is view-only. It does not block, drop, or modify traffic.
+- HTTPS is TLS passthrough; there is no interception, editing, or replay of
+  HTTPS contents yet.
+- Interception is available for plain HTTP. Only buffered UTF-8 bodies can be
+  edited; larger, streaming, and binary bodies are header-only.
+- Scope enforcement can block HTTP and `CONNECT`, but it is off by default and
+  an empty scope allows every host.
+- Match/replace body rules apply only to buffered UTF-8 bodies. Rules are
+  runtime-only and are not persisted between launches.
 - Repeater cannot edit or send requests yet; Intruder has no engine yet.
 - History is in memory only. It is bounded by `--history-limit` and
   `--history-bytes`; captured bodies are capped per message by
-  `--capture-limit`. The oldest exchanges are evicted when either history
-  bound is reached.
+  `--capture-limit`, and interception buffers up to `--intercept-limit` per
+  message. The oldest exchanges are evicted when either history bound is
+  reached.
 - There is no disk persistence, project file, or settings persistence yet.
 
 ## HiDPI displays
@@ -112,6 +155,13 @@ scale.
 - **History or the site map looks empty:** the filter or scope may be hiding
   rows. Clear the history filter, or turn off **Filter views to the scope** in
   **Target > Scope**.
+- **Pages appear to hang with an amber "awaiting intercept" count:** traffic is
+  held in **Proxy > Intercept**. Forward or drop the current message, then turn
+  interception off if you are finished. Pending messages are aborted when the
+  proxy stops.
+- **A request or `CONNECT` gets a `403`:** **Block out-of-scope traffic** is
+  enabled and the host is not in the scope list. Add the host or turn the
+  guardrail off.
 - **HTTPS sites work but show no decrypted traffic:** expected for now;
   `CONNECT` tunnels are relayed without interception. The site map deliberately
   lists HTTP endpoints only.
