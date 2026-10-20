@@ -33,7 +33,7 @@ definition of done, and deliberate deviations.
   *Complete: a locally generated ECDSA certificate authority mints per-host
   certificates for intercepted `CONNECT` tunnels. Decryption is opt-in and
   starts only when a CA is loaded and the TLS toggle is on. Trust is installed
-  and removed manually in the browser; Wiremoth never touches a system or
+  and removed manually in the browser; Perseid never touches a system or
   browser trust store. Pass-through hosts stay opaque, scope can still block
   tunnels, and decrypted exchanges flow through the same interception,
   match/replace, and bounded-capture pipeline as plain HTTP. See

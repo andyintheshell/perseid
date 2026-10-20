@@ -1,12 +1,12 @@
 # Safety and privacy
 
-Wiremoth is intended for systems you own or are explicitly authorized to test,
+Perseid is intended for systems you own or are explicitly authorized to test,
 including purpose-built training labs. Intercepted requests may contain
 passwords, session tokens, cookies, or personal data.
 
 ## Authorized use
 
-Do not point Wiremoth at third-party systems without permission. The
+Do not point Perseid at third-party systems without permission. The
 loopback-only default, scope filters, and optional scope enforcement are safety
 aids, not permission to test an arbitrary host.
 
@@ -42,7 +42,7 @@ aids, not permission to test an arbitrary host.
 For now, captured history and held interception messages live in memory only
 and disappear when the process exits. Dropping the proxy handle or closing the
 application releases held messages and aborts their exchanges. There is no disk
-persistence, export, or background upload. The only files Wiremoth writes are
+persistence, export, or background upload. The only files Perseid writes are
 the TLS certificate authority and its private key described below.
 
 When persistent history and exports are added:
@@ -58,9 +58,9 @@ When persistent history and exports are added:
 HTTPS interception uses a certificate authority generated and stored locally.
 
 - The CA private key stays on the user's machine in the CA directory
-  (`--ca-dir`, `WIREMOTH_CA_DIR`, or `$XDG_DATA_HOME/wiremoth`). The directory
+  (`--ca-dir`, `PERSEID_CA_DIR`, or `$XDG_DATA_HOME/perseid`). The directory
   is created owner-only and the key is written owner-readable only.
-- Trust must be installed deliberately by the user in each browser. Wiremoth
+- Trust must be installed deliberately by the user in each browser. Perseid
   never writes to system or browser trust stores, and never installs the CA
   silently.
 - Interception is off by default and requires both a loaded CA and the TLS
@@ -73,9 +73,9 @@ HTTPS interception uses a certificate authority generated and stored locally.
 
 ## Reporting a vulnerability
 
-If you believe you found a security issue in Wiremoth itself, please use a
+If you believe you found a security issue in Perseid itself, please use a
 private GitHub security advisory:
-[report a vulnerability](https://github.com/andyintheshell/wiremoth/security/advisories/new).
+[report a vulnerability](https://github.com/andyintheshell/perseid/security/advisories/new).
 
 Please do not open a public issue containing working exploit details or
 captured sensitive traffic.

@@ -1,7 +1,7 @@
 # Getting started
 
-Wiremoth builds as a small Cargo workspace: `wiremoth-proxy` (the proxy library)
-and `wiremoth` (the desktop application).
+Perseid builds as a small Cargo workspace: `perseid-proxy` (the proxy library)
+and `perseid` (the desktop application).
 
 ## Requirements
 
@@ -14,11 +14,11 @@ and `wiremoth` (the desktop application).
 From the workspace root:
 
 ```sh
-cargo run -p wiremoth
+cargo run -p perseid
 ```
 
 This starts the proxy on `127.0.0.1:8080` (loopback only) and opens the
-Wiremoth window on **Proxy > HTTP history**. The toolbar shows whether the
+Perseid window on **Proxy > HTTP history**. The toolbar shows whether the
 proxy is running and lets you retry if the address is already in use.
 
 ### Options
@@ -30,13 +30,13 @@ proxy is running and lets you retry if the address is already in use.
 --history-limit <N>       maximum number of exchanges kept in memory [default: 2000]
 --history-bytes <BYTES>   maximum total body bytes retained by history [default: 268435456]
 --no-proxy                start the UI without the proxy
---ca-dir <DIR>            TLS interception CA directory [default: $WIREMOTH_CA_DIR or $XDG_DATA_HOME/wiremoth]
+--ca-dir <DIR>            TLS interception CA directory [default: $PERSEID_CA_DIR or $XDG_DATA_HOME/perseid]
 --tls-intercept           start with HTTPS interception enabled (requires a CA)
 --tls-passthrough <HOST>  host that is never TLS-intercepted (repeatable)
 --ui-scale <FACTOR>       UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
 ```
 
-Run `cargo run -p wiremoth -- --help` for the authoritative list.
+Run `cargo run -p perseid -- --help` for the authoritative list.
 
 ## Workspace
 
@@ -64,7 +64,7 @@ layout. Drag the divider between the panes to give either side more room. Click
 a history row or use the keyboard to select it.
 
 The status bar shows a live **Memory** figure: the bytes currently held by
-Wiremoth's allocator, the closest equivalent to the memory figure in Burp
+Perseid's allocator, the closest equivalent to the memory figure in Burp
 Suite's status bar. Click it for the current and peak values and a rolling
 three-minute graph. See [Performance and memory](performance.md) for the M0
 baseline, resident-memory context, and method.
@@ -96,9 +96,9 @@ readable. The displayed headers have `Content-Encoding` removed;
 Raw and Hex records the original wire size.
 
 This matches Burp's model: Burp unpacks compressed bodies for the message editor
-by default and does not recompress them for display. Wiremoth's proxy still
+by default and does not recompress them for display. Perseid's proxy still
 forwards the encoded bytes unchanged, so the browser and origin server see the
-wire representation. As Burp does by default, Wiremoth also removes content
+wire representation. As Burp does by default, Perseid also removes content
 codings it cannot decode (`zstd`, for example) from the outgoing
 `Accept-Encoding` header, so servers normally choose gzip, deflate, Brotli, or
 identity. If a server still returns an unsupported coding, the wire bytes are
@@ -111,11 +111,11 @@ its cached copy does not look like a failed capture.
 
 ## HTTPS interception
 
-Wiremoth can decrypt HTTPS with a local certificate authority (CA). The CA is
+Perseid can decrypt HTTPS with a local certificate authority (CA). The CA is
 generated on demand and stored outside the proxy; its private key stays on your
 machine. Open **Proxy > TLS** to generate it, copy the certificate path, and
 import the certificate into your browser. Trust is always installed manually,
-never system-wide by Wiremoth. Step-by-step Firefox and Chromium instructions,
+never system-wide by Perseid. Step-by-step Firefox and Chromium instructions,
 pass-through configuration, and removal steps are in
 [HTTPS interception](tls.md).
 
@@ -140,7 +140,7 @@ over-limit bodies are left untouched. Empty patterns are ignored. An invalid
 regular expression stays visible in the editor and is skipped while the rest of
 the policy, including the interception control and valid rules, remains active.
 
-## Pointing a browser at Wiremoth
+## Pointing a browser at Perseid
 
 Configure your browser — or an extension such as FoxyProxy — to use an HTTP
 proxy at `127.0.0.1:8080` for HTTP and HTTPS.
@@ -149,7 +149,7 @@ proxy at `127.0.0.1:8080` for HTTP and HTTPS.
   bodies, status, size, duration, and capture truncation are visible in the
   history table and detail pane. They can also be held and edited when
   interception is enabled.
-- HTTPS requests arrive as `CONNECT` tunnels. By default Wiremoth relays the
+- HTTPS requests arrive as `CONNECT` tunnels. By default Perseid relays the
   bytes in both directions and records the exchange with byte counts, without
   decrypting. After generating a CA and enabling **Decrypt HTTPS**, each request
   inside the tunnel is captured — and can be held and edited — as a separate
@@ -165,7 +165,7 @@ leaves the filter. Clicking a row also selects it.
 - HTTPS interception terminates HTTP/1.1 inside `CONNECT` tunnels. Certificate
   pinning, non-HTTP TLS protocols, and clients that do not trust the local CA
   need the pass-through list; HTTP/3/QUIC is not proxied.
-- Browser trust must be installed and removed manually. Wiremoth never edits a
+- Browser trust must be installed and removed manually. Perseid never edits a
   system or browser trust store.
 - Interception covers HTTP and decrypted HTTPS. Only buffered UTF-8 bodies can
   be edited; larger, streaming, and binary bodies are header-only.
@@ -188,7 +188,7 @@ leaves the filter. Clicking a row also selects it.
 
 The UI follows the scale factor reported by the windowing system. On X11
 desktops that do not report one (for example when `Xft.dpi` is unset),
-Wiremoth falls back to `GDK_SCALE` or `QT_SCALE_FACTOR`, so it matches the
+Perseid falls back to `GDK_SCALE` or `QT_SCALE_FACTOR`, so it matches the
 scale GTK and Qt applications already use.
 
 Override the result with `--ui-scale <FACTOR>`, or adjust it at runtime from
@@ -216,5 +216,5 @@ scale.
 - **HTTPS sites show no decrypted traffic:** decryption is off, no CA is loaded,
   or the host is on the pass-through list. Check the status in **Proxy > TLS**.
   If the browser reports an untrusted certificate, import the current
-  `wiremoth-ca.pem` as described in [HTTPS interception](tls.md); regenerating
+  `perseid-ca.pem` as described in [HTTPS interception](tls.md); regenerating
   the CA requires importing the new certificate.

@@ -1,0 +1,30 @@
+[package]
+name = "perseid"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A lightweight web security workbench for inspecting, modifying, and replaying HTTP traffic"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["http", "proxy", "security", "egui", "burp"]
+categories = ["gui", "network-programming", "development-tools::testing"]
+
+[[bin]]
+name = "perseid"
+path = "src/main.rs"
+
+[dependencies]
+brotli-decompressor.workspace = true
+chrono.workspace = true
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+env_logger.workspace = true
+flate2.workspace = true
+image.workspace = true
+libc.workspace = true
+log.workspace = true
+perseid-proxy = { version = "0.1.0", path = "../perseid-proxy" }

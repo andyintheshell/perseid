@@ -22,14 +22,14 @@ From the workspace root:
 
 ```sh
 cargo build
-cargo run -p wiremoth
+cargo run -p perseid
 cargo test --workspace
 ```
 
-The `wiremoth-proxy` crate also has a headless example for manual smoke tests:
+The `perseid-proxy` crate also has a headless example for manual smoke tests:
 
 ```sh
-cargo run -p wiremoth-proxy --example headless
+cargo run -p perseid-proxy --example headless
 ```
 
 ## Required checks
@@ -50,12 +50,12 @@ systems using the distribution's Rust packages, install `rustfmt` and
 
 | Path | Contents |
 | --- | --- |
-| `crates/wiremoth-proxy/` | Proxy library: listener, forwarding, CONNECT tunnels, capture, events. |
-| `crates/wiremoth/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
+| `crates/perseid-proxy/` | Proxy library: listener, forwarding, CONNECT tunnels, capture, events. |
+| `crates/perseid/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
 | `docs/` | User and design documentation. |
 | `branding/` | Logo and icon source assets. |
 
-Proxy behavior belongs behind the `wiremoth-proxy` API so it can be tested
+Proxy behavior belongs behind the `perseid-proxy` API so it can be tested
 without the UI. UI code should not block on network or disk work; events flow
 through the bounded channel.
 
