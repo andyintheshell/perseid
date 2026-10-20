@@ -1,0 +1,126 @@
+name: Screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "crates/perseid/**"
+      - "crates/perseid-proxy/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "scripts/screenshots.sh"
+      - "scripts/check_screenshots.py"
+      - ".github/workflows/screenshots.yml"
+  pull_request:
+    paths:
+      - "crates/perseid/**"
+      - "crates/perseid-proxy/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "scripts/screenshots.sh"
+      - "scripts/check_screenshots.py"
+      - ".github/workflows/screenshots.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  screenshots:
+    name: Generate and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux and Xvfb dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libssl-dev \
+            xvfb \
+            xauth \
+            libgl1-mesa-dri \
+            libglx-mesa0 \
+            libegl1 \
+            libxkbcommon-x11-0 \
+            libxcursor1 \
+            libxrandr2 \
+            libxi6
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build with screenshot mode
+        run: cargo build -p perseid --features screenshots
+
+      - name: Generate screenshots
+        run: scripts/screenshots.sh --no-build --out artifacts/screenshots
+
+      - name: Verify screenshots exist
+        run: python3 scripts/check_screenshots.py artifacts/screenshots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: perseid-screenshots
+          path: artifacts/screenshots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Add artifact link to the summary
+        run: |
+          {
+            echo "## Perseid screenshots"
+            echo
+            echo "Generated from \`${{ github.sha }}\`."
+            echo
+            echo "[Download the PNG artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The shared preview branch is force-pushed so the summary can embed the
+      # images. It is skipped for pull requests from forks, where the token is
+      # read-only; the artifact is still available for those runs.
+      - name: Publish inline preview
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          preview="$(mktemp -d)"
+          cp artifacts/screenshots/perseid-main.png "$preview/"
+          cp artifacts/screenshots/perseid-memory.png "$preview/"
+          cd "$preview"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -qm "Screenshots from ${GITHUB_SHA}"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:screenshots-preview
+          {
+            echo "### Inline preview"
+            echo
+            echo "![HTTP history](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/perseid-main.png?v=${GITHUB_RUN_ID})"
+            echo
+            echo "![Memory usage](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/perseid-memory.png?v=${GITHUB_RUN_ID})"
+            echo
+            echo "_This preview branch shows the latest generated run. If the images do not load (for example, in a private repository), use the artifact link above._"
+          } >> "$GITHUB_STEP_SUMMARY"
