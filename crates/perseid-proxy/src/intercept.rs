@@ -24,214 +24,142 @@ pub enum InterceptKind {
 }
 
 /// A message waiting for an interception decision.
+///
+/// Requests and responses share the same state and lifecycle; [`kind`] records
+/// which direction the held message is travelling in. The constructors are
+/// crate-private so consumers can only act on items received from the proxy.
+///
+/// [`kind`]: InterceptItem::kind
 #[derive(Debug)]
-pub enum InterceptItem {
-    Request(InterceptRequest),
-    Response(InterceptResponse),
-}
-
-/// A held client request.
-#[derive(Debug)]
-pub struct InterceptRequest {
+pub struct InterceptItem {
+    kind: InterceptKind,
     id: u64,
     request: RequestInfo,
     head: String,
     body: Option<Vec<u8>>,
     body_is_text: bool,
     responder: Option<oneshot::Sender<InterceptDecision>>,
-}
-
-/// A held upstream response.
-#[derive(Debug)]
-pub struct InterceptResponse {
-    id: u64,
-    request: RequestInfo,
-    head: String,
-    body: Option<Vec<u8>>,
-    body_is_text: bool,
-    responder: Option<oneshot::Sender<InterceptDecision>>,
-}
-
-impl InterceptRequest {
-    pub(crate) fn new(
-        id: u64,
-        request: RequestInfo,
-        head: String,
-        body: Option<Vec<u8>>,
-        responder: oneshot::Sender<InterceptDecision>,
-    ) -> Self {
-        let body_is_text = body
-            .as_ref()
-            .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok());
-        Self {
-            id,
-            request,
-            head,
-            body,
-            body_is_text,
-            responder: Some(responder),
-        }
-    }
-
-    fn forward(&mut self, head: &str, body: Option<Vec<u8>>) -> Result<(), InterceptError> {
-        if body.is_some() && self.body.is_none() {
-            return Err(InterceptError::BodyUnavailable);
-        }
-        parse_request_head(head).map_err(InterceptError::InvalidHead)?;
-        let responder = self
-            .responder
-            .take()
-            .ok_or(InterceptError::AlreadyResolved)?;
-        responder
-            .send(InterceptDecision::Forward {
-                head: head.to_string(),
-                body,
-            })
-            .map_err(|_| InterceptError::Closed)
-    }
-
-    fn drop_message(&mut self) -> Result<(), InterceptError> {
-        let responder = self
-            .responder
-            .take()
-            .ok_or(InterceptError::AlreadyResolved)?;
-        responder
-            .send(InterceptDecision::Drop)
-            .map_err(|_| InterceptError::Closed)
-    }
-}
-
-impl InterceptResponse {
-    pub(crate) fn new(
-        id: u64,
-        request: RequestInfo,
-        head: String,
-        body: Option<Vec<u8>>,
-        responder: oneshot::Sender<InterceptDecision>,
-    ) -> Self {
-        let body_is_text = body
-            .as_ref()
-            .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok());
-        Self {
-            id,
-            request,
-            head,
-            body,
-            body_is_text,
-            responder: Some(responder),
-        }
-    }
-
-    fn forward(&mut self, head: &str, body: Option<Vec<u8>>) -> Result<(), InterceptError> {
-        if body.is_some() && self.body.is_none() {
-            return Err(InterceptError::BodyUnavailable);
-        }
-        parse_response_head(head).map_err(InterceptError::InvalidHead)?;
-        let responder = self
-            .responder
-            .take()
-            .ok_or(InterceptError::AlreadyResolved)?;
-        responder
-            .send(InterceptDecision::Forward {
-                head: head.to_string(),
-                body,
-            })
-            .map_err(|_| InterceptError::Closed)
-    }
-
-    fn drop_message(&mut self) -> Result<(), InterceptError> {
-        let responder = self
-            .responder
-            .take()
-            .ok_or(InterceptError::AlreadyResolved)?;
-        responder
-            .send(InterceptDecision::Drop)
-            .map_err(|_| InterceptError::Closed)
-    }
-}
-
-impl Drop for InterceptRequest {
-    fn drop(&mut self) {
-        if let Some(responder) = self.responder.take() {
-            let _ = responder.send(InterceptDecision::Abort);
-        }
-    }
-}
-
-impl Drop for InterceptResponse {
-    fn drop(&mut self) {
-        if let Some(responder) = self.responder.take() {
-            let _ = responder.send(InterceptDecision::Abort);
-        }
-    }
 }
 
 impl InterceptItem {
-    /// The exchange id, matching `ProxyEvent` ids.
-    pub fn id(&self) -> u64 {
-        match self {
-            Self::Request(item) => item.id,
-            Self::Response(item) => item.id,
+    pub(crate) fn new_request(
+        id: u64,
+        request: RequestInfo,
+        head: String,
+        body: Option<Vec<u8>>,
+        responder: oneshot::Sender<InterceptDecision>,
+    ) -> Self {
+        Self::new(InterceptKind::Request, id, request, head, body, responder)
+    }
+
+    pub(crate) fn new_response(
+        id: u64,
+        request: RequestInfo,
+        head: String,
+        body: Option<Vec<u8>>,
+        responder: oneshot::Sender<InterceptDecision>,
+    ) -> Self {
+        Self::new(InterceptKind::Response, id, request, head, body, responder)
+    }
+
+    fn new(
+        kind: InterceptKind,
+        id: u64,
+        request: RequestInfo,
+        head: String,
+        body: Option<Vec<u8>>,
+        responder: oneshot::Sender<InterceptDecision>,
+    ) -> Self {
+        let body_is_text = body
+            .as_ref()
+            .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok());
+        Self {
+            kind,
+            id,
+            request,
+            head,
+            body,
+            body_is_text,
+            responder: Some(responder),
         }
     }
 
+    /// The exchange id, matching `ProxyEvent` ids.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     pub fn kind(&self) -> InterceptKind {
-        match self {
-            Self::Request(_) => InterceptKind::Request,
-            Self::Response(_) => InterceptKind::Response,
-        }
+        self.kind
     }
 
     /// The request that started this exchange. For a response item this is the
     /// request the response belongs to.
     pub fn request(&self) -> &RequestInfo {
-        match self {
-            Self::Request(item) => &item.request,
-            Self::Response(item) => &item.request,
-        }
+        &self.request
     }
 
     /// The raw message head (request/status line plus headers), terminated by
     /// a blank line.
     pub fn head(&self) -> &str {
-        match self {
-            Self::Request(item) => &item.head,
-            Self::Response(item) => &item.head,
-        }
+        &self.head
     }
 
     /// The buffered body, or `None` when the body was too large or streaming
     /// and therefore cannot be edited.
     pub fn body(&self) -> Option<&[u8]> {
-        match self {
-            Self::Request(item) => item.body.as_deref(),
-            Self::Response(item) => item.body.as_deref(),
-        }
+        self.body.as_deref()
     }
 
     /// Whether the buffered body can safely be edited as text.
     pub fn body_is_text(&self) -> bool {
-        match self {
-            Self::Request(item) => item.body_is_text,
-            Self::Response(item) => item.body_is_text,
-        }
+        self.body_is_text
     }
 
     /// Forward the edited message. `body` must be `None` when the original
     /// body was not buffered; otherwise `None` keeps the original body.
     pub fn forward(&mut self, head: &str, body: Option<Vec<u8>>) -> Result<(), InterceptError> {
-        match self {
-            Self::Request(item) => item.forward(head, body),
-            Self::Response(item) => item.forward(head, body),
+        if body.is_some() && self.body.is_none() {
+            return Err(InterceptError::BodyUnavailable);
         }
+        self.validate_head(head)?;
+        let responder = self
+            .responder
+            .take()
+            .ok_or(InterceptError::AlreadyResolved)?;
+        responder
+            .send(InterceptDecision::Forward {
+                head: head.to_string(),
+                body,
+            })
+            .map_err(|_| InterceptError::Closed)
     }
 
     /// Drop the message. A dropped request is answered with `403 Forbidden`;
     /// a dropped response is replaced with `502 Bad Gateway`.
     pub fn drop_message(&mut self) -> Result<(), InterceptError> {
-        match self {
-            Self::Request(item) => item.drop_message(),
-            Self::Response(item) => item.drop_message(),
+        let responder = self
+            .responder
+            .take()
+            .ok_or(InterceptError::AlreadyResolved)?;
+        responder
+            .send(InterceptDecision::Drop)
+            .map_err(|_| InterceptError::Closed)
+    }
+
+    fn validate_head(&self, head: &str) -> Result<(), InterceptError> {
+        match self.kind {
+            InterceptKind::Request => parse_request_head(head).map(|_| ()),
+            InterceptKind::Response => parse_response_head(head).map(|_| ()),
+        }
+        .map_err(InterceptError::InvalidHead)
+    }
+}
+
+impl Drop for InterceptItem {
+    fn drop(&mut self) {
+        if let Some(responder) = self.responder.take() {
+            let _ = responder.send(InterceptDecision::Abort);
         }
     }
 }
@@ -269,13 +197,13 @@ mod tests {
     #[test]
     fn forwarding_validates_the_edited_head() {
         let (tx, mut rx) = oneshot::channel();
-        let mut item = InterceptItem::Request(InterceptRequest::new(
+        let mut item = InterceptItem::new_request(
             1,
             request_info(),
             "POST / HTTP/1.1\r\n\r\n".to_string(),
             Some(Vec::new()),
             tx,
-        ));
+        );
 
         let error = item
             .forward("not a request line", Some(Vec::new()))
@@ -297,16 +225,55 @@ mod tests {
     }
 
     #[test]
+    fn forwarding_a_response_validates_the_status_line() {
+        let (tx, mut rx) = oneshot::channel();
+        let mut item = InterceptItem::new_response(
+            2,
+            request_info(),
+            "HTTP/1.1 204 No Content\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+
+        let error = item.forward("not a response line", None).unwrap_err();
+        assert!(matches!(error, InterceptError::InvalidHead(_)));
+
+        item.forward("HTTP/1.1 204 No Content\r\n\r\n", None)
+            .unwrap();
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            InterceptDecision::Forward { .. }
+        ));
+    }
+
+    #[test]
+    fn body_edits_are_rejected_when_the_body_was_not_buffered() {
+        let (tx, _rx) = oneshot::channel();
+        let mut item = InterceptItem::new_request(
+            3,
+            request_info(),
+            "GET / HTTP/1.1\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+
+        let error = item
+            .forward("GET / HTTP/1.1\r\n\r\n", Some(Vec::new()))
+            .unwrap_err();
+        assert!(matches!(error, InterceptError::BodyUnavailable));
+    }
+
+    #[test]
     fn dropping_the_item_aborts_the_exchange() {
         let (tx, mut rx) = oneshot::channel();
         {
-            let _item = InterceptItem::Request(InterceptRequest::new(
+            let _item = InterceptItem::new_request(
                 1,
                 request_info(),
                 "GET / HTTP/1.1\r\n\r\n".to_string(),
                 None,
                 tx,
-            ));
+            );
         }
         assert!(matches!(rx.try_recv(), Ok(InterceptDecision::Abort)));
     }
