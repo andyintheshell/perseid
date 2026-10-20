@@ -5,75 +5,70 @@ use egui::{Align, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
 use super::util::{mime_type, request_url};
-use super::widgets::{empty_state, message_text, message_toolbar, section_tab};
+use super::widgets::{empty_state, message_text, message_toolbar, section_bar, section_tab};
 use super::*;
 
 impl PerseidApp {
     pub(super) fn proxy_tab(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::NONE
-            .fill(theme::SURFACE_ALT)
-            .inner_margin(egui::Margin::symmetric(10, 5))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if section_tab(
-                        ui,
-                        self.proxy_section == ProxySection::Intercept,
-                        "Intercept",
-                    )
-                    .clicked()
-                    {
-                        self.proxy_section = ProxySection::Intercept;
-                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                    }
-                    if section_tab(
-                        ui,
-                        self.proxy_section == ProxySection::HttpHistory,
-                        "HTTP history",
-                    )
-                    .clicked()
-                    {
-                        self.proxy_section = ProxySection::HttpHistory;
-                    }
-                    let rules_label = if self.rules_error.is_some() {
-                        "Match/replace !"
-                    } else {
-                        "Match/replace"
-                    };
-                    let rules_hint = self
-                        .rules_error
-                        .as_deref()
-                        .unwrap_or("Rule changes apply to traffic immediately");
-                    if section_tab(
-                        ui,
-                        self.proxy_section == ProxySection::MatchReplace,
-                        rules_label,
-                    )
-                    .on_hover_text(rules_hint)
-                    .clicked()
-                    {
-                        self.proxy_section = ProxySection::MatchReplace;
-                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                    }
-                    let tls_label = if self.tls_ca_error.is_some() {
-                        "TLS !"
-                    } else if self.tls_intercept && self.tls_ca.is_some() {
-                        "TLS on"
-                    } else {
-                        "TLS"
-                    };
-                    let tls_hint = self
-                        .tls_ca_error
-                        .as_deref()
-                        .unwrap_or("Certificate authority and HTTPS decryption controls");
-                    if section_tab(ui, self.proxy_section == ProxySection::Tls, tls_label)
-                        .on_hover_text(tls_hint)
-                        .clicked()
-                    {
-                        self.proxy_section = ProxySection::Tls;
-                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                    }
-                });
-            });
+        section_bar(ui, "perseid.proxy.sections", |ui| {
+            if section_tab(
+                ui,
+                self.proxy_section == ProxySection::Intercept,
+                "Intercept",
+            )
+            .clicked()
+            {
+                self.proxy_section = ProxySection::Intercept;
+                ui.ctx().memory_mut(|memory| memory.stop_text_input());
+            }
+            if section_tab(
+                ui,
+                self.proxy_section == ProxySection::HttpHistory,
+                "HTTP history",
+            )
+            .clicked()
+            {
+                self.proxy_section = ProxySection::HttpHistory;
+            }
+            let rules_label = if self.rules_error.is_some() {
+                "Match/replace !"
+            } else {
+                "Match/replace"
+            };
+            let rules_hint = self
+                .rules_error
+                .as_deref()
+                .unwrap_or("Rule changes apply to traffic immediately");
+            if section_tab(
+                ui,
+                self.proxy_section == ProxySection::MatchReplace,
+                rules_label,
+            )
+            .on_hover_text(rules_hint)
+            .clicked()
+            {
+                self.proxy_section = ProxySection::MatchReplace;
+                ui.ctx().memory_mut(|memory| memory.stop_text_input());
+            }
+            let tls_label = if self.tls_ca_error.is_some() {
+                "TLS !"
+            } else if self.tls_intercept && self.tls_ca.is_some() {
+                "TLS on"
+            } else {
+                "TLS"
+            };
+            let tls_hint = self
+                .tls_ca_error
+                .as_deref()
+                .unwrap_or("Certificate authority and HTTPS decryption controls");
+            if section_tab(ui, self.proxy_section == ProxySection::Tls, tls_label)
+                .on_hover_text(tls_hint)
+                .clicked()
+            {
+                self.proxy_section = ProxySection::Tls;
+                ui.ctx().memory_mut(|memory| memory.stop_text_input());
+            }
+        });
 
         match self.proxy_section {
             ProxySection::Intercept => self.intercept_view(ui),
@@ -86,7 +81,7 @@ impl PerseidApp {
     fn http_history_view(&mut self, ui: &mut egui::Ui) {
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(10, 6))
+            .inner_margin(egui::Margin::symmetric(12, 6))
             .show(ui, |ui| self.history_toolbar(ui));
         self.rebuild_visible();
         // The filter or scope can hide the selected exchange. Do not leave its

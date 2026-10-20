@@ -3,7 +3,7 @@
 use egui::{Label, TextEdit};
 use perseid_proxy::{CapturedBody, InterceptError, InterceptItem, InterceptKind};
 
-use super::widgets::{card, empty_state};
+use super::widgets::{card, empty_state, page_pad};
 use super::*;
 
 /// UI-side copy of the message currently waiting for a decision.
@@ -59,10 +59,11 @@ impl PerseidApp {
             .unwrap_or(self.listen);
         let pending = self.intercept_queue.len();
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_max_width(920.0);
+        page_pad(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_max_width(920.0);
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
@@ -408,6 +409,7 @@ impl PerseidApp {
                     }
                 }
             });
+        });
 
         if settings_changed {
             self.apply_proxy_settings();

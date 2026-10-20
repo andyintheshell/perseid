@@ -68,6 +68,7 @@ fn visuals() -> egui::Visuals {
     visuals.menu_corner_radius = CornerRadius::same(6);
     visuals.selection.bg_fill = SELECTED;
     visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     visuals.indent_has_left_vline = false;
     visuals.collapsing_header_frame = false;
     visuals.striped = true;

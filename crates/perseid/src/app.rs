@@ -633,12 +633,6 @@ impl PerseidApp {
                     self.about_open = true;
                 }
             }
-            ui.label(
-                RichText::new("Perseid")
-                    .size(20.0)
-                    .strong()
-                    .color(theme::TEXT),
-            );
             ui.add_space(6.0);
 
             ui.scope(|ui| {
@@ -725,7 +719,7 @@ impl PerseidApp {
     }
 
     fn main_tabs(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(5.0);
+        ui.add_space(4.0);
         let shortcuts = [
             ui.ctx().format_shortcut(&TAB_TARGET_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_PROXY_SHORTCUT),
@@ -742,8 +736,6 @@ impl PerseidApp {
                 }
             }
         });
-        ui.add_space(5.0);
-        ui.separator();
     }
 
     fn capture_toggle(&mut self, ui: &mut egui::Ui) {
@@ -883,7 +875,6 @@ impl PerseidApp {
     }
 
     fn main_content(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(2.0);
         match self.main_tab {
             MainTab::Target => self.target_tab(ui),
             MainTab::Proxy => self.proxy_tab(ui),
@@ -902,7 +893,6 @@ impl eframe::App for PerseidApp {
         self.rebuild_visible();
 
         egui::Panel::top("perseid.top")
-            .show_separator_line(false)
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
@@ -922,11 +912,7 @@ impl eframe::App for PerseidApp {
             .show(ui, |ui| self.status_bar(ui));
 
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::NONE
-                    .fill(theme::CANVAS)
-                    .inner_margin(egui::Margin::same(8)),
-            )
+            .frame(egui::Frame::NONE.fill(theme::CANVAS))
             .show(ui, |ui| self.main_content(ui));
 
         self.memory_window(&ctx);
