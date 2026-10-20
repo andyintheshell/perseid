@@ -224,20 +224,16 @@ pub(super) fn message_text(
         });
 }
 
-/// Render the Pretty and Raw views as virtualized, numbered, highlighted rows.
+/// Render the Pretty and Raw views as a wrapped, selectable text editor.
 ///
-/// Splitting the message into rows is what makes both the gutter and the
-/// per-line highlighting cheap: only the visible page is laid out, even when
-/// the body preview is at its 256 KiB limit.
+/// The editor owns the text buffer, so wrapping, selection, copying, and
+/// keyboard navigation all use egui's native text behavior. Line numbers stay
+/// in a painted gutter outside the buffer: they align with the editor's galley
+/// but can never be selected or copied.
 fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: MessageView, text: &str) {
-    let lines: Vec<&str> = text.lines().collect();
-    let syntax = highlight::Syntax::from_lines(&lines);
+    let line_count = text.lines().count() + usize::from(text.ends_with('\n'));
     let font = message_font();
-    // `show_rows` uses this as the row pitch, so it must match the height each
-    // row actually occupies. Zero the outer spacing before the estimate is
-    // taken, then do the same inside the scroll area.
-    let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
-    let digits = lines.len().max(1).to_string().len();
+    let digits = line_count.max(1).to_string().len();
     let number_width = ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap("0".repeat(digits), font.clone(), theme::GRAY)
@@ -245,37 +241,91 @@ fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: Message
             .x
     });
     let gutter_width = number_width + 10.0;
-    let total_rows = total_message_rows(ui, lines.len(), row_height);
-    let line_id_base = ui.make_persistent_id(("perseid.message.line", id, pane as u8, mode as u8));
+    let available_height = ui.available_height();
+    let min_height = if available_height.is_finite() {
+        available_height.max(0.0)
+    } else {
+        0.0
+    };
+    let text_id = ui.make_persistent_id(("perseid.message.text", id, pane as u8, mode as u8));
+    let frame = egui::Frame::NONE.inner_margin(egui::Margin {
+        left: gutter_width.round().clamp(0.0, i8::MAX as f32) as i8,
+        right: 0,
+        top: 0,
+        bottom: 0,
+    });
+    let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+        let job = highlight::message_job(buffer.as_str(), wrap_width, &font);
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+    let mut readonly = text;
 
     ui.spacing_mut().item_spacing.y = 0.0;
-    egui::ScrollArea::both()
+    egui::ScrollArea::vertical()
         .id_salt(("perseid.message", id, pane as u8, mode as u8))
         .auto_shrink([false, false])
-        .show_rows(ui, row_height, total_rows, |ui, range| {
+        .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            for index in range {
-                let numbered = index < lines.len();
-                let line = lines.get(index).copied().unwrap_or_default();
-                let role = if numbered {
-                    syntax.role(index)
-                } else {
-                    highlight::LineRole::Blank
-                };
-                let galley = ui.fonts_mut(|fonts| {
-                    fonts.layout_job(highlight::line_job(line, role, syntax.language, &font))
-                });
-                selectable_message_line(
-                    ui,
-                    line_id_base.with(index),
-                    galley,
-                    numbered.then_some(index + 1),
-                    &font,
-                    gutter_width,
-                    row_height,
-                );
-            }
+            let output = egui::TextEdit::multiline(&mut readonly)
+                .id(text_id)
+                .font(egui::FontSelection::FontId(font.clone()))
+                .frame(frame)
+                .desired_width(f32::INFINITY)
+                .min_size(egui::vec2(0.0, min_height))
+                .layouter(&mut layouter)
+                .show(ui);
+            autoscroll_message_selection(ui, &output.response.response);
+            paint_line_numbers(ui, &output.galley, output.galley_pos, &font);
         });
+}
+
+fn autoscroll_message_selection(ui: &egui::Ui, response: &egui::Response) {
+    if !response.dragged() {
+        return;
+    }
+    let Some(pointer) = ui.input(|input| input.pointer.interact_pos()) else {
+        return;
+    };
+    let viewport = ui.clip_rect();
+    const EDGE: f32 = 20.0;
+    const SPEED: f32 = 12.0;
+    let delta = if pointer.y < viewport.top() + EDGE {
+        SPEED
+    } else if pointer.y > viewport.bottom() - EDGE {
+        -SPEED
+    } else {
+        return;
+    };
+    let content = response.rect;
+    if (delta < 0.0 && content.bottom() <= viewport.bottom() + 0.5)
+        || (delta > 0.0 && content.top() >= viewport.top() - 0.5)
+    {
+        return;
+    }
+    ui.scroll_with_delta_animation(egui::vec2(0.0, delta), egui::style::ScrollAnimation::none());
+    ui.ctx().request_repaint();
+}
+
+fn paint_line_numbers(ui: &egui::Ui, galley: &egui::Galley, galley_pos: egui::Pos2, font: &FontId) {
+    let clip = ui.clip_rect();
+    let mut number = 1;
+    for (index, row) in galley.rows.iter().enumerate() {
+        let starts_line = index == 0 || galley.rows[index - 1].ends_with_newline;
+        if !starts_line {
+            continue;
+        }
+        let y = galley_pos.y + row.pos.y;
+        if y + row.row.size.y >= clip.top() && y <= clip.bottom() {
+            ui.painter().text(
+                egui::pos2(galley_pos.x - 8.0, y),
+                Align2::RIGHT_TOP,
+                number.to_string(),
+                font.clone(),
+                theme::GRAY,
+            );
+        }
+        number += 1;
+    }
 }
 
 fn message_font() -> FontId {
@@ -497,6 +547,164 @@ mod tests {
             pressed,
             modifiers: Modifiers::NONE,
         }
+    }
+
+    fn run_message_frame(
+        ctx: &Context,
+        events: Vec<Event>,
+        text: &str,
+    ) -> Vec<egui::OutputCommand> {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            events,
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, text);
+        });
+        let commands = output.platform_output.commands.clone();
+        output.drop_without_applying_deltas();
+        commands
+    }
+
+    fn settled_selections(commands: &[egui::OutputCommand]) -> Vec<&str> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                egui::OutputCommand::TextSelectionSettled(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn message_selection_autoscrolls_past_the_viewport() {
+        let text = (0..60)
+            .map(|index| format!("line-{index:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let ctx = Context::default();
+        let start = egui::pos2(20.0, 5.0);
+        let below_viewport = egui::pos2(40.0, 310.0);
+        let mut commands = run_message_frame(&ctx, vec![], &text);
+
+        commands.extend(run_message_frame(
+            &ctx,
+            vec![Event::PointerMoved(start)],
+            &text,
+        ));
+        commands.extend(run_message_frame(&ctx, vec![button(start, true)], &text));
+        commands.extend(run_message_frame(
+            &ctx,
+            vec![Event::PointerMoved(below_viewport)],
+            &text,
+        ));
+        for _ in 0..60 {
+            commands.extend(run_message_frame(&ctx, vec![], &text));
+        }
+        commands.extend(run_message_frame(
+            &ctx,
+            vec![button(below_viewport, false)],
+            &text,
+        ));
+        commands.extend(run_message_frame(&ctx, vec![], &text));
+
+        let selected = settled_selections(&commands)
+            .into_iter()
+            .next()
+            .expect("selection should settle");
+        assert!(
+            selected.starts_with("line-000"),
+            "selection should start at the first line without the gutter: {selected:?}"
+        );
+        assert!(
+            selected.contains("line-050"),
+            "dragging below the viewport should keep scrolling: {selected:?}"
+        );
+    }
+
+    #[test]
+    fn message_selection_can_start_in_blank_space() {
+        let text = "line-000\nline-001\nline-002";
+        let ctx = Context::default();
+        let blank = egui::pos2(40.0, 250.0);
+        let first_line = egui::pos2(20.0, 5.0);
+        let mut commands = run_message_frame(&ctx, vec![], text);
+
+        commands.extend(run_message_frame(
+            &ctx,
+            vec![Event::PointerMoved(blank)],
+            text,
+        ));
+        commands.extend(run_message_frame(&ctx, vec![button(blank, true)], text));
+        commands.extend(run_message_frame(
+            &ctx,
+            vec![Event::PointerMoved(first_line)],
+            text,
+        ));
+        commands.extend(run_message_frame(
+            &ctx,
+            vec![button(first_line, false)],
+            text,
+        ));
+        commands.extend(run_message_frame(&ctx, vec![], text));
+
+        let selected = settled_selections(&commands)
+            .into_iter()
+            .next()
+            .expect("selection should settle");
+        assert!(
+            selected.starts_with("line-000"),
+            "a drag from the blank area should select the message: {selected:?}"
+        );
+        assert!(selected.contains("line-002"));
+    }
+
+    #[test]
+    fn message_selection_does_not_leak_into_other_labels() {
+        let text = "line-000\nline-001\nline-002";
+        let ctx = Context::default();
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(500.0, 300.0))),
+            ..Default::default()
+        };
+        let run = |events| {
+            let input = RawInput {
+                events,
+                ..input.clone()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(300.0, 300.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, text);
+                        },
+                    );
+                    ui.add(egui::Label::new("OUTSIDE").selectable(true));
+                });
+            });
+            let commands = output.platform_output.commands.clone();
+            output.drop_without_applying_deltas();
+            commands
+        };
+
+        let start = egui::pos2(40.0, 5.0);
+        let outside = egui::pos2(350.0, 100.0);
+        let mut commands = run(vec![]);
+        commands.extend(run(vec![Event::PointerMoved(start)]));
+        commands.extend(run(vec![button(start, true)]));
+        commands.extend(run(vec![Event::PointerMoved(outside)]));
+        commands.extend(run(vec![button(outside, false)]));
+        commands.extend(run(vec![]));
+
+        let selections = settled_selections(&commands);
+        assert!(!selections.is_empty(), "selection should settle");
+        assert!(
+            selections.iter().all(|text| !text.contains("OUTSIDE")),
+            "selection should stay inside the message view: {selections:?}"
+        );
     }
 
     #[test]
