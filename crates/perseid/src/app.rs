@@ -835,7 +835,7 @@ impl PerseidApp {
             if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
                 ui.separator();
                 ui.label(
-                    RichText::new(format!("#{} {}", item.id, item.request.method))
+                    RichText::new(format!("#{} {}", item.number, item.request.method))
                         .small()
                         .color(theme::TEXT_MUTED),
                 );

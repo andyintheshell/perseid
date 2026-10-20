@@ -159,7 +159,7 @@ pub(super) fn message_toolbar(
                 |ui| match pane {
                     MessagePane::Request => {
                         ui.label(
-                            RichText::new(format!("#{}", item.id))
+                            RichText::new(format!("#{}", item.number))
                                 .small()
                                 .color(theme::TEXT_MUTED),
                         );

@@ -107,9 +107,11 @@ only.
 
 Configure the browser's HTTP and HTTPS proxy as `127.0.0.1:8080` (or the address
 passed with `--listen`). Then browse an HTTPS site. Each request and response
-appears as its own row in **Proxy > HTTP history**, with an `https://` URL. The
-original `CONNECT` row remains in history marked **TLS intercepted**, with the
-number of decrypted requests served over that tunnel.
+appears as its own row in **Proxy > HTTP history**, with an `https://` URL. Like
+Burp, Perseid treats the `CONNECT` tunnel as transport: it is not listed as a
+separate history request. When interception is off or a host is passed through,
+the encrypted traffic has no plaintext request to show, so it does not add
+history rows either.
 
 Held interception, scope enforcement, and match/replace rules all apply to
 decrypted HTTPS messages exactly as they do to plain HTTP. Only HTTP/1.1 is
@@ -145,7 +147,8 @@ Visit an HTTPS page after installing the certificate. In **HTTP history**:
 - The URL starts with `https://`.
 - **Raw** shows the request and response, including compressed bodies decoded
   for display.
-- The **CONNECT** row for the same host is labeled **TLS intercepted**.
+- There is no separate `CONNECT` row; the request index counts actual HTTP
+  requests, as in Burp.
 
 If the browser shows a certificate warning instead, see the troubleshooting
 section below.

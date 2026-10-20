@@ -129,10 +129,11 @@ the same certificate page.
 
 Each request inside a decrypted `CONNECT` tunnel appears as its own `https://`
 entry in HTTP history and flows through interception, scope, and match/replace
-like plain HTTP. The original `CONNECT` row records the tunnel and how many
-requests it carried. Hosts on the pass-through list stay opaque, as does all
-HTTPS when you turn off **Intercept HTTPS** or start with
-`--no-tls-intercept`. Only HTTP/1.1 is negotiated inside the tunnel.
+like plain HTTP. The `CONNECT` tunnel itself is transport and is not shown as a
+separate row, matching Burp's HTTP history. Hosts on the pass-through list stay
+opaque, as does all HTTPS when you turn off **Intercept HTTPS** or start with
+`--no-tls-intercept`; because those connections are not decrypted, they add no
+HTTP history rows. Only HTTP/1.1 is negotiated inside the tunnel.
 
 ## Match/replace rules
 
@@ -156,11 +157,12 @@ proxy at `127.0.0.1:8080` for HTTP and HTTPS.
   bodies, status, size, duration, and capture truncation are visible in the
   history table and detail pane. They can also be held and edited when
   interception is enabled.
-- HTTPS requests arrive as `CONNECT` tunnels. By default Perseid relays the
-  bytes in both directions and records the exchange with byte counts, without
-  decrypting. After generating a CA and enabling **Decrypt HTTPS**, each request
-  inside the tunnel is captured — and can be held and edited — as a separate
-  `https://` history entry.
+- HTTPS requests arrive as `CONNECT` tunnels. Perseid intercepts and decrypts
+  them by default, so each request inside the tunnel is captured — and can be
+  held and edited — as an ordinary `https://` history entry. The `CONNECT`
+  transport itself does not get its own row. If interception is off or the host
+  is passed through, Perseid relays the encrypted bytes without adding history
+  entries.
 
 History is keyboard-friendly: `j`/`k` or the arrow keys move the selection,
 `Home`/`End` jump to the ends, `Ctrl`+`F` focuses the filter, and `Escape`

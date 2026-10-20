@@ -40,7 +40,7 @@ impl PerseidApp {
                 let body = if self.scope_enabled {
                     "No in-scope HTTP endpoints. Adjust the scope in Target > Scope, or turn off scope filtering."
                 } else {
-                    "Browse an HTTP site through the proxy to populate the site map. HTTPS traffic is captured as CONNECT tunnels until TLS interception lands."
+                    "Browse an HTTP or HTTPS site through the proxy to populate the site map. HTTPS requests appear after decryption."
                 };
                 empty_state(ui, "No HTTP endpoints", body);
                 return;
@@ -107,7 +107,7 @@ impl PerseidApp {
                             ui.add_space(6.0);
                             ui.label(
                                 RichText::new(
-                                    "HTTP only. CONNECT tunnels are omitted until TLS interception lands.",
+                                    "CONNECT transport tunnels are not listed. Decrypted HTTPS requests appear here individually.",
                                 )
                                 .small()
                                 .color(theme::TEXT_MUTED),

@@ -67,7 +67,9 @@ Current workspace layout:
 HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
 `CONNECT` tunnel, and decrypted HTTP/1.1 requests flow through the same
-forwarding, interception, scope, and rewrite pipeline as plain HTTP. Upstream
+forwarding, interception, scope, and rewrite pipeline as plain HTTP. The
+`CONNECT` tunnel is transport and is not inserted into HTTP history; the table
+shows the decrypted request/response exchanges, as Burp does. Upstream
 connections verify origin certificates against the platform trust store. The
 CA is created automatically on first launch and loaded by the app from a stable
 per-user data directory; trust is installed and removed by the user in the

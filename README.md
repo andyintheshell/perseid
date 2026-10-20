@@ -39,8 +39,9 @@ application testing — with no embedded browser and memory bounded by design.
 - Burp-style workspace with **Target**, **Proxy**, **Intruder**, and
   **Repeater** tabs in the familiar order, in a warm light theme.
 - Bounded in-memory history (exchange count and total captured-body bytes)
-  with filtering, a scope view filter, and keyboard navigation (`j`/`k`,
-  arrows, `Home`/`End`, `Ctrl`+`F`).
+  with one row per HTTP request, filtering, a scope view filter, and keyboard
+  navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`). `CONNECT` transport
+  tunnels do not clutter the table; decrypted HTTPS requests appear directly.
 - Live **Memory** indicator in the status bar with allocator memory in use;
   click it for the current and peak values and a rolling graph.
 - Request/response tabs with Raw, Headers, and Hex views, truncation markers,

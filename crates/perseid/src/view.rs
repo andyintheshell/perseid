@@ -620,6 +620,7 @@ mod tests {
 
         HistoryItem {
             id: 1,
+            number: 1,
             timestamp: SystemTime::UNIX_EPOCH,
             request: RequestInfo {
                 method: "POST".to_string(),

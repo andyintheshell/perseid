@@ -1,5 +1,9 @@
 //! UI-side history: proxy events folded into inspectable exchange records.
 //!
+//! Transport-level `CONNECT` tunnels are ignored, matching Burp's HTTP history:
+//! only the HTTP requests carried through the proxy, including decrypted HTTPS
+//! requests, become rows.
+//!
 //! History is intentionally simple: one map for lookup, one deque for order,
 //! and a hard cap. Memory stays bounded because bodies are already capped by
 //! the proxy's capture limit and the oldest entries are evicted here.
@@ -30,6 +34,9 @@ pub enum Phase {
 #[derive(Debug)]
 pub struct HistoryItem {
     pub id: u64,
+    /// One-based request index shown in the table. This is separate from the
+    /// proxy event id because transport-level CONNECT tunnels do not get a row.
+    pub number: u64,
     pub timestamp: SystemTime,
     pub request: RequestInfo,
     pub request_body: CapturedBody,
@@ -127,6 +134,7 @@ pub struct History {
     retained_bytes: usize,
     evicted: u64,
     in_flight: usize,
+    next_number: u64,
     revision: u64,
 }
 
@@ -140,6 +148,7 @@ impl History {
             retained_bytes: 0,
             evicted: 0,
             in_flight: 0,
+            next_number: 1,
             revision: 0,
         }
     }
@@ -173,6 +182,7 @@ impl History {
         self.retained_bytes = 0;
         self.evicted = 0;
         self.in_flight = 0;
+        self.next_number = 1;
         self.revision += 1;
     }
 
@@ -228,10 +238,19 @@ impl History {
                 timestamp,
                 request,
             } => {
+                // CONNECT is transport plumbing, not an HTTP request. Burp's
+                // HTTP history lists the requests carried inside the tunnel,
+                // not the tunnel itself, so it gets no row or request index.
+                if request.method.eq_ignore_ascii_case("CONNECT") {
+                    return id;
+                }
+                let number = self.next_number;
+                self.next_number += 1;
                 self.items.insert(
                     id,
                     HistoryItem {
                         id,
+                        number,
                         timestamp,
                         request,
                         request_body: CapturedBody::default(),
@@ -296,7 +315,7 @@ fn item_body_bytes(item: &HistoryItem) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use perseid_proxy::{ExchangeEnd, RequestInfo};
+    use perseid_proxy::{ExchangeEnd, ExchangeResult, RequestInfo, ResponseHead};
     use std::time::SystemTime;
 
     fn started(id: u64, method: &str) -> ProxyEvent {
@@ -309,6 +328,22 @@ mod tests {
                 scheme: "http".to_string(),
                 host: "example.com".to_string(),
                 path: format!("/{id}"),
+                version: "HTTP/1.1".to_string(),
+                headers: Vec::new(),
+            },
+        }
+    }
+
+    fn connect_started(id: u64) -> ProxyEvent {
+        ProxyEvent::Started {
+            id,
+            timestamp: SystemTime::now(),
+            request: RequestInfo {
+                method: "CONNECT".to_string(),
+                uri: "example.com:443".to_string(),
+                scheme: "https".to_string(),
+                host: "example.com:443".to_string(),
+                path: String::new(),
                 version: "HTTP/1.1".to_string(),
                 headers: Vec::new(),
             },
@@ -357,6 +392,41 @@ mod tests {
         assert!(!item.is_in_flight());
         assert_eq!(item.status(), Some(200));
         assert_eq!(item.duration(), Some(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn connect_tunnels_do_not_create_rows_or_consume_request_numbers() {
+        let mut history = History::new(10, DEFAULT_HISTORY_BYTES);
+        history.apply(connect_started(1));
+        history.apply(ProxyEvent::ResponseHead {
+            id: 1,
+            head: ResponseHead {
+                version: "HTTP/1.1".to_string(),
+                status: 200,
+                reason: "Connection Established".to_string(),
+                headers: Vec::new(),
+            },
+        });
+        history.apply(ProxyEvent::Finished {
+            id: 1,
+            end: ExchangeEnd {
+                duration: Duration::from_millis(1),
+                request_body: CapturedBody::default(),
+                result: ExchangeResult::InterceptedTls { requests: 1 },
+            },
+        });
+        assert_eq!(history.len(), 0);
+        assert_eq!(history.in_flight(), 0);
+
+        history.apply(started(2, "GET"));
+        history.apply(started(3, "GET"));
+        assert_eq!(history.len(), 2);
+        let numbers: Vec<u64> = history.iter().map(|item| item.number).collect();
+        assert_eq!(numbers, vec![1, 2]);
+
+        history.clear();
+        history.apply(started(4, "GET"));
+        assert_eq!(history.get(4).unwrap().number, 1);
     }
 
     #[test]

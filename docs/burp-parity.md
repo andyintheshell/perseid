@@ -71,8 +71,10 @@ first launch, serves its certificate from a local download page, and reuses the
 CA across restarts and updates. The user still installs trust manually in the
 browser; the CA private key stays local, and Perseid never writes to a trust
 store. Hosts on the pass-through list stay opaque, and HTTP/1.1 is the only
-protocol negotiated inside the tunnel. See [HTTPS interception](tls.md) for the
-trust and removal workflow.
+protocol negotiated inside the tunnel. HTTP history follows Burp's model: it
+lists HTTP requests and responses, including decrypted HTTPS requests, but not
+the `CONNECT` transport tunnels that carry them. See
+[HTTPS interception](tls.md) for the trust and removal workflow.
 Interception buffers bodies up to `--intercept-limit`; larger or streaming
 bodies are held for header edits, and body rewrite rules apply only to buffered
 UTF-8 bodies. The message editor decodes gzip, deflate, and Brotli bodies in
