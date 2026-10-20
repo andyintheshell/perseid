@@ -23,7 +23,7 @@ use crate::capture::{BodyBuffer, EndReason, TeeBody, new_buffer, snapshot};
 use crate::events::{
     CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
 };
-use crate::intercept::{InterceptDecision, InterceptItem, InterceptRequest, InterceptResponse};
+use crate::intercept::{InterceptDecision, InterceptItem};
 use crate::message::{
     ParsedResponseHead, editor_reason, parse_request_head, parse_response_head,
     serialize_request_head, serialize_response_head,
@@ -249,13 +249,13 @@ async fn handle_with(
         );
         let body = body_source.buffered().map(<[u8]>::to_vec);
         let (decision_tx, decision_rx) = oneshot::channel();
-        let item = InterceptItem::Request(InterceptRequest::new(
+        let item = InterceptItem::new_request(
             exchange.start.id,
             exchange.request.clone(),
             head,
             body,
             decision_tx,
-        ));
+        );
 
         match ctx.ask_interceptor(item, decision_rx).await {
             InterceptDecision::Forward { mut head, mut body } => {
@@ -607,13 +607,7 @@ async fn relay(
         let head = serialize_response_head(parts.version, parts.status, &reason, &parts.headers);
         let body = body_source.buffered().map(<[u8]>::to_vec);
         let (decision_tx, decision_rx) = oneshot::channel();
-        let item = InterceptItem::Response(InterceptResponse::new(
-            start.id,
-            request.clone(),
-            head,
-            body,
-            decision_tx,
-        ));
+        let item = InterceptItem::new_response(start.id, request.clone(), head, body, decision_tx);
 
         match ctx.ask_interceptor(item, decision_rx).await {
             InterceptDecision::Forward { mut head, mut body } => {

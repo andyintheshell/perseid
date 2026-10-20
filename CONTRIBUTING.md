@@ -21,9 +21,9 @@ Requirements:
 From the workspace root:
 
 ```sh
-cargo build
-cargo run -p perseid
-cargo test --workspace
+cargo build --locked
+cargo run -p perseid --locked
+cargo test --workspace --locked
 ```
 
 The `perseid-proxy` crate also has a headless example for manual smoke tests:
@@ -47,13 +47,28 @@ Before sending a change, run the same checks as CI:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
 Install the tools with `rustup component add rustfmt clippy`. On Kali/Debian
 systems using the distribution's Rust packages, install `rustfmt` and
 `rust-clippy` through apt instead, keeping them in step with `rustc`.
+
+## Dependencies
+
+`Cargo.lock` is tracked. It is the exact, reproducible resolution used by
+local builds, releases, and CI; every Cargo check in CI runs with `--locked`
+so a manifest change that needs a lockfile update fails instead of silently
+resolving to newer crates.
+
+Workspace manifests deliberately use semver-compatible ranges (for example,
+`egui = "0.37"`) rather than `=` pins. The lockfile supplies the pin for
+applications and CI, while ranges let downstream consumers of
+`perseid-proxy` share a compatible version. When a dependency is added or
+upgraded, run `cargo update` intentionally and include the resulting
+`Cargo.lock` change in the same pull request. Do not commit unrelated
+lockfiles from other toolchains.
 
 ## Screenshots
 

@@ -30,6 +30,7 @@ eframe = { version = "0.37", default-features = false, features = [
 ] }
 env_logger = "0.11"
 flate2 = "1.1"
+form_urlencoded = "1"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "http2", "server", "client"] }

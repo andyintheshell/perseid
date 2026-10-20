@@ -5,10 +5,12 @@ use log::debug;
 use crate::config::ProxySettings;
 use crate::rules::{CompiledRule, RuleDirection, RuleError};
 
-/// Shared policy behind an `RwLock`. Requests take a cheap snapshot so policy
-/// changes never require holding a lock across an await.
-#[derive(Debug)]
-pub(crate) struct Policy {
+/// A consistent view of policy for one exchange.
+///
+/// Stored behind an `RwLock`; requests clone a snapshot so policy changes never
+/// require holding a lock across an await.
+#[derive(Clone, Debug)]
+pub(crate) struct PolicySnapshot {
     intercept_requests: bool,
     intercept_responses: bool,
     scope_enforce: bool,
@@ -18,7 +20,7 @@ pub(crate) struct Policy {
     rules: Vec<CompiledRule>,
 }
 
-impl Policy {
+impl PolicySnapshot {
     pub(crate) fn from_settings(settings: &ProxySettings) -> Result<Self, RuleError> {
         let mut rules = Vec::new();
         for rule in &settings.match_replace {
@@ -38,32 +40,6 @@ impl Policy {
         })
     }
 
-    pub(crate) fn snapshot(&self) -> PolicySnapshot {
-        PolicySnapshot {
-            intercept_requests: self.intercept_requests,
-            intercept_responses: self.intercept_responses,
-            scope_enforce: self.scope_enforce,
-            scope_rules: self.scope_rules.clone(),
-            tls_intercept: self.tls_intercept,
-            tls_passthrough: self.tls_passthrough.clone(),
-            rules: self.rules.clone(),
-        }
-    }
-}
-
-/// A consistent view of policy for one exchange.
-#[derive(Clone, Debug)]
-pub(crate) struct PolicySnapshot {
-    intercept_requests: bool,
-    intercept_responses: bool,
-    scope_enforce: bool,
-    scope_rules: Vec<String>,
-    tls_intercept: bool,
-    tls_passthrough: Vec<String>,
-    rules: Vec<CompiledRule>,
-}
-
-impl PolicySnapshot {
     pub(crate) fn intercept_requests(&self) -> bool {
         self.intercept_requests
     }
@@ -268,19 +244,19 @@ mod tests {
     fn empty_scope_never_enforces() {
         let mut settings = settings();
         settings.scope_enforce = true;
-        let policy = Policy::from_settings(&settings).unwrap().snapshot();
+        let policy = PolicySnapshot::from_settings(&settings).unwrap();
         assert!(!policy.scope_enforced());
         assert!(policy.in_scope("anything.test"));
     }
 
     #[test]
     fn tls_interception_is_off_until_enabled() {
-        let policy = Policy::from_settings(&settings()).unwrap().snapshot();
+        let policy = PolicySnapshot::from_settings(&settings()).unwrap();
         assert!(!policy.tls_intercept());
 
         let mut enabled = settings();
         enabled.tls_intercept = true;
-        let policy = Policy::from_settings(&enabled).unwrap().snapshot();
+        let policy = PolicySnapshot::from_settings(&enabled).unwrap();
         assert!(policy.tls_intercept());
     }
 
@@ -288,7 +264,7 @@ mod tests {
     fn tls_passthrough_matches_subdomains_and_ignores_ports() {
         let mut settings = settings();
         settings.tls_passthrough = vec!["banking.example".to_string(), "10.0.0.5".to_string()];
-        let policy = Policy::from_settings(&settings).unwrap().snapshot();
+        let policy = PolicySnapshot::from_settings(&settings).unwrap();
 
         assert!(policy.tls_passthrough("banking.example"));
         assert!(policy.tls_passthrough("banking.example:443"));
@@ -299,7 +275,7 @@ mod tests {
 
         // An empty list excludes nothing, so every tunnel is a candidate.
         settings.tls_passthrough.clear();
-        let policy = Policy::from_settings(&settings).unwrap().snapshot();
+        let policy = PolicySnapshot::from_settings(&settings).unwrap();
         assert!(!policy.tls_passthrough("example.com"));
     }
 
@@ -324,7 +300,7 @@ mod tests {
                 regex: false,
             },
         ];
-        let policy = Policy::from_settings(&settings).unwrap().snapshot();
+        let policy = PolicySnapshot::from_settings(&settings).unwrap();
         let mut head = "POST / HTTP/1.1\r\nX-Test: secret\r\n\r\n".to_string();
         let mut body = b"old value".to_vec();
         policy.apply_request(&mut head, Some(&mut body));
@@ -343,6 +319,6 @@ mod tests {
             replacement: "x".to_string(),
             regex: true,
         }];
-        assert!(Policy::from_settings(&settings).is_err());
+        assert!(PolicySnapshot::from_settings(&settings).is_err());
     }
 }

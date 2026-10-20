@@ -90,7 +90,7 @@ use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 
-use crate::policy::Policy;
+use crate::policy::PolicySnapshot;
 use crate::util::ProxyBody;
 
 /// Failure to start the proxy itself (the listener, not individual requests).
@@ -122,7 +122,7 @@ pub struct Proxy {
     addr: SocketAddr,
     events: Receiver<ProxyEvent>,
     intercepts: mpsc::Receiver<InterceptItem>,
-    policy: Arc<RwLock<Policy>>,
+    policy: Arc<RwLock<PolicySnapshot>>,
     tls_ca: Arc<RwLock<Option<Arc<CertificateAuthority>>>>,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
@@ -142,7 +142,9 @@ impl Proxy {
     /// return means the proxy is actually accepting connections.
     pub fn start(config: ProxyConfig) -> Result<Self, StartError> {
         config.settings.validate()?;
-        let policy = Arc::new(RwLock::new(Policy::from_settings(&config.settings)?));
+        let policy = Arc::new(RwLock::new(PolicySnapshot::from_settings(
+            &config.settings,
+        )?));
 
         let listener =
             std::net::TcpListener::bind(config.listen).map_err(|source| StartError::Bind {
@@ -315,7 +317,7 @@ impl Proxy {
     ///
     /// The previous policy stays in effect when a rule fails to compile.
     pub fn set_settings(&self, settings: ProxySettings) -> Result<(), RuleError> {
-        let policy = Policy::from_settings(&settings)?;
+        let policy = PolicySnapshot::from_settings(&settings)?;
         *self
             .policy
             .write()

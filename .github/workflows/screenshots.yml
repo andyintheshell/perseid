@@ -67,7 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build with screenshot mode
-        run: cargo build -p perseid --features screenshots
+        run: cargo build -p perseid --features screenshots --locked
 
       - name: Generate screenshots
         run: scripts/screenshots.sh --no-build --out artifacts/screenshots

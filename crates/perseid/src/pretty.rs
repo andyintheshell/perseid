@@ -462,62 +462,14 @@ fn format_form(text: &str) -> Option<String> {
 
     let mut out = String::new();
     let mut wrote = false;
-    for field in text.split('&') {
-        if field.is_empty() {
-            continue;
-        }
-        let (name, value) = field.split_once('=').unwrap_or((field, ""));
-        let name = percent_decode(name);
-        let value = percent_decode(value);
-        out.push_str(&name);
+    for (name, value) in form_urlencoded::parse(text.as_bytes()) {
+        out.push_str(name.as_ref());
         out.push_str(" = ");
-        out.push_str(&value);
+        out.push_str(value.as_ref());
         out.push('\n');
         wrote = true;
     }
     wrote.then_some(out)
-}
-
-fn percent_decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'+' => {
-                out.push(b' ');
-                index += 1;
-            }
-            b'%' if index + 2 < bytes.len() => {
-                match (hex_value(bytes[index + 1]), hex_value(bytes[index + 2])) {
-                    (Some(high), Some(low)) => {
-                        out.push(high * 16 + low);
-                        index += 3;
-                    }
-                    _ => {
-                        out.push(b'%');
-                        index += 1;
-                    }
-                }
-            }
-            byte => {
-                out.push(byte);
-                index += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -599,6 +551,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(formatted, "name = Perseid User\nrole = admin/owner\n");
+    }
+
+    #[test]
+    fn form_formatting_handles_empty_fields_and_malformed_escapes() {
+        let formatted = format_body(
+            Some("application/x-www-form-urlencoded"),
+            b"&&a=1&bad=%2&plus=a+b",
+        )
+        .unwrap();
+
+        assert_eq!(formatted, "a = 1\nbad = %2\nplus = a b\n");
     }
 
     #[test]

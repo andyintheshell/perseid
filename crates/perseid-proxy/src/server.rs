@@ -21,7 +21,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::events::ProxyEvent;
 use crate::intercept::{InterceptDecision, InterceptItem};
-use crate::policy::{Policy, PolicySnapshot};
+use crate::policy::PolicySnapshot;
 use crate::tls::CertificateAuthority;
 use crate::util::ProxyBody;
 use crate::{forward, portal, tunnel};
@@ -42,7 +42,7 @@ pub(crate) struct Ctx {
     pub(crate) paused: Arc<AtomicBool>,
     pub(crate) capture_limit: usize,
     pub(crate) intercept_limit: usize,
-    pub(crate) policy: Arc<RwLock<Policy>>,
+    pub(crate) policy: Arc<RwLock<PolicySnapshot>>,
     pub(crate) intercepts: mpsc::Sender<InterceptItem>,
     pub(crate) blocked_by_scope: Arc<AtomicU64>,
     pub(crate) connect_timeout: Duration,
@@ -91,7 +91,7 @@ impl Ctx {
         self.policy
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .snapshot()
+            .clone()
     }
 
     /// Snapshot the certificate authority for one CONNECT decision.

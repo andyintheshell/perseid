@@ -65,7 +65,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [[ "$BUILD" == 1 ]]; then
-    cargo build -p perseid --features screenshots
+    cargo build -p perseid --features screenshots --locked
 fi
 
 BIN="$ROOT/target/debug/perseid"

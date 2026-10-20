@@ -4,8 +4,9 @@
 use egui::{Align, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
+use super::message_view::{message_text, message_toolbar};
 use super::util::{mime_type, request_url};
-use super::widgets::{empty_state, message_text, message_toolbar, section_bar, section_tab};
+use super::widgets::{empty_state, section_bar, section_tab};
 use super::*;
 
 impl PerseidApp {
