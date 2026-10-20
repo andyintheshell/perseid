@@ -30,9 +30,6 @@ tokio-rustls.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
-env_logger = "0.11"
-rcgen.workspace = true
-rustls.workspace = true
-rustls-pemfile.workspace = true
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
-tokio-rustls.workspace = true
+# Tests and the headless example share the normal dependencies for TLS and
+# Tokio; only the logger is test-only.
+env_logger.workspace = true
