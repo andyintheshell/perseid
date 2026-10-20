@@ -3,33 +3,26 @@
 use egui::TextEdit;
 
 use super::util::captured_hosts;
-use super::widgets::{card, empty_state, section_tab};
+use super::widgets::{card, empty_state, page_pad, section_bar, section_tab};
 use super::*;
 
 impl PerseidApp {
     pub(super) fn target_tab(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::NONE
-            .fill(theme::SURFACE_ALT)
-            .inner_margin(egui::Margin::symmetric(10, 5))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if section_tab(
-                        ui,
-                        self.target_section == TargetSection::SiteMap,
-                        "Site map",
-                    )
-                    .clicked()
-                    {
-                        self.target_section = TargetSection::SiteMap;
-                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                    }
-                    if section_tab(ui, self.target_section == TargetSection::Scope, "Scope")
-                        .clicked()
-                    {
-                        self.target_section = TargetSection::Scope;
-                    }
-                });
-            });
+        section_bar(ui, "perseid.target.sections", |ui| {
+            if section_tab(
+                ui,
+                self.target_section == TargetSection::SiteMap,
+                "Site map",
+            )
+            .clicked()
+            {
+                self.target_section = TargetSection::SiteMap;
+                ui.ctx().memory_mut(|memory| memory.stop_text_input());
+            }
+            if section_tab(ui, self.target_section == TargetSection::Scope, "Scope").clicked() {
+                self.target_section = TargetSection::Scope;
+            }
+        });
 
         match self.target_section {
             TargetSection::SiteMap => self.site_map_view(ui),
@@ -142,12 +135,13 @@ impl PerseidApp {
         let mut settings_dirty = false;
         let mut clear_scope = false;
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_max_width(780.0);
-                card(ui, |ui| {
-                    ui.label(
+        page_pad(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_max_width(780.0);
+                    card(ui, |ui| {
+                        ui.label(
                         RichText::new("Target scope")
                             .size(17.0)
                             .strong()
@@ -294,6 +288,7 @@ impl PerseidApp {
                     .color(theme::TEXT_MUTED),
                 );
             });
+        });
 
         if clear_scope {
             self.scope.clear();

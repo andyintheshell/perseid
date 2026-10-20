@@ -3,7 +3,7 @@
 use egui::TextEdit;
 use perseid_proxy::{MatchReplaceRule, RuleDirection, RulePart};
 
-use super::widgets::{card, empty_state};
+use super::widgets::{card, empty_state, page_pad};
 use super::*;
 
 fn direction_label(direction: RuleDirection) -> &'static str {
@@ -27,10 +27,11 @@ impl PerseidApp {
         let mut add = None;
         let mut remove = None;
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_max_width(980.0);
+        page_pad(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_max_width(980.0);
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
@@ -204,6 +205,7 @@ impl PerseidApp {
                     .color(theme::TEXT_MUTED),
                 );
             });
+        });
 
         if let Some(direction) = add {
             self.match_replace.push(MatchReplaceRule {
