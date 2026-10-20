@@ -1,7 +1,8 @@
 //! Small shared egui widgets: tabs, message viewers, cards, badges, and empty
 //! states.
 
-use egui::{FontId, Label, RichText};
+use egui::text_selection::LabelSelectionState;
+use egui::{Align2, FontId, Label, RichText, Sense};
 
 use super::*;
 use crate::highlight;
@@ -244,49 +245,110 @@ fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: Message
             .x
     });
     let gutter_width = number_width + 10.0;
+    let total_rows = total_message_rows(ui, lines.len(), row_height);
+    let line_id_base = ui.make_persistent_id(("perseid.message.line", id, pane as u8, mode as u8));
 
     ui.spacing_mut().item_spacing.y = 0.0;
     egui::ScrollArea::both()
         .id_salt(("perseid.message", id, pane as u8, mode as u8))
         .auto_shrink([false, false])
-        .show_rows(ui, row_height, lines.len(), |ui, range| {
+        .show_rows(ui, row_height, total_rows, |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for index in range {
+                let numbered = index < lines.len();
                 let line = lines.get(index).copied().unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(gutter_width, row_height),
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            // Right-to-left places this space against the text
-                            // edge, so the numbers stay right-aligned with a
-                            // readable gap before the message.
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new((index + 1).to_string())
-                                    .font(font.clone())
-                                    .color(theme::GRAY),
-                            );
-                        },
-                    );
-                    ui.add(
-                        Label::new(highlight::line_job(
-                            line,
-                            syntax.role(index),
-                            syntax.language,
-                            &font,
-                        ))
-                        .selectable(true)
-                        .wrap_mode(egui::TextWrapMode::Extend),
-                    );
+                let role = if numbered {
+                    syntax.role(index)
+                } else {
+                    highlight::LineRole::Blank
+                };
+                let galley = ui.fonts_mut(|fonts| {
+                    fonts.layout_job(highlight::line_job(line, role, syntax.language, &font))
                 });
+                selectable_message_line(
+                    ui,
+                    line_id_base.with(index),
+                    galley,
+                    numbered.then_some(index + 1),
+                    &font,
+                    gutter_width,
+                    row_height,
+                );
             }
         });
 }
 
 fn message_font() -> FontId {
     FontId::monospace(highlight::MESSAGE_FONT_SIZE)
+}
+
+/// Keep short messages filling the viewport so a selection can begin in the
+/// blank area below the last line, just like in a regular text editor.
+fn total_message_rows(ui: &egui::Ui, content_rows: usize, row_height: f32) -> usize {
+    let available = ui.available_height();
+    let viewport_rows = if available.is_finite() && row_height > 0.0 {
+        (available / row_height).ceil().max(1.0) as usize
+    } else {
+        1
+    };
+    content_rows.max(viewport_rows)
+}
+
+/// One virtualized message row with a selectable text area and an optional
+/// non-selectable line-number gutter.
+///
+/// The interactive rect spans the full visible row width, not just the text
+/// galley. That lets a drag begin to the right of a short line and still anchor
+/// at the line's end. The gutter is painted separately and never enters the
+/// label-selection state.
+fn selectable_message_line(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    galley: Arc<egui::Galley>,
+    number: Option<usize>,
+    font: &FontId,
+    gutter_width: f32,
+    row_height: f32,
+) -> egui::Response {
+    let text_width = galley.size().x;
+    let available_width = ui.available_width();
+    let row_width = (gutter_width + text_width).max(if available_width.is_finite() {
+        available_width
+    } else {
+        0.0
+    });
+    let (_, row_rect) = ui.allocate_space(egui::vec2(row_width, row_height));
+
+    if let Some(number) = number {
+        ui.painter().text(
+            egui::pos2(row_rect.left() + gutter_width - 8.0, row_rect.top()),
+            Align2::RIGHT_TOP,
+            number.to_string(),
+            font.clone(),
+            theme::GRAY,
+        );
+    }
+
+    let text_left = row_rect.left() + gutter_width;
+    let text_rect = egui::Rect::from_min_max(
+        egui::pos2(text_left, row_rect.top()),
+        egui::pos2(
+            row_rect.right().max(text_left + text_width),
+            row_rect.bottom(),
+        ),
+    );
+    let response = ui.interact(text_rect, id, Sense::click_and_drag() - Sense::FOCUSABLE);
+    if ui.is_rect_visible(row_rect) {
+        LabelSelectionState::label_text_selection(
+            ui,
+            &response,
+            egui::pos2(text_left, row_rect.top()),
+            galley,
+            theme::TEXT,
+            Stroke::NONE,
+        );
+    }
+    response
 }
 
 pub(super) fn message_hex(
@@ -306,17 +368,27 @@ pub(super) fn message_hex(
     ui.spacing_mut().item_spacing.y = 0.0;
     let font = message_font();
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let total_rows = total_message_rows(ui, lines.len(), row_height);
+    let line_id_base = ui.make_persistent_id(("perseid.hex.line", id, pane as u8, mode as u8));
 
     egui::ScrollArea::both()
         .id_salt(("perseid.hex", id, pane as u8, mode as u8))
         .auto_shrink([false, false])
-        .show_rows(ui, row_height, lines.len(), |ui, range| {
+        .show_rows(ui, row_height, total_rows, |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            for line in &lines[range] {
-                ui.add(
-                    Label::new(RichText::new(*line).font(font.clone()).color(theme::TEXT))
-                        .selectable(true)
-                        .wrap_mode(egui::TextWrapMode::Extend),
+            for index in range {
+                let line = lines.get(index).copied().unwrap_or_default();
+                let galley = ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(line.to_owned(), font.clone(), theme::TEXT)
+                });
+                selectable_message_line(
+                    ui,
+                    line_id_base.with(index),
+                    galley,
+                    None,
+                    &font,
+                    0.0,
+                    row_height,
                 );
             }
         });
@@ -381,4 +453,82 @@ pub(super) fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
         ui.add_space(4.0);
         ui.label(RichText::new(body).color(theme::TEXT_MUTED));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Context, Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+
+    fn run_frame(
+        ctx: &Context,
+        events: Vec<Event>,
+        row_rect: &mut Option<Rect>,
+    ) -> egui::FullOutput {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 200.0))),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let font = message_font();
+            let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+            let galley = ui.fonts_mut(|fonts| {
+                fonts.layout_no_wrap("short".to_owned(), font.clone(), theme::TEXT)
+            });
+            let response = selectable_message_line(
+                ui,
+                egui::Id::unique("perseid.test.message.line"),
+                galley,
+                Some(123),
+                &font,
+                40.0,
+                row_height,
+            );
+            *row_rect = Some(response.rect);
+        })
+    }
+
+    fn button(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn selection_can_start_in_blank_space_without_the_gutter() {
+        let ctx = Context::default();
+        let mut row_rect = None;
+        run_frame(&ctx, vec![], &mut row_rect).drop_without_applying_deltas();
+        let rect = row_rect.expect("the message row should be rendered");
+        let start = egui::pos2(rect.right() - 4.0, rect.center().y);
+        let end = egui::pos2(rect.left() + 1.0, rect.center().y);
+
+        run_frame(&ctx, vec![Event::PointerMoved(start)], &mut row_rect)
+            .drop_without_applying_deltas();
+        run_frame(&ctx, vec![button(start, true)], &mut row_rect).drop_without_applying_deltas();
+        assert!(
+            ctx.plugin::<LabelSelectionState>().lock().has_selection(),
+            "a drag that starts in the blank area should begin a text selection"
+        );
+
+        run_frame(&ctx, vec![Event::PointerMoved(end)], &mut row_rect)
+            .drop_without_applying_deltas();
+        run_frame(&ctx, vec![button(end, false)], &mut row_rect).drop_without_applying_deltas();
+
+        let output = run_frame(&ctx, vec![Event::Copy], &mut row_rect);
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.as_str()),
+                _ => None,
+            });
+        assert_eq!(copied, Some("short"), "gutter text must not be copied");
+    }
 }
