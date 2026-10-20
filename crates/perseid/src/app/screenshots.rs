@@ -190,8 +190,8 @@ impl PerseidApp {
     pub(super) fn prepare_screenshot_scene(&mut self) -> Result<(), String> {
         self.main_tab = MainTab::Proxy;
         self.proxy_section = ProxySection::HttpHistory;
-        self.request_view = MessageView::Raw;
-        self.response_view = MessageView::Raw;
+        self.request_view = MessageView::Pretty;
+        self.response_view = MessageView::Pretty;
         self.filter.clear();
         self.visible_key = None;
         self.clear_history();

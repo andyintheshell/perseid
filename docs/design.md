@@ -142,16 +142,18 @@ performance claims.
 Important implementation principles:
 
 - Disk-backed history with bounded in-memory windows (planned).
-- Hard limits on captured body size, with explicit truncation markers.
+- Hard limits on captured body size, with bounded text and hex previews.
 - A total retained-body budget for history, independent of the exchange count.
 - Bounded worker queues, concurrent connections and tunnels, and a bounded UI
   event channel with drop counters.
 - A bounded interception queue: held bodies are capped by `--intercept-limit`,
   larger or streaming bodies stay header-only, and unresolved messages apply
   backpressure rather than being silently discarded.
-- Virtualized request lists and hex dumps, plus bounded text previews. Raw
-  previews decode gzip, deflate, and Brotli bodies with a hard output cap; Hex
-  previews keep the wire bytes.
+- Virtualized request lists and message rows, plus bounded text previews. Pretty
+  formats JSON, HTML/XML, and URL-encoded forms; Pretty and Raw are rendered
+  line-by-line with numbers and a small purpose-built highlighter, so only the
+  visible page is laid out. All views decode gzip, deflate, and Brotli bodies
+  with a hard output cap, and Hex previews are bounded byte-offset dumps.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply

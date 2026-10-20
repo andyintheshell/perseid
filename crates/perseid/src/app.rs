@@ -134,8 +134,8 @@ enum MessagePane {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum MessageView {
     #[default]
+    Pretty,
     Raw,
-    Headers,
     Hex,
 }
 

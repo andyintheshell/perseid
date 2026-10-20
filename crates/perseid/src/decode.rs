@@ -2,7 +2,7 @@
 //!
 //! Perseid forwards encoded bodies untouched. For inspection, the message
 //! editor needs to show what the browser would consume, so gzip, deflate, and
-//! Brotli bodies are decoded into a bounded preview. Raw, Headers, and Hex all
+//! Brotli bodies are decoded into a bounded preview. Pretty, Raw, and Hex all
 //! use that decoded representation, matching Burp's unpacked message editor.
 //! The original wire body remains in the capture and is used for forwarding.
 

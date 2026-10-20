@@ -335,7 +335,7 @@ impl PerseidApp {
         };
 
         // Burp's default message-editor layout is horizontal: request and
-        // response are both visible, each with its own Raw/Headers/Hex tabs.
+        // response are both visible, each with its own Pretty/Raw/Hex tabs.
         // Keep the splitter resizable so wide messages still have room.
         let mut request_view = self.request_view;
         let mut response_view = self.response_view;
@@ -385,8 +385,8 @@ impl PerseidApp {
 
 fn message_view_text(views: &MessageViews, mode: MessageView) -> &str {
     match mode {
+        MessageView::Pretty => &views.pretty,
         MessageView::Raw => &views.raw,
-        MessageView::Headers => &views.head,
         MessageView::Hex => &views.hex,
     }
 }

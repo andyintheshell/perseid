@@ -15,7 +15,7 @@ aids, not permission to test an arbitrary host.
 - The proxy binds to `127.0.0.1` by default; keep it on loopback unless you
   have a specific reason and understand the exposure.
 - Captured request and response bodies are capped by `--capture-limit`
-  (1 MiB per message by default) with explicit truncation markers.
+  (1 MiB per message by default).
 - History is bounded by `--history-limit` (2000 exchanges by default) and
   `--history-bytes` (256 MiB of retained request/response body bytes by
   default). The oldest exchanges are evicted when either bound is reached.

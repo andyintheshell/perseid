@@ -101,6 +101,7 @@ impl HistoryItem {
         }
     }
 
+    #[cfg(test)]
     pub fn error(&self) -> Option<&str> {
         match &self.phase {
             Phase::Finished {
