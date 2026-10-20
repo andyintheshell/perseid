@@ -19,6 +19,11 @@
 //! [`ProxyConfig::intercept_limit`]; larger or streaming messages are held for
 //! header edits while their bodies pass through untouched.
 //!
+//! [`Repeater`] is a separate direct HTTP/HTTPS client for manual replay. It
+//! has its own Tokio runtime and connection pool, so it continues to work when
+//! the proxy is stopped, and it does not pass traffic through the proxy's
+//! interception, scope, or rewrite policy.
+//!
 //! # Current scope
 //!
 //! - HTTP/1.1 and HTTP/2 proxying with full request/response capture. The
@@ -37,6 +42,10 @@
 //!   capture pipeline as plain HTTP.
 //! - A local certificate page at the listener address (and `http://perseid/`)
 //!   downloads the public CA certificate. Portal requests are not captured.
+//! - Direct Repeater replay with its own runtime and HTTP/HTTPS client. Edited
+//!   requests can target the connection authority independently of a preserved
+//!   virtual `Host` header, and response bodies are bounded by
+//!   [`RepeaterConfig::capture_limit`]. WebSocket replay is not supported yet.
 //!
 //! # Example
 //!
@@ -57,6 +66,7 @@ mod intercept;
 mod message;
 mod policy;
 mod portal;
+mod repeater;
 mod rules;
 mod server;
 mod tls;
@@ -73,6 +83,10 @@ pub use events::{
 };
 pub use intercept::{InterceptError, InterceptItem, InterceptKind};
 pub use policy::host_in_scope;
+pub use repeater::{
+    DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterError, RepeaterRequest,
+    RepeaterResponse, RepeaterResult, RepeaterStartError,
+};
 pub use rules::{MatchReplaceRule, RuleDirection, RuleError, RulePart};
 pub use tls::{CaError, CertificateAuthority, UpstreamTlsError};
 
