@@ -229,13 +229,21 @@ pub(super) fn message_text(
         });
 
     // egui's text editor collapses a selection when it is pressed or loses
-    // focus (for example when a menu item is clicked). Keep the selected text
-    // while the menu is open so Copy selection still works after that.
-    if secondary_pressed && let Some(range) = selection {
-        let selected: Arc<str> = range.slice_str(text).into();
-        if !selected.is_empty() {
-            ui.data_mut(|data| data.insert_temp(selection_key, selected));
-        }
+    // focus (for example when a menu item is clicked). Remember the text that
+    // was selected when the context menu opened so Copy selection still has
+    // something to copy after that happens.
+    if secondary_pressed {
+        let selected = selection
+            .map(|range| range.slice_str(text))
+            .filter(|selected| !selected.is_empty())
+            .map(Arc::<str>::from);
+        ui.data_mut(|data| {
+            if let Some(selected) = selected {
+                data.insert_temp(selection_key, selected);
+            } else {
+                data.remove::<Arc<str>>(selection_key);
+            }
+        });
     }
     let saved_selection = ui.data(|data| data.get_temp::<Arc<str>>(selection_key));
     let copy_all = match pane {
@@ -248,8 +256,12 @@ pub(super) fn message_text(
                 .map(|range| range.slice_str(text))
                 .filter(|selected| !selected.is_empty())
         });
-        if let Some(selected) = selected
-            && ui.button("Copy selection").clicked()
+        // Keep the item in the menu even without a selection so the entries
+        // never move around while the menu is open.
+        if ui
+            .add_enabled(selected.is_some(), egui::Button::new("Copy selection"))
+            .clicked()
+            && let Some(selected) = selected
         {
             ui.ctx().copy_text(selected.to_owned());
             ui.close();
@@ -259,10 +271,6 @@ pub(super) fn message_text(
             ui.close();
         }
     });
-
-    if saved_selection.is_some() && !frame.response.context_menu_opened() && !secondary_pressed {
-        ui.data_mut(|data| data.remove::<Arc<str>>(selection_key));
-    }
 }
 
 /// Render the Pretty and Raw views as a wrapped, selectable text editor.
@@ -578,7 +586,7 @@ pub(super) fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::{Context, Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+    use egui::{Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect};
 
     fn run_frame(
         ctx: &Context,
@@ -871,11 +879,67 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_copies_a_one_character_selection() {
+        let text = "7 alpha\nbeta";
+        let ctx = Context::default();
+        let cursor = egui::pos2(20.0, 5.0);
+        let right_click = egui::pos2(40.0, 10.0);
+        let copy_selection = egui::pos2(80.0, 27.0);
+
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(cursor)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(cursor, true)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(cursor, false)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(
+            &ctx,
+            vec![Event::Key {
+                key: Key::ArrowRight,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::SHIFT,
+            }],
+            text,
+        )
+        .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(right_click)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(right_click, true)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(right_click, false)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(copy_selection)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(copy_selection, true)], text)
+            .drop_without_applying_deltas();
+        let output = run_message_text_frame(&ctx, vec![button(copy_selection, false)], text);
+
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.as_str()),
+                _ => None,
+            });
+        assert_eq!(
+            copied,
+            Some("7"),
+            "the context menu should copy a one-character selection"
+        );
+    }
+
+    #[test]
     fn context_menu_copies_the_full_message() {
         let text = "alpha\nbeta";
         let ctx = Context::default();
         let pos = egui::pos2(40.0, 10.0);
-        let copy_all = egui::pos2(80.0, 27.0);
+        let copy_all = egui::pos2(80.0, 50.0);
 
         run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
         run_message_text_frame(&ctx, vec![Event::PointerMoved(pos)], text)
