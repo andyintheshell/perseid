@@ -206,7 +206,12 @@ pub(super) fn message_text(
     mode: MessageView,
     text: &str,
 ) {
-    egui::Frame::NONE
+    let selection_key =
+        ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
+    let secondary_pressed =
+        ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary));
+    let mut selection = None;
+    let frame = egui::Frame::NONE
         .fill(Color32::WHITE)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(4.0)
@@ -219,9 +224,45 @@ pub(super) fn message_text(
                 // proportional to the visible page rather than the whole dump.
                 message_hex(ui, id, pane, mode, text);
             } else {
-                message_numbered(ui, id, pane, mode, text);
+                selection = message_numbered(ui, id, pane, mode, text);
             }
         });
+
+    // egui's text editor collapses a selection when it is pressed or loses
+    // focus (for example when a menu item is clicked). Keep the selected text
+    // while the menu is open so Copy selection still works after that.
+    if secondary_pressed && let Some(range) = selection {
+        let selected: Arc<str> = range.slice_str(text).into();
+        if !selected.is_empty() {
+            ui.data_mut(|data| data.insert_temp(selection_key, selected));
+        }
+    }
+    let saved_selection = ui.data(|data| data.get_temp::<Arc<str>>(selection_key));
+    let copy_all = match pane {
+        MessagePane::Request => "Copy request",
+        MessagePane::Response => "Copy response",
+    };
+    frame.response.container_context_menu(|ui| {
+        let selected = saved_selection.as_deref().or_else(|| {
+            selection
+                .map(|range| range.slice_str(text))
+                .filter(|selected| !selected.is_empty())
+        });
+        if let Some(selected) = selected
+            && ui.button("Copy selection").clicked()
+        {
+            ui.ctx().copy_text(selected.to_owned());
+            ui.close();
+        }
+        if ui.button(copy_all).clicked() {
+            ui.ctx().copy_text(text.to_owned());
+            ui.close();
+        }
+    });
+
+    if saved_selection.is_some() && !frame.response.context_menu_opened() && !secondary_pressed {
+        ui.data_mut(|data| data.remove::<Arc<str>>(selection_key));
+    }
 }
 
 /// Render the Pretty and Raw views as a wrapped, selectable text editor.
@@ -230,7 +271,16 @@ pub(super) fn message_text(
 /// keyboard navigation all use egui's native text behavior. Line numbers stay
 /// in a painted gutter outside the buffer: they align with the editor's galley
 /// but can never be selected or copied.
-fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: MessageView, text: &str) {
+///
+/// Returns the current selection, if any, so the message frame can offer a
+/// right-click copy action for it.
+fn message_numbered(
+    ui: &mut egui::Ui,
+    id: u64,
+    pane: MessagePane,
+    mode: MessageView,
+    text: &str,
+) -> Option<egui::text::CCursorRange> {
     let line_count = text.lines().count() + usize::from(text.ends_with('\n'));
     let font = message_font();
     let digits = line_count.max(1).to_string().len();
@@ -260,6 +310,19 @@ fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: Message
     };
     let mut readonly = text;
 
+    // A right-click is turned into a context menu by the message frame, but
+    // egui's text editor treats any pointer press as the start of a selection.
+    // Capture the selection before the editor clears it, then restore it so it
+    // stays visible while the menu is open.
+    let secondary_pressed =
+        ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary));
+    let previous_selection = if secondary_pressed {
+        egui::text_edit::TextEditState::load(ui.ctx(), text_id)
+            .and_then(|state| state.cursor.char_range())
+            .filter(|range| !range.is_empty())
+    } else {
+        None
+    };
     ui.spacing_mut().item_spacing.y = 0.0;
     egui::ScrollArea::vertical()
         .id_salt(("perseid.message", id, pane as u8, mode as u8))
@@ -274,9 +337,16 @@ fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: Message
                 .min_size(egui::vec2(0.0, min_height))
                 .layouter(&mut layouter)
                 .show(ui);
+            if let Some(range) = previous_selection {
+                let mut state = output.state.clone();
+                state.cursor.set_char_range(Some(range));
+                state.store(ui.ctx(), text_id);
+            }
             autoscroll_message_selection(ui, &output.response.response);
             paint_line_numbers(ui, &output.galley, output.galley_pos, &font);
-        });
+            previous_selection.or(output.cursor_range.filter(|range| !range.is_empty()))
+        })
+        .inner
 }
 
 fn autoscroll_message_selection(ui: &egui::Ui, response: &egui::Response) {
@@ -549,6 +619,26 @@ mod tests {
         }
     }
 
+    fn secondary_button(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton {
+            pos,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }
+    }
+
+    fn run_message_text_frame(ctx: &Context, events: Vec<Event>, text: &str) -> egui::FullOutput {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| {
+            message_text(ui, 1, MessagePane::Request, MessageView::Raw, text);
+        })
+    }
+
     fn run_message_frame(
         ctx: &Context,
         events: Vec<Event>,
@@ -560,7 +650,7 @@ mod tests {
             ..Default::default()
         };
         let output = ctx.run_ui(input, |ui| {
-            message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, text);
+            let _ = message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, text);
         });
         let commands = output.platform_output.commands.clone();
         output.drop_without_applying_deltas();
@@ -679,7 +769,13 @@ mod tests {
                         egui::vec2(300.0, 300.0),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
-                            message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, text);
+                            let _ = message_numbered(
+                                ui,
+                                1,
+                                MessagePane::Request,
+                                MessageView::Raw,
+                                text,
+                            );
                         },
                     );
                     ui.add(egui::Label::new("OUTSIDE").selectable(true));
@@ -704,6 +800,109 @@ mod tests {
         assert!(
             selections.iter().all(|text| !text.contains("OUTSIDE")),
             "selection should stay inside the message view: {selections:?}"
+        );
+    }
+
+    #[test]
+    fn right_click_opens_message_context_menu() {
+        let text = "alpha\nbeta";
+        let ctx = Context::default();
+        let pos = egui::pos2(40.0, 10.0);
+
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(pos)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(pos, true)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(pos, false)], text)
+            .drop_without_applying_deltas();
+        // The popup layer is reported by the context on the following frame.
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+
+        assert!(
+            ctx.any_popup_open(),
+            "right-clicking the message should open its context menu"
+        );
+    }
+
+    #[test]
+    fn context_menu_copies_the_selection() {
+        let text = "alpha\nbeta";
+        let ctx = Context::default();
+        let start = egui::pos2(20.0, 5.0);
+        let end = egui::pos2(70.0, 5.0);
+        let right_click = egui::pos2(40.0, 10.0);
+        let copy_selection = egui::pos2(80.0, 27.0);
+
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(start)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(start, true)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(end)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(end, false)], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(right_click)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(right_click, true)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(right_click, false)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(copy_selection)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(copy_selection, true)], text)
+            .drop_without_applying_deltas();
+        let output = run_message_text_frame(&ctx, vec![button(copy_selection, false)], text);
+
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.as_str()),
+                _ => None,
+            });
+        assert_eq!(
+            copied,
+            Some("alpha"),
+            "the context menu should copy the selection"
+        );
+    }
+
+    #[test]
+    fn context_menu_copies_the_full_message() {
+        let text = "alpha\nbeta";
+        let ctx = Context::default();
+        let pos = egui::pos2(40.0, 10.0);
+        let copy_all = egui::pos2(80.0, 27.0);
+
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(pos)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(pos, true)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![secondary_button(pos, false)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![], text).drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![Event::PointerMoved(copy_all)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(&ctx, vec![button(copy_all, true)], text)
+            .drop_without_applying_deltas();
+        let output = run_message_text_frame(&ctx, vec![button(copy_all, false)], text);
+
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.as_str()),
+                _ => None,
+            });
+        assert_eq!(
+            copied,
+            Some(text),
+            "the context menu should copy the message"
         );
     }
 
