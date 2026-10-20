@@ -8,9 +8,10 @@
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
 //! [`intercept`], [`proxy`], [`rules`], [`target`], [`previews`], [`windows`],
-//! [`widgets`], [`util`], and [`scale`].
+//! [`widgets`], [`message_view`], [`util`], and [`scale`].
 
 mod intercept;
+mod message_view;
 mod previews;
 mod proxy;
 mod rules;
