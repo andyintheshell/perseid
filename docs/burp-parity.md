@@ -47,7 +47,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Scope / target allowlist | Yes | View filter plus opt-in HTTP/CONNECT blocking | Working | — |
 | Target site map | Yes | Host/path tree from history | Partial | — |
 | Match/replace rules | Yes | Head and buffered UTF-8 body rules, literal or regex | Working | — |
-| Compressed body inspection | Yes | Bounded gzip, deflate, and Brotli decoding in Raw, Headers, and Hex; wire bytes still forwarded | Working | — |
+| Compressed body inspection | Yes | Bounded gzip, deflate, and Brotli decoding in Pretty, Raw, and Hex; wire bytes still forwarded | Working | — |
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
@@ -77,13 +77,15 @@ the `CONNECT` transport tunnels that carry them. See
 [HTTPS interception](tls.md) for the trust and removal workflow.
 Interception buffers bodies up to `--intercept-limit`; larger or streaming
 bodies are held for header edits, and body rewrite rules apply only to buffered
-UTF-8 bodies. The message editor decodes gzip, deflate, and Brotli bodies in
-Raw, Headers, and Hex, mirroring Burp's default unpacking, and the request and
-response panes use Burp's horizontal side-by-side layout. Like Burp, the proxy
-removes unsupported `Accept-Encoding` codings before forwarding. Interception
-and body rules still operate on the wire representation, and forwarding keeps
-the original response encoding. Scope enforcement is opt-in, and an empty scope
-allows every host.
+UTF-8 bodies. The message editor uses Burp's Pretty, Raw, and Hex tabs. Pretty
+indents JSON and HTML/XML and lays out URL-encoded forms one field per line;
+Pretty and Raw add line numbers, syntax highlighting, and Burp-style title-cased
+header names. All three views decode gzip, deflate, and Brotli bodies, mirroring
+Burp's default unpacking. The request and response panes use Burp's horizontal
+side-by-side layout. Like Burp, the proxy removes unsupported `Accept-Encoding`
+codings before forwarding. Interception and body rules still operate on the wire
+representation, and forwarding keeps the original response encoding. Scope
+enforcement is opt-in, and an empty scope allows every host.
 
 Burp Suite's status bar exposes a memory figure. Perseid's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;

@@ -59,7 +59,7 @@ scope allows every host. The HTTP history filter matches method, host, path,
 URI, and status.
 
 The detail pane shows the request and response side by side, each with its own
-Raw, Headers, and Hex tabs. This follows Burp's default horizontal message-editor
+Pretty, Raw, and Hex tabs, following Burp's default horizontal message-editor
 layout. Drag the divider between the panes to give either side more room. Click
 a history row or use the keyboard to select it.
 
@@ -88,12 +88,21 @@ editing. Larger or streaming bodies are still held for header edits, but their
 body bytes pass through unchanged and body editing is disabled. In the
 interception editor, binary bodies are shown as a read-only hex preview.
 
-In history, **Raw** always shows text so it never mixes in a hex dump. Bodies
-with `Content-Encoding: gzip`, `deflate`, or `br` (Brotli) are decoded for all
-three inspection views, including **Hex**, which makes ordinary compressed HTML
-readable. The displayed headers have `Content-Encoding` removed;
-`Content-Length` is updated when the complete decoded length is known. A note in
-Raw and Hex records the original wire size.
+**Pretty** formats structured bodies for reading: JSON is indented, HTML and XML
+are nested, and URL-encoded forms get one decoded field per line. **Raw** shows
+the body as plain text and never mixes in a hex dump; binary bodies are rendered
+lossily with control bytes masked as `·`. Pretty and Raw number their lines and
+highlight the start line, headers, and structured bodies. Header names are
+displayed in the conventional title case used by Burp (`Content-Type`, `ETag`,
+and so on) without changing the forwarded bytes. **Hex** shows a bounded
+byte-offset dump and uses the same compact message font. The message editor does
+not add explanatory notes to any view: when there is no body, the view simply
+ends after the headers.
+
+Bodies with `Content-Encoding: gzip`, `deflate`, or `br` (Brotli) are decoded
+for all three inspection views, including Hex, which makes ordinary compressed
+HTML readable. The displayed headers have `Content-Encoding` removed;
+`Content-Length` is updated when the complete decoded length is known.
 
 This matches Burp's model: Burp unpacks compressed bodies for the message editor
 by default and does not recompress them for display. Perseid's proxy still
@@ -102,12 +111,10 @@ wire representation. As Burp does by default, Perseid also removes content
 codings it cannot decode (`zstd`, for example) from the outgoing
 `Accept-Encoding` header, so servers normally choose gzip, deflate, Brotli, or
 identity. If a server still returns an unsupported coding, the wire bytes are
-shown with a note instead of an empty panel. Binary bodies are shown lossily in
-Raw, with control bytes masked as `·`.
+shown instead.
 
 Responses such as `304 Not Modified` and `204 No Content` have no body by
-definition. Raw labels them explicitly, so a force-refreshed page that reuses
-its cached copy does not look like a failed capture.
+definition, so their message views end after the headers.
 
 ## HTTPS interception
 
@@ -154,9 +161,8 @@ Configure your browser — or an extension such as FoxyProxy — to use an HTTP
 proxy at `127.0.0.1:8080` for HTTP and HTTPS.
 
 - Plain HTTP requests are forwarded and captured: method, headers, bounded
-  bodies, status, size, duration, and capture truncation are visible in the
-  history table and detail pane. They can also be held and edited when
-  interception is enabled.
+  bodies, status, size, and duration are visible in the history table and
+  detail pane. They can also be held and edited when interception is enabled.
 - HTTPS requests arrive as `CONNECT` tunnels. Perseid intercepts and decrypts
   them by default, so each request inside the tunnel is captured — and can be
   held and edited — as an ordinary `https://` history entry. The `CONNECT`

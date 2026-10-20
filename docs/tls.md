@@ -145,8 +145,8 @@ mode it started with.
 Visit an HTTPS page after installing the certificate. In **HTTP history**:
 
 - The URL starts with `https://`.
-- **Raw** shows the request and response, including compressed bodies decoded
-  for display.
+- **Pretty** and **Raw** show the request and response, including compressed
+  bodies decoded for display.
 - There is no separate `CONNECT` row; the request index counts actual HTTP
   requests, as in Burp.
 

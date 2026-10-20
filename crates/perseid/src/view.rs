@@ -5,8 +5,8 @@ use std::time::{Duration, SystemTime};
 use egui::Color32;
 
 use crate::decode::{self, DecodeError};
-use crate::history::{HistoryItem, Phase};
-use crate::theme;
+use crate::history::HistoryItem;
+use crate::{pretty, theme};
 use perseid_proxy::CapturedBody;
 
 /// Maximum body bytes rendered as text.
@@ -75,10 +75,10 @@ pub fn status_color(item: &HistoryItem) -> Color32 {
 }
 
 /// Formatted representations of one side of an exchange, for the
-/// Request/Response tabs and their Raw/Headers/Hex views.
+/// Request/Response tabs and their Pretty/Raw/Hex views.
 pub struct MessageViews {
+    pub pretty: String,
     pub raw: String,
-    pub head: String,
     pub hex: String,
 }
 
@@ -94,15 +94,19 @@ pub fn format_request(item: &HistoryItem) -> String {
 fn format_request_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
     let mut out = format_request_head_with(item, decoded);
     out.push('\n');
+    out.push_str(&format_raw_body_with_decoded(&item.request_body, decoded));
+    out
+}
 
-    if item.request_body.total_len() == 0 && !item.request_body.is_complete() {
-        out.push_str(if item.is_in_flight() {
-            "(request body still streaming…)\n"
-        } else {
-            "(no request body captured)\n"
-        });
-    } else {
-        out.push_str(&format_raw_body_with_decoded(&item.request_body, decoded));
+fn format_request_pretty_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
+    let mut out = format_request_head_with(item, decoded);
+    let bytes = display_body_bytes(&item.request_body, decoded);
+    if !bytes.is_empty() {
+        out.push('\n');
+        out.push_str(&format_pretty_body(
+            header_value(&item.request.headers, "content-type"),
+            bytes,
+        ));
     }
     out
 }
@@ -145,110 +149,74 @@ fn format_response_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
     let mut out = format_response_head_with(item, decoded);
     if item.response.is_some() {
         out.push('\n');
-        match item.response_body() {
-            Some(body) if body.total_len() == 0 && body.is_complete() => {
-                out.push_str(empty_response_note(item));
-            }
-            Some(body) => out.push_str(&format_raw_body_with_decoded(body, decoded)),
-            None => match &item.phase {
-                Phase::InFlight => out.push_str("(response body streaming…)\n"),
-                Phase::Finished { .. } => match item.tls_intercepted_requests() {
-                    Some(0) => out.push_str(
-                        "[Perseid: TLS intercepted; the client closed before sending a request]\n",
-                    ),
-                    Some(requests) => out.push_str(&format!(
-                        "[Perseid: TLS intercepted; {requests} HTTP request{} decrypted into separate history entries]\n",
-                        if requests == 1 { "" } else { "s" },
-                    )),
-                    None => match item.tunnel_stats() {
-                        Some((up, down)) => out.push_str(&format!(
-                            "[Perseid: TLS passthrough tunnel; relayed {} to server, {} to client; payload not decrypted]\n",
-                            human_bytes(up),
-                            human_bytes(down),
-                        )),
-                        None => out.push_str("(no response body captured)\n"),
-                    },
-                },
-            },
+        if let Some(body) = item.response_body() {
+            out.push_str(&format_raw_body_with_decoded(body, decoded));
         }
-    }
-    if let Some(error) = item.error() {
-        out.push_str(&format!("\n[Perseid: exchange failed: {error}]\n"));
     }
     out
 }
 
-fn empty_response_note(item: &HistoryItem) -> &'static str {
-    match item.status() {
-        Some(304) => "(no response body: 304 Not Modified; the client reuses its cached copy)\n",
-        Some(204) => "(no response body: 204 No Content)\n",
-        _ if item.request.method.eq_ignore_ascii_case("HEAD") => "(no response body for HEAD)\n",
-        _ => "(empty body)\n",
+fn format_response_pretty_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
+    let mut out = format_response_head_with(item, decoded);
+    if item.response.is_some() {
+        out.push('\n');
+        if let Some(body) = item.response_body() {
+            let content_type = item
+                .response
+                .as_ref()
+                .and_then(|head| header_value(&head.headers, "content-type"));
+            out.push_str(&format_pretty_body(
+                content_type,
+                display_body_bytes(body, decoded),
+            ));
+        }
     }
+    out
 }
 
 fn format_response_head_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
     let mut out = String::new();
-    match &item.response {
-        Some(head) => {
-            out.push_str(&format!(
-                "{} {} {}\n",
-                head.version, head.status, head.reason
-            ));
-            let headers = display_headers(&head.headers, decoded, item.response_body());
-            push_headers(&mut out, &headers);
-        }
-        None => match &item.phase {
-            Phase::InFlight => out.push_str("(awaiting response…)\n"),
-            Phase::Finished { .. } => out.push_str("(no response head captured)\n"),
-        },
+    if let Some(head) = &item.response {
+        out.push_str(&format!(
+            "{} {} {}\n",
+            head.version, head.status, head.reason
+        ));
+        let headers = display_headers(&head.headers, decoded, item.response_body());
+        push_headers(&mut out, &headers);
     }
     out
 }
 
 pub fn request_views(item: &HistoryItem) -> MessageViews {
     let decoded = decode_request(item);
-    let head = format_request_head_with(item, &decoded);
+    let pretty = format_request_pretty_with(item, &decoded);
     let raw = format_request_with(item, &decoded);
-    let mut bytes = head.as_bytes().to_vec();
+    let mut bytes = format_request_head_with(item, &decoded).into_bytes();
     bytes.push(b'\n');
     bytes.extend_from_slice(display_body_bytes(&item.request_body, &decoded));
-    let mut hex = hex_preview(&bytes);
-    append_body_notes(&mut hex, &item.request_body, item.is_in_flight());
-    append_decoded_hex_notes(&mut hex, &item.request_body, &decoded);
-    MessageViews { raw, head, hex }
+    MessageViews {
+        pretty,
+        raw,
+        hex: hex_preview(&bytes),
+    }
 }
 
 pub fn response_views(item: &HistoryItem) -> MessageViews {
     let decoded = decode_response(item);
-    let head = format_response_head_with(item, &decoded);
+    let pretty = format_response_pretty_with(item, &decoded);
     let raw = format_response_with(item, &decoded);
-    let body = item.response_body();
-    let mut hex = if item.response.is_some() {
-        let mut bytes = head.as_bytes().to_vec();
+    let mut bytes = format_response_head_with(item, &decoded).into_bytes();
+    if item.response.is_some() {
         bytes.push(b'\n');
-        if let Some(body) = body {
+        if let Some(body) = item.response_body() {
             bytes.extend_from_slice(display_body_bytes(body, &decoded));
         }
-        hex_preview(&bytes)
-    } else {
-        raw.clone()
-    };
-    if let Some(body) = body {
-        append_body_notes(&mut hex, body, item.is_in_flight());
-        append_decoded_hex_notes(&mut hex, body, &decoded);
     }
-    if let Some(requests) = item.tls_intercepted_requests() {
-        hex.push_str(&format!(
-            "\n[Perseid: TLS intercepted; {requests} HTTP request{} decrypted into separate history entries]\n",
-            if requests == 1 { "" } else { "s" },
-        ));
-    } else if let Some((up, down)) = item.tunnel_stats() {
-        hex.push_str(&format!(
-            "\n[Perseid: TLS passthrough tunnel; {up} bytes to server, {down} bytes to client; payload not decrypted]\n"
-        ));
+    MessageViews {
+        pretty,
+        raw,
+        hex: hex_preview(&bytes),
     }
-    MessageViews { raw, head, hex }
 }
 
 fn decode_for(body: &CapturedBody, content_encoding: Option<&str>) -> DecodeResult {
@@ -312,160 +280,105 @@ fn display_headers(
 }
 
 fn hex_preview(bytes: &[u8]) -> String {
-    let shown = &bytes[..bytes.len().min(HEX_PREVIEW_LIMIT)];
-    let mut out = hexdump(shown);
-    if shown.len() < bytes.len() {
-        out.push_str(&format!(
-            "\n[Perseid: hex preview truncated to {} of {}]\n",
-            human_bytes(shown.len() as u64),
-            human_bytes(bytes.len() as u64)
-        ));
-    }
-    out
-}
-
-fn append_body_notes(out: &mut String, body: &CapturedBody, in_flight: bool) {
-    if body.total_len() == 0 && !body.is_complete() {
-        out.push_str(if in_flight {
-            "\n[Perseid: body still streaming]\n"
-        } else {
-            "\n[Perseid: no body captured]\n"
-        });
-    }
-    if body.is_truncated() {
-        out.push_str(&format!(
-            "\n[Perseid: capture limit reached; {} on the wire]\n",
-            human_bytes(body.total_len())
-        ));
-    }
+    hexdump(&bytes[..bytes.len().min(HEX_PREVIEW_LIMIT)])
 }
 
 fn push_headers(out: &mut String, headers: &[(String, String)]) {
     for (name, value) in headers {
-        out.push_str(name);
+        out.push_str(&display_header_name(name));
         out.push_str(": ");
         out.push_str(value);
         out.push('\n');
     }
 }
 
+/// Header names arrive lowercased from the HTTP stack. Present them in the
+/// title-case form used by browsers and Burp's message editor. This only
+/// affects the displayed message; forwarding always uses the captured bytes.
+fn display_header_name(name: &str) -> String {
+    if let Some(canonical) = canonical_header_name(name) {
+        return canonical.to_owned();
+    }
+
+    let mut out = String::with_capacity(name.len());
+    for (index, part) in name.split('-').enumerate() {
+        if index > 0 {
+            out.push('-');
+        }
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            out.extend(first.to_uppercase());
+            out.push_str(&chars.as_str().to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+/// A few header names contain acronyms that plain title-casing gets wrong.
+fn canonical_header_name(name: &str) -> Option<&'static str> {
+    match name.to_ascii_lowercase().as_str() {
+        "etag" => Some("ETag"),
+        "www-authenticate" => Some("WWW-Authenticate"),
+        "content-md5" => Some("Content-MD5"),
+        "content-dpr" => Some("Content-DPR"),
+        "dnt" => Some("DNT"),
+        "dpr" => Some("DPR"),
+        "ect" => Some("ECT"),
+        "rtt" => Some("RTT"),
+        "te" => Some("TE"),
+        "accept-ch" => Some("Accept-CH"),
+        "critical-ch" => Some("Critical-CH"),
+        "cdn-loop" => Some("CDN-Loop"),
+        "cf-connecting-ip" => Some("CF-Connecting-IP"),
+        "cf-ray" => Some("CF-Ray"),
+        "x-client-ip" => Some("X-Client-IP"),
+        "x-http-method-override" => Some("X-HTTP-Method-Override"),
+        "x-real-ip" => Some("X-Real-IP"),
+        "x-xss-protection" => Some("X-XSS-Protection"),
+        "x-ua-compatible" => Some("X-UA-Compatible"),
+        "x-dns-prefetch-control" => Some("X-DNS-Prefetch-Control"),
+        "sec-ch-ua" => Some("Sec-CH-UA"),
+        "sec-ch-ua-mobile" => Some("Sec-CH-UA-Mobile"),
+        "sec-ch-ua-platform" => Some("Sec-CH-UA-Platform"),
+        "sec-websocket-key" => Some("Sec-WebSocket-Key"),
+        "sec-websocket-version" => Some("Sec-WebSocket-Version"),
+        "sec-websocket-extensions" => Some("Sec-WebSocket-Extensions"),
+        "sec-websocket-protocol" => Some("Sec-WebSocket-Protocol"),
+        "sec-websocket-accept" => Some("Sec-WebSocket-Accept"),
+        _ => None,
+    }
+}
+
 /// Render a raw body using the same decoded representation as the other views.
 ///
 /// Raw never switches to a hex dump, even for binary bodies: bytes are decoded
-/// lossily, control bytes are shown as visible markers, and a note points at the
-/// Hex view for the byte-offset representation. Requests and responses share
-/// this path so both stay consistent.
+/// lossily and control bytes are shown as visible markers.
 fn format_raw_body_with_decoded(body: &CapturedBody, decoded: &DecodeResult) -> String {
-    if body.total_len() == 0 {
-        return if body.is_complete() {
-            "(empty body)\n".to_string()
-        } else {
-            "(body not read)\n".to_string()
-        };
-    }
-
-    match decoded {
-        Ok(Some(decoded)) => format_decoded_raw_body(body, decoded),
-        Ok(None) => format_wire_raw_body(body),
-        Err(DecodeError::Unsupported(name)) => {
-            let mut out = format_wire_raw_body(body);
-            out.push_str(&format!(
-                "\n[Perseid: content-encoding `{name}` is not decoded; showing wire bytes]\n"
-            ));
-            out
-        }
-        Err(DecodeError::Invalid { encoding, .. }) => {
-            let mut out = format_wire_raw_body(body);
-            out.push_str(&format!(
-                "\n[Perseid: could not decode content-encoding `{encoding}`; showing wire bytes]\n"
-            ));
-            out
-        }
-    }
+    let bytes = display_body_bytes(body, decoded);
+    let shown = &bytes[..bytes.len().min(TEXT_PREVIEW_LIMIT)];
+    normalize_body_text(visible_raw_text(shown))
 }
 
-fn format_decoded_raw_body(body: &CapturedBody, decoded: &decode::DecodedBody) -> String {
-    let mut out = visible_raw_text(&decoded.bytes);
-    out.push('\n');
-    if looks_binary(&decoded.bytes) {
-        out.push_str(
-            "[Perseid: decoded body shown as lossy text; use Hex for a byte-offset view]\n",
-        );
+/// Format a body for the Pretty view. Structured text is laid out by
+/// [`pretty`]; everything else keeps the plain raw representation.
+fn format_pretty_body(content_type: Option<&str>, bytes: &[u8]) -> String {
+    let shown = &bytes[..bytes.len().min(TEXT_PREVIEW_LIMIT)];
+    if shown.is_empty() {
+        return String::new();
     }
-    if decoded.truncated {
-        out.push_str(&format!(
-            "[Perseid: decoded preview truncated to {}]\n",
-            human_bytes(TEXT_PREVIEW_LIMIT as u64)
-        ));
-    }
-    if decoded.incomplete {
-        out.push_str(
-            "[Perseid: compressed body ended before the decoder finished; preview is partial]\n",
-        );
-    }
-    if body.is_truncated() {
-        out.push_str(&format!(
-            "[Perseid: capture limit reached; {} on the wire]\n",
-            human_bytes(body.total_len())
-        ));
-    }
-    if !body.is_complete() {
-        out.push_str("[Perseid: body did not finish]\n");
-    }
-    out.push_str(&format!(
-        "[Perseid: decoded from {} for display; {} on the wire]\n",
-        decoded.encoding,
-        human_bytes(body.total_len())
-    ));
-    out
+    let text = if looks_binary(shown) {
+        visible_raw_text(shown)
+    } else {
+        pretty::format_body(content_type, shown).unwrap_or_else(|| visible_raw_text(shown))
+    };
+    normalize_body_text(text)
 }
 
-fn append_decoded_hex_notes(out: &mut String, body: &CapturedBody, decoded: &DecodeResult) {
-    match decoded {
-        Ok(Some(decoded)) => {
-            if decoded.truncated {
-                out.push_str(&format!(
-                    "\n[Perseid: decoded preview truncated to {}]\n",
-                    human_bytes(TEXT_PREVIEW_LIMIT as u64)
-                ));
-            }
-            if decoded.incomplete {
-                out.push_str(
-                    "\n[Perseid: compressed body ended before the decoder finished; preview is partial]\n",
-                );
-            }
-            out.push_str(&format!(
-                "\n[Perseid: body decoded from {} for display; {} on the wire]\n",
-                decoded.encoding,
-                human_bytes(body.total_len())
-            ));
-        }
-        Ok(None) => {}
-        Err(DecodeError::Unsupported(name)) => {
-            out.push_str(&format!(
-                "\n[Perseid: content-encoding `{name}` is not decoded; showing wire bytes]\n"
-            ));
-        }
-        Err(DecodeError::Invalid { encoding, .. }) => {
-            out.push_str(&format!(
-                "\n[Perseid: could not decode content-encoding `{encoding}`; showing wire bytes]\n"
-            ));
-        }
+fn normalize_body_text(mut text: String) -> String {
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
     }
-}
-
-fn format_wire_raw_body(body: &CapturedBody) -> String {
-    let data = body.data();
-    let shown = &data[..data.len().min(TEXT_PREVIEW_LIMIT)];
-    let mut out = visible_raw_text(shown);
-    out.push('\n');
-    if looks_binary(shown) {
-        out.push_str(
-            "[Perseid: binary body shown as lossy text; use Hex for a byte-offset view]\n",
-        );
-    }
-    push_body_preview_notes(&mut out, body, shown.len(), data.len());
-    out
+    text
 }
 
 fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
@@ -572,6 +485,7 @@ fn hexdump(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::Phase;
 
     const GZIP_HTML: &[u8] = &[
         31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 179, 81, 116, 241, 119, 14, 137, 12, 112, 85, 200, 40,
@@ -629,10 +543,14 @@ mod tests {
                 host: "example.com".to_string(),
                 path: "/upload".to_string(),
                 version: "HTTP/1.1".to_string(),
-                headers: vec![(
-                    "content-type".to_string(),
-                    "application/octet-stream".to_string(),
-                )],
+                headers: vec![
+                    ("host".to_string(), "example.com".to_string()),
+                    (
+                        "content-type".to_string(),
+                        "application/octet-stream".to_string(),
+                    ),
+                    ("x-custom-header".to_string(), "demo".to_string()),
+                ],
             },
             request_body: CapturedBody::from_bytes(request),
             response: Some(ResponseHead {
@@ -674,14 +592,66 @@ mod tests {
                 "Raw view masks no control bytes:\n{raw:?}"
             );
             assert!(
-                raw.contains("binary body shown as lossy text"),
-                "Raw view is missing the binary-body note:\n{raw}"
+                !raw.contains("[Perseid"),
+                "Raw view has an annotation:\n{raw}"
             );
         }
         assert!(request.raw.starts_with("POST /upload HTTP/1.1\n"));
         assert!(response.raw.starts_with("HTTP/1.1 200 OK\n"));
         assert!(request.hex.contains("00000000  "));
         assert!(response.hex.contains("00000000  "));
+    }
+
+    #[test]
+    fn header_names_use_burp_title_case() {
+        let item = item_with_bodies(Vec::new(), Vec::new());
+        let request = request_views(&item);
+        let response = response_views(&item);
+
+        assert!(request.raw.contains("\nHost: example.com\n"));
+        assert!(
+            request
+                .raw
+                .contains("\nContent-Type: application/octet-stream\n")
+        );
+        assert!(request.raw.contains("\nX-Custom-Header: demo\n"));
+        assert!(request.pretty.contains("\nHost: example.com\n"));
+        assert!(response.raw.contains("\nContent-Type: image/png\n"));
+        assert!(response.pretty.contains("\nContent-Type: image/png\n"));
+    }
+
+    #[test]
+    fn acronym_headers_keep_their_conventional_casing() {
+        assert_eq!(display_header_name("etag"), "ETag");
+        assert_eq!(display_header_name("www-authenticate"), "WWW-Authenticate");
+        assert_eq!(display_header_name("content-md5"), "Content-MD5");
+        assert_eq!(display_header_name("content-dpr"), "Content-DPR");
+        assert_eq!(display_header_name("dnt"), "DNT");
+        assert_eq!(display_header_name("dpr"), "DPR");
+        assert_eq!(display_header_name("ect"), "ECT");
+        assert_eq!(display_header_name("rtt"), "RTT");
+        assert_eq!(display_header_name("te"), "TE");
+        assert_eq!(display_header_name("accept-ch"), "Accept-CH");
+        assert_eq!(display_header_name("critical-ch"), "Critical-CH");
+        assert_eq!(display_header_name("cdn-loop"), "CDN-Loop");
+        assert_eq!(display_header_name("cf-ray"), "CF-Ray");
+        assert_eq!(display_header_name("x-real-ip"), "X-Real-IP");
+        assert_eq!(
+            display_header_name("x-http-method-override"),
+            "X-HTTP-Method-Override"
+        );
+        assert_eq!(display_header_name("x-xss-protection"), "X-XSS-Protection");
+        assert_eq!(display_header_name("x-ua-compatible"), "X-UA-Compatible");
+        assert_eq!(
+            display_header_name("x-dns-prefetch-control"),
+            "X-DNS-Prefetch-Control"
+        );
+        assert_eq!(display_header_name("sec-ch-ua-mobile"), "Sec-CH-UA-Mobile");
+        assert_eq!(
+            display_header_name("sec-websocket-key"),
+            "Sec-WebSocket-Key"
+        );
+        assert_eq!(display_header_name("x-custom-header"), "X-Custom-Header");
     }
 
     #[test]
@@ -693,8 +663,8 @@ mod tests {
 
         assert!(request.raw.ends_with("name=Perseid\n"));
         assert!(response.raw.ends_with("hello\n"));
-        assert!(!request.raw.contains("binary body"));
-        assert!(!response.raw.contains("binary body"));
+        assert!(!request.raw.contains("[Perseid"));
+        assert!(!response.raw.contains("[Perseid"));
     }
 
     #[test]
@@ -709,7 +679,7 @@ mod tests {
         assert!(!raw.contains('\0'));
         assert!(raw.contains('·'));
         assert!(raw.contains("hi"));
-        assert!(raw.contains("binary body shown as lossy text"));
+        assert!(!raw.contains("[Perseid"));
     }
 
     #[test]
@@ -718,6 +688,7 @@ mod tests {
         let headers = &mut item.response.as_mut().unwrap().headers;
         headers.push(("content-encoding".to_string(), "br".to_string()));
         headers.push(("content-length".to_string(), BROTLI_HTML.len().to_string()));
+        headers.push(("content-type".to_string(), "text/html".to_string()));
 
         let views = response_views(&item);
 
@@ -726,20 +697,25 @@ mod tests {
             "Raw response was not decoded:\n{}",
             views.raw
         );
-        assert!(views.raw.contains("decoded from br for display"));
-        assert!(!views.raw.contains("Hex shows the"));
-        assert!(!views.raw.contains("binary body"));
-        assert!(!views.head.to_ascii_lowercase().contains("content-encoding"));
+        assert!(!views.raw.contains("[Perseid"));
+        assert!(!views.raw.to_ascii_lowercase().contains("content-encoding"));
         assert!(
             views
-                .head
-                .contains(&format!("content-length: {}", HTML.len()))
+                .raw
+                .contains(&format!("Content-Length: {}", HTML.len()))
         );
+        assert!(
+            views.pretty.contains("<h1>") && views.pretty.contains("Hello, Perseid"),
+            "Pretty response was not formatted:\n{}",
+            views.pretty
+        );
+        assert!(!views.pretty.contains("[Perseid"));
         assert!(
             contains(&hexdump_bytes(&views.hex), HTML),
             "Hex should show the decoded response body:\n{}",
             views.hex
         );
+        assert!(!views.hex.contains("[Perseid"));
     }
 
     #[test]
@@ -752,9 +728,9 @@ mod tests {
         let views = request_views(&item);
 
         assert!(views.raw.contains("<h1>Hello, Perseid</h1>"));
-        assert!(views.raw.contains("decoded from gzip for display"));
+        assert!(!views.raw.contains("[Perseid"));
         assert!(!views.raw.contains('\0'));
-        assert!(!views.head.to_ascii_lowercase().contains("content-encoding"));
+        assert!(!views.raw.to_ascii_lowercase().contains("content-encoding"));
         assert!(
             contains(&hexdump_bytes(&views.hex), HTML),
             "Hex should show the decoded request body:\n{}",
@@ -772,13 +748,52 @@ mod tests {
 
         let views = request_views(&item);
 
-        assert!(views.raw.contains("is not decoded; showing wire bytes"));
-        assert!(views.head.to_ascii_lowercase().contains("content-encoding"));
+        assert!(!views.raw.contains("[Perseid"));
+        assert!(views.raw.to_ascii_lowercase().contains("content-encoding"));
         assert!(views.hex.contains("1f 8b"));
     }
 
     #[test]
-    fn raw_response_labels_304_as_bodyless() {
+    fn empty_bodies_have_no_annotations() {
+        let item = item_with_bodies(Vec::new(), Vec::new());
+        let request = request_views(&item);
+        let response = response_views(&item);
+
+        for view in [
+            &request.pretty,
+            &request.raw,
+            &request.hex,
+            &response.pretty,
+            &response.raw,
+            &response.hex,
+        ] {
+            assert!(!view.contains("[Perseid"));
+            assert!(!view.contains("empty body"));
+            assert!(!view.contains("no body"));
+        }
+    }
+
+    #[test]
+    fn pretty_view_formats_json_response_body() {
+        let mut item = item_with_bodies(Vec::new(), br#"{"items":[{"id":1},{"id":2}]}"#.to_vec());
+        let headers = &mut item.response.as_mut().unwrap().headers;
+        headers.retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+        headers.push(("content-type".to_string(), "application/json".to_string()));
+
+        let views = response_views(&item);
+
+        assert!(
+            views
+                .pretty
+                .contains("{\n  \"items\": [\n    {\n      \"id\": 1\n    },"),
+            "JSON response was not pretty-printed:\n{}",
+            views.pretty
+        );
+        assert!(views.raw.contains(r#"{"items":[{"id":1},{"id":2}]}"#));
+    }
+
+    #[test]
+    fn response_view_has_no_body_annotations() {
         let mut item = item_with_bodies(Vec::new(), Vec::new());
         item.request.method = "GET".to_string();
         let response = item.response.as_mut().unwrap();
@@ -788,8 +803,9 @@ mod tests {
         let views = response_views(&item);
 
         assert!(views.raw.contains("304 Not Modified"));
-        assert!(views.raw.contains("cached copy"));
+        assert!(!views.raw.contains("cached copy"));
         assert!(!views.raw.contains("(empty body)"));
+        assert!(!views.raw.contains("[Perseid"));
     }
 
     #[test]

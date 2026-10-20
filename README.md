@@ -44,9 +44,11 @@ application testing — with no embedded browser and memory bounded by design.
   tunnels do not clutter the table; decrypted HTTPS requests appear directly.
 - Live **Memory** indicator in the status bar with allocator memory in use;
   click it for the current and peak values and a rolling graph.
-- Request/response tabs with Raw, Headers, and Hex views, truncation markers,
-  size, and timing. Raw decodes gzip, deflate, and Brotli bodies for display;
-  Hex keeps the original wire bytes.
+- Request/response tabs with Burp's Pretty, Raw, and Hex views, plus size and
+  timing. Pretty formats JSON, HTML/XML, and URL-encoded form bodies; Pretty and
+  Raw add line numbers, syntax highlighting, and title-cased header names.
+  Compressed bodies are decoded in every view, and Hex is a bounded byte-offset
+  dump.
 - Target site map grouped by host and path, plus an editable scope list shared
   by the view filter and the traffic guardrail.
 - `CONNECT` tunneling for HTTPS: decrypted by default with the local CA, with

@@ -1,9 +1,10 @@
 //! Small shared egui widgets: tabs, message viewers, cards, badges, and empty
 //! states.
 
-use egui::Label;
+use egui::{FontId, Label, RichText};
 
 use super::*;
+use crate::highlight;
 use crate::history::HistoryItem;
 
 #[derive(Clone, Copy)]
@@ -184,11 +185,11 @@ pub(super) fn message_toolbar(
     });
     ui.add_space(2.0);
     ui.horizontal(|ui| {
+        if message_mode_tab(ui, *mode == MessageView::Pretty, "Pretty").clicked() {
+            *mode = MessageView::Pretty;
+        }
         if message_mode_tab(ui, *mode == MessageView::Raw, "Raw").clicked() {
             *mode = MessageView::Raw;
-        }
-        if message_mode_tab(ui, *mode == MessageView::Headers, "Headers").clicked() {
-            *mode = MessageView::Headers;
         }
         if message_mode_tab(ui, *mode == MessageView::Hex, "Hex").clicked() {
             *mode = MessageView::Hex;
@@ -217,18 +218,75 @@ pub(super) fn message_text(
                 // proportional to the visible page rather than the whole dump.
                 message_hex(ui, id, pane, mode, text);
             } else {
-                egui::ScrollArea::both()
-                    .id_salt(("perseid.message", id, pane as u8, mode as u8))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.add(
-                            Label::new(RichText::new(text).monospace().color(theme::TEXT))
-                                .selectable(true)
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        );
-                    });
+                message_numbered(ui, id, pane, mode, text);
             }
         });
+}
+
+/// Render the Pretty and Raw views as virtualized, numbered, highlighted rows.
+///
+/// Splitting the message into rows is what makes both the gutter and the
+/// per-line highlighting cheap: only the visible page is laid out, even when
+/// the body preview is at its 256 KiB limit.
+fn message_numbered(ui: &mut egui::Ui, id: u64, pane: MessagePane, mode: MessageView, text: &str) {
+    let lines: Vec<&str> = text.lines().collect();
+    let syntax = highlight::Syntax::from_lines(&lines);
+    let font = message_font();
+    // `show_rows` uses this as the row pitch, so it must match the height each
+    // row actually occupies. Zero the outer spacing before the estimate is
+    // taken, then do the same inside the scroll area.
+    let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let digits = lines.len().max(1).to_string().len();
+    let number_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap("0".repeat(digits), font.clone(), theme::GRAY)
+            .size()
+            .x
+    });
+    let gutter_width = number_width + 10.0;
+
+    ui.spacing_mut().item_spacing.y = 0.0;
+    egui::ScrollArea::both()
+        .id_salt(("perseid.message", id, pane as u8, mode as u8))
+        .auto_shrink([false, false])
+        .show_rows(ui, row_height, lines.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for index in range {
+                let line = lines.get(index).copied().unwrap_or_default();
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(gutter_width, row_height),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            // Right-to-left places this space against the text
+                            // edge, so the numbers stay right-aligned with a
+                            // readable gap before the message.
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new((index + 1).to_string())
+                                    .font(font.clone())
+                                    .color(theme::GRAY),
+                            );
+                        },
+                    );
+                    ui.add(
+                        Label::new(highlight::line_job(
+                            line,
+                            syntax.role(index),
+                            syntax.language,
+                            &font,
+                        ))
+                        .selectable(true)
+                        .wrap_mode(egui::TextWrapMode::Extend),
+                    );
+                });
+            }
+        });
+}
+
+fn message_font() -> FontId {
+    FontId::monospace(highlight::MESSAGE_FONT_SIZE)
 }
 
 pub(super) fn message_hex(
@@ -246,7 +304,8 @@ pub(super) fn message_hex(
     // padding made the estimate too tall, so long dumps stopped short of the
     // viewport bottom and left a large blank area when scrolled to the end.
     ui.spacing_mut().item_spacing.y = 0.0;
-    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+    let font = message_font();
+    let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
 
     egui::ScrollArea::both()
         .id_salt(("perseid.hex", id, pane as u8, mode as u8))
@@ -255,7 +314,7 @@ pub(super) fn message_hex(
             ui.spacing_mut().item_spacing.y = 0.0;
             for line in &lines[range] {
                 ui.add(
-                    Label::new(RichText::new(*line).monospace().color(theme::TEXT))
+                    Label::new(RichText::new(*line).font(font.clone()).color(theme::TEXT))
                         .selectable(true)
                         .wrap_mode(egui::TextWrapMode::Extend),
                 );
