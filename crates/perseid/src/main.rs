@@ -71,6 +71,14 @@ pub struct Args {
     /// honored instead.
     #[arg(long, value_name = "FACTOR")]
     pub ui_scale: Option<f32>,
+
+    /// Render the documentation screenshots into DIR, then exit.
+    ///
+    /// Only available when built with the `screenshots` feature; see
+    /// `scripts/screenshots.sh`.
+    #[cfg(feature = "screenshots")]
+    #[arg(long, value_name = "DIR", hide = true)]
+    pub screenshot_dir: Option<std::path::PathBuf>,
 }
 
 fn main() -> eframe::Result {

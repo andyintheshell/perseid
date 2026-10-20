@@ -38,7 +38,7 @@ impl PerseidApp {
         let samples: Vec<u64> = self.memory.samples().iter().copied().collect();
         let mut open = self.memory_open;
 
-        egui::Window::new("Memory usage")
+        let window_response = egui::Window::new("Memory usage")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
@@ -66,6 +66,12 @@ impl PerseidApp {
                 });
                 memory_graph(ui, &samples);
             });
+        #[cfg(feature = "screenshots")]
+        if let (Some(driver), Some(window)) = (self.screenshots.as_mut(), window_response) {
+            driver.record_memory_rect(window.response.rect);
+        }
+        #[cfg(not(feature = "screenshots"))]
+        let _ = window_response;
         self.memory_open = open;
     }
 

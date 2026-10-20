@@ -15,6 +15,8 @@ mod previews;
 mod proxy;
 mod rules;
 mod scale;
+#[cfg(feature = "screenshots")]
+mod screenshots;
 mod target;
 mod tls;
 mod util;
@@ -188,6 +190,8 @@ pub struct PerseidApp {
     memory: MemoryMeter,
     memory_open: bool,
     about_open: bool,
+    #[cfg(feature = "screenshots")]
+    screenshots: Option<screenshots::ScreenshotDriver>,
 }
 
 /// Formatted request/response text for the selected exchange, rebuilt only
@@ -286,8 +290,33 @@ impl PerseidApp {
             memory: MemoryMeter::new(),
             memory_open: false,
             about_open: false,
+            #[cfg(feature = "screenshots")]
+            screenshots: None,
         };
+        #[cfg(feature = "screenshots")]
+        if let Some(dir) = args.screenshot_dir.clone() {
+            match screenshots::ScreenshotDriver::new(dir) {
+                Ok(driver) => {
+                    app.screenshots = Some(driver);
+                    if let Err(err) = app.prepare_screenshot_scene() {
+                        log::error!("screenshot mode: {err}");
+                        std::process::exit(1);
+                    }
+                }
+                Err(err) => {
+                    log::error!("screenshot mode: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         if !args.no_proxy {
+            let notify = app.notify.clone();
+            app.start_proxy(notify);
+        }
+        #[cfg(feature = "screenshots")]
+        if app.screenshots.is_some() && !args.no_proxy && app.proxy.is_none() {
+            // Keep the demo runnable on a desktop where port 8080 is busy.
+            app.listen = SocketAddr::from(([127, 0, 0, 1], 0));
             let notify = app.notify.clone();
             app.start_proxy(notify);
         }
@@ -902,6 +931,9 @@ impl eframe::App for PerseidApp {
 
         self.memory_window(&ctx);
         self.about_window(&ctx);
+
+        #[cfg(feature = "screenshots")]
+        self.drive_screenshots(&ctx);
 
         // Keep the fetch loop honest about dropped events even while idle.
         if self

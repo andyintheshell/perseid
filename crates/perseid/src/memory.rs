@@ -130,6 +130,38 @@ impl MemoryMeter {
     pub fn time_until_next_sample(&self) -> Duration {
         SAMPLE_INTERVAL.saturating_sub(self.last_sample.elapsed())
     }
+
+    /// Fill the graph with a deterministic, realistic-looking history so the
+    /// screenshot tool does not have to wait three minutes. Only used by the
+    /// `screenshots` feature; the live meter keeps sampling normally.
+    #[cfg(feature = "screenshots")]
+    pub fn seed_presentation_samples(&mut self) {
+        let current = heap_in_use().max(1) as f32;
+        let peak = heap_peak().max(heap_in_use()).max(1) as f32;
+        self.samples.clear();
+        for index in 0..SAMPLE_HISTORY {
+            let t = index as f32 / (SAMPLE_HISTORY - 1) as f32;
+            let step = 0.14 * smoothstep((t - 0.12) / 0.24);
+            let bump = 0.045 * (1.0 - ((t - 0.72) / 0.07).abs()).max(0.0);
+            let wobble = 0.003 * (index as f32 * 0.83).sin();
+            let sample = (current * (0.86 + step + bump) * (1.0 + wobble)).min(peak);
+            self.samples.push_back(sample.max(1.0) as u64);
+        }
+        self.last_sample = Instant::now();
+    }
+}
+
+/// Keep the memory window from reporting the screenshot resizer's temporary
+/// buffers as the application's peak. Only used by the `screenshots` feature.
+#[cfg(feature = "screenshots")]
+pub fn reset_peak_for_screenshot() {
+    HEAP_PEAK.store(HEAP_IN_USE.load(Ordering::Relaxed), Ordering::Relaxed);
+}
+
+#[cfg(feature = "screenshots")]
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 impl Default for MemoryMeter {

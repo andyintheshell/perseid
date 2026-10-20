@@ -46,6 +46,25 @@ Install the tools with `rustup component add rustfmt clippy`. On Kali/Debian
 systems using the distribution's Rust packages, install `rustfmt` and
 `rust-clippy` through apt instead, keeping them in step with `rustc`.
 
+## Screenshots
+
+The README screenshots are generated headlessly, without a desktop session:
+
+```sh
+scripts/screenshots.sh
+```
+
+This builds `perseid` with the `screenshots` feature, runs it under Xvfb,
+seeds a deterministic demo history, captures the egui framebuffer, and writes
+the two PNGs to `docs/images/`. It requires `xvfb`, `xauth`, and Python 3 (for
+the PNG check). Use `--out DIR` to write elsewhere, or `--no-build` to reuse an
+existing `target/debug/perseid`.
+
+The screenshots contain synthetic demo traffic, never captured traffic. The
+separate [Screenshots workflow](.github/workflows/screenshots.yml) runs the
+same script on UI changes, verifies the PNGs, uploads them as artifacts, and
+publishes an inline preview.
+
 ## Project layout
 
 | Path | Contents |

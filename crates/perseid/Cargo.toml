@@ -15,6 +15,10 @@ categories = ["gui", "network-programming", "development-tools::testing"]
 name = "perseid"
 path = "src/main.rs"
 
+[features]
+# Development-only mode that renders the documentation screenshots headlessly.
+screenshots = []
+
 [dependencies]
 brotli-decompressor.workspace = true
 chrono.workspace = true
