@@ -111,6 +111,7 @@ impl PerseidApp {
 
     fn history_toolbar(&mut self, ui: &mut egui::Ui) {
         let mut clear = false;
+        let mut send_to_repeater = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("HTTP history").strong().color(theme::TEXT));
             ui.separator();
@@ -149,6 +150,18 @@ impl PerseidApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let can_send = self
+                    .selected
+                    .and_then(|id| self.history.get(id))
+                    .is_some_and(|item| !item.is_tunnel());
+                if ui
+                    .add_enabled(can_send, egui::Button::new("Send to Repeater"))
+                    .on_hover_text("Replay the selected request in an editable Repeater tab")
+                    .on_disabled_hover_text("Select an HTTP exchange first")
+                    .clicked()
+                {
+                    send_to_repeater = true;
+                }
                 if ui
                     .button("Clear history")
                     .on_hover_text("Discard all captured exchanges")
@@ -167,6 +180,9 @@ impl PerseidApp {
                 );
             });
         });
+        if send_to_repeater {
+            self.send_selected_to_repeater();
+        }
         if clear {
             self.clear_history();
         }

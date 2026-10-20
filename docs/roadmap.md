@@ -43,9 +43,10 @@ definition of done, and deliberate deviations.
 - [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
   search, Repeater, Decoder, and response diff (Comparer).
 
-  *Status: in-memory history, basic filtering, and a read-only Repeater
-  preview work; persistence, editable replay, Decoder, and Comparer are not
-  implemented.*
+  *Status: in-memory history, basic filtering, and editable HTTP/HTTPS
+  Repeater work. Repeater has request tabs, history seeding, target and virtual
+  host control, direct replay, and Pretty/Raw/Hex responses; WebSocket replay
+  and saved tabs are not implemented. Persistence, Decoder, and Comparer remain.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope

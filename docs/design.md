@@ -49,20 +49,20 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
       |                |
       |                +----> Search, filtering, comparison
       |
-      +----> Repeater / request mutation (planned)
-      |
       +----> Optional passive and guided checks (planned)
                        |
                        v
                Native egui interface
+                       |
+                       +----> Repeater (direct HTTP/HTTPS client, own runtime)
 ```
 
 Current workspace layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/perseid-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events. |
-| `crates/perseid` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
+| `crates/perseid-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events, and the direct Repeater client. |
+| `crates/perseid` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Repeater tabs and editor, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
 
 HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
@@ -77,8 +77,15 @@ browser, never by Perseid. Interception is on by default, and pass-through hosts
 remain opaque. The proxy also serves the certificate as a local download page,
 so installing trust does not require finding the file on disk.
 
-Planned additions include a disk-backed history store, replay/fuzzing workers,
-and a native extension point. Network operations run on their own runtime and
+Repeater deliberately sits beside the proxy rather than behind it: the
+`perseid-proxy` crate exposes a direct HTTP/HTTPS client with its own runtime
+and connection pool, and the UI sends edited messages to that engine. Replay
+therefore works when the proxy is stopped and avoids re-entering interception,
+match/replace, or scope policy. Responses are captured with the same byte limit
+as proxy traffic and delivered to the UI over a channel.
+
+Planned additions include a disk-backed history store, fuzzing workers, and a
+native extension point. Network operations run on their own runtime and
 communicate with the UI through a bounded channel so a slow interface cannot
 grow memory without limit. Held messages use a separate bounded interception
 channel with a one-shot decision per message, so capture-event overflow cannot
@@ -101,12 +108,15 @@ one theme module so future views stay consistent. HiDPI text and controls are
 first-class requirements, not an afterthought.
 
 Tools that are not implemented yet are shown as explicit previews with the
-milestone that will complete them. Intruder and Repeater do not present
-nonfunctional controls as if they already worked. **Proxy > Intercept** is a
-real editor: held messages show their raw head, editable buffered text body,
-and read-only binary preview, with Burp's single Intercept on/off control plus
-explicit Forward and Drop actions. HTTP/2 messages use a reconstructed head:
-the request line is origin-form, `:authority` is represented by `Host`, and
+milestone that will complete them. Intruder is the remaining preview and does
+not present nonfunctional controls as if they already worked. **Repeater** is a
+real editor with request tabs seeded from HTTP history, a target bar, an
+editable raw request, direct Send (`Ctrl`+`Enter`), and Pretty/Raw/Hex
+responses. **Proxy > Intercept** is a real editor: held messages show their raw
+head, editable buffered text body, and read-only binary preview, with Burp's
+single Intercept on/off control plus explicit Forward and Drop actions. HTTP/2
+messages use a reconstructed head: the request line is origin-form,
+`:authority` is represented by `Host`, and
 response status lines omit the reason phrase. Pseudo-headers are regenerated
 when the edited message is forwarded. Scope serves both as a view filter and, when
 enabled, as a traffic guardrail checked before interception and again after
@@ -126,7 +136,8 @@ Initial technology choices, subject to prototyping and measurement:
 
 - **Rust** for the application and networking components.
 - **Tokio** for asynchronous networking.
-- **hyper** for HTTP/1.1 and HTTP/2 forwarding; WebSocket handling is planned.
+- **hyper** for HTTP/1.1 and HTTP/2 forwarding and direct Repeater replay;
+  WebSocket handling is planned.
 - **regex** for match/replace rules, with rules compiled once per policy update.
 - **rustls** and an automatically generated CA for HTTPS interception. The CA
   persists across runs, interception is on by default, and the user installs
@@ -148,7 +159,8 @@ Important implementation principles:
 - Hard limits on captured body size, with bounded text and hex previews.
 - A total retained-body budget for history, independent of the exchange count.
 - Bounded worker queues, concurrent connections and tunnels, and a bounded UI
-  event channel with drop counters.
+  event channel with drop counters. Repeater responses share the capture limit,
+  and simultaneous Repeater sends are capped independently of tab count.
 - A bounded interception queue: held bodies are capped by `--intercept-limit`,
   larger or streaming bodies stay header-only, and unresolved messages apply
   backpressure rather than being silently discarded.

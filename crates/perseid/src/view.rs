@@ -232,6 +232,53 @@ pub fn response_views(item: &HistoryItem) -> MessageViews {
     }
 }
 
+/// Build the standard Pretty/Raw/Hex views for a Repeater response.
+///
+/// Repeater responses do not become history rows, so they cannot use
+/// [`HistoryItem`]. The formatting rules are otherwise identical: supported
+/// content encodings are unpacked, unsupported or malformed encodings fall
+/// back to the wire bytes, and Hex stays bounded.
+pub fn response_views_from_parts(
+    version: &str,
+    status: u16,
+    reason: &str,
+    headers: &[(String, String)],
+    body: &CapturedBody,
+) -> MessageViews {
+    let decoded = decode_for(body, header_value(headers, "content-encoding"));
+    let content_type = header_value(headers, "content-type");
+
+    let mut head = String::new();
+    if reason.is_empty() || version.starts_with("HTTP/2") {
+        head.push_str(&format!("{version} {status}\n"));
+    } else {
+        head.push_str(&format!("{version} {status} {reason}\n"));
+    }
+    let display = display_headers(headers, &decoded, Some(body));
+    push_headers(&mut head, &display);
+
+    let mut raw = head.clone();
+    raw.push('\n');
+    raw.push_str(&format_raw_body_with_decoded(body, &decoded));
+
+    let mut pretty = head.clone();
+    pretty.push('\n');
+    pretty.push_str(&format_pretty_body(
+        content_type,
+        display_body_bytes(body, &decoded),
+    ));
+
+    let mut bytes = head.into_bytes();
+    bytes.push(b'\n');
+    bytes.extend_from_slice(display_body_bytes(body, &decoded));
+
+    MessageViews {
+        pretty,
+        raw,
+        hex: hex_preview(&bytes),
+    }
+}
+
 fn decode_for(body: &CapturedBody, content_encoding: Option<&str>) -> DecodeResult {
     if body.total_len() == 0 || body.data().is_empty() {
         return Ok(None);
@@ -755,6 +802,32 @@ mod tests {
             views.hex
         );
         assert!(!views.hex.contains("[Perseid"));
+    }
+
+    #[test]
+    fn repeater_response_views_decode_compressed_bodies() {
+        let body = CapturedBody::from_bytes(GZIP_HTML.to_vec());
+        let headers = vec![
+            ("content-encoding".to_string(), "gzip".to_string()),
+            ("content-length".to_string(), GZIP_HTML.len().to_string()),
+            ("content-type".to_string(), "text/html".to_string()),
+        ];
+
+        let views = response_views_from_parts("HTTP/1.1", 200, "OK", &headers, &body);
+
+        assert!(views.raw.starts_with("HTTP/1.1 200 OK\n"));
+        assert!(views.raw.contains("<h1>Hello, Perseid</h1>"));
+        assert!(!views.raw.to_ascii_lowercase().contains("content-encoding"));
+        assert!(
+            views
+                .raw
+                .contains(&format!("Content-Length: {}", HTML.len()))
+        );
+        assert!(views.pretty.contains("<h1>"));
+        assert!(contains(&hexdump_bytes(&views.hex), HTML));
+
+        let h2 = response_views_from_parts("HTTP/2", 200, "OK", &[], &CapturedBody::default());
+        assert!(h2.raw.starts_with("HTTP/2 200\n"));
     }
 
     #[test]

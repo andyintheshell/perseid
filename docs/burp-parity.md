@@ -27,8 +27,9 @@ Source: [Burp Suite Community Edition](https://portswigger.net/burp/communitydow
 
 The workspace deliberately follows Burp's tool order: **Target**, **Proxy**,
 **Intruder**, and **Repeater**. Tools that are not implemented yet are labelled
-as previews rather than presented as working features. Familiar navigation is
-part of the goal; reproducing every control before its engine exists is not.
+as previews rather than presented as working features; Intruder is the
+remaining preview. Familiar navigation is part of the goal; reproducing every
+control before its engine exists is not.
 
 Parity here means capability, not artificial restrictions. Burp CE rate-limits
 Intruder to encourage upgrades; Perseid's fuzzer will not reproduce that
@@ -54,7 +55,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | HTTPS interception with a local CA | Yes | Automatic local CA, HTTPS interception on by default, local certificate page, pass-through hosts, manual trust setup | Working | — |
 | HTTP/2 proxying | Yes | h2 over TLS via ALPN, h2c prior knowledge on the listener | Working | — |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
-| Repeater | Yes | Read-only preview | Partial | M3 |
+| Repeater | Yes | Editable HTTP/HTTPS request tabs seeded from history, target/virtual-host control, direct replay, and Pretty/Raw/Hex responses; no WebSocket replay or saved tabs yet | Partial | M3 (HTTP/HTTPS); WS in M4 |
 | Decoder | Yes | No | Planned | M3 |
 | Comparer | Yes | No | Planned | M3 |
 | Sequencer | Yes | No | Planned | M4 |
@@ -87,6 +88,18 @@ side-by-side layout. Like Burp, the proxy removes unsupported `Accept-Encoding`
 codings before forwarding. Interception and body rules still operate on the wire
 representation, and forwarding keeps the original response encoding. Scope
 enforcement is opt-in, and an empty scope allows every host.
+
+Repeater follows the same manual-first shape as Burp: seed an editable request
+from history with **Send to Repeater**, keep several request tabs, set the
+target scheme and authority, send with the button or `Ctrl`+`Enter`, and inspect
+the response in Pretty, Raw, and Hex. The target bar controls the connection
+for origin-form request lines, while an absolute-form request line overrides it
+and a non-empty `Host` header is preserved for virtual-host testing. Repeater
+uses an independent direct HTTP/HTTPS client and runtime, not the local proxy,
+so it remains usable when the proxy is stopped. It deliberately bypasses
+interception, match/replace rules, and scope enforcement, and its exchanges do
+not appear in Proxy history. Responses are bounded by `--capture-limit`.
+WebSocket Repeater and saved tabs remain part of the M3/M4 work.
 
 Burp Suite's status bar exposes a memory figure. Perseid's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;

@@ -48,7 +48,7 @@ The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
 | **Target** | A host/path site map built from captured exchanges, and an editable scope list. Scope can filter the site map and history, and can optionally block out-of-scope traffic before it is forwarded. |
 | **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds HTTP and decrypted HTTPS messages for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. **TLS** shows the automatically created CA, opens the certificate page, and manages the HTTPS toggle, regeneration, removal, and pass-through hosts. |
 | **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
-| **Repeater** | A read-only preview of the selected request and response. Editing and resending arrive in Milestone 3. |
+| **Repeater** | Editable request tabs seeded from HTTP history, a target bar, direct Send, and Pretty/Raw/Hex responses. HTTP/HTTPS only; WebSocket replay is not supported yet. |
 
 The scope input accepts a bare host, a `host:port` authority, or a full URL;
 matching also covers subdomains and ignores ports. Toggle **Filter views to the
@@ -121,6 +121,43 @@ shown instead.
 
 Responses such as `304 Not Modified` and `204 No Content` have no body by
 definition, so their message views end after the headers.
+
+## Repeater
+
+Repeater is the manual replay workspace. Select an HTTP exchange in **Proxy >
+HTTP history** and choose **Send to Repeater**, or open **Repeater** and use the
+`+` button for a blank tab. Each tab keeps its own target, edited request,
+response, and Pretty/Raw/Hex selection. The tab strip remains available while
+other requests are in flight, and the status bar shows how many Repeater sends
+are pending.
+
+The target bar sets the scheme and authority used for an origin-form request
+line such as `GET /admin HTTP/1.1`. An absolute-form request line such as
+`GET https://other.example/admin HTTP/1.1` overrides the target bar. Perseid
+preserves a non-empty `Host` header from the editor so you can connect to one
+authority while testing a different virtual host; if the header is absent or
+blank, Perseid fills it from the target. Edit the request line, headers, and
+body directly, then click **Send** or press `Ctrl`+`Enter` (`Cmd`+`Enter` on
+macOS).
+
+Repeater sends directly to the target with its own HTTP client rather than
+through the local proxy listener. It therefore works when the proxy is stopped
+or Perseid was started with `--no-proxy`. It also means Repeater traffic does
+not pass through interception, match/replace rules, or scope enforcement, and
+it does not add a row to Proxy history; the edited request and response stay in
+the Repeater tab. The client supports HTTP and HTTPS and negotiates HTTP/2 over
+TLS when the origin offers it. It verifies origin certificates against the
+platform trust store.
+
+Response bodies are retained up to `--capture-limit` (1 MiB by default). The
+response header reports status, duration, and total body size; a note appears
+when the retained body was truncated or the transfer did not finish. Each
+request has a 60-second end-to-end timeout, and up to eight tab sends run
+concurrently. Requests seeded from history use the same decoded, bounded
+representation as the Proxy detail pane, so compressed or very large captured
+bodies can be lossy. A seed warning asks you to review the body before sending.
+WebSocket messages, saved Repeater tabs, and project persistence are not
+implemented yet.
 
 ## HTTPS interception
 
@@ -202,7 +239,9 @@ leaves the filter. Clicking a row also selects it.
   runtime-only and are not persisted between launches.
 - Compressed-body unpacking is always on for the inspection views and has no
   UI toggle yet. It affects display only; forwarding keeps the wire encoding.
-- Repeater cannot edit or send requests yet; Intruder has no engine yet.
+- Repeater supports editable HTTP and HTTPS requests, but not WebSocket
+  messages or saved tabs. It sends directly to the target, bypassing the proxy
+  pipeline and scope enforcement. Intruder has no engine yet.
 - History is in memory only. It is bounded by `--history-limit` and
   `--history-bytes`; captured bodies are capped per message by
   `--capture-limit`, and interception buffers up to `--intercept-limit` per
