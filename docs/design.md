@@ -1,18 +1,21 @@
 # Design
 
-Wiremoth is a Rust-native web security tool for people who like to understand
+Perseid is a Rust-native web security tool for people who like to understand
 what happens on the wire. It is designed around the everyday workflow of
 intercepting a request, inspecting it, changing it, sending it again, and
 understanding the response.
 
-## Why Wiremoth?
+## Why Perseid?
 
 Web security testing often comes down to the same small set of actions:
 capture a request, inspect its parameters and headers, replay it with changes,
 compare the result, and follow a hypothesis. Those actions should be fast and
 comfortable even on modest hardware.
 
-Wiremoth aims to be:
+The name comes from the Perseid meteor shower: many faint signals that become
+clear when you can watch the whole sky.
+
+Perseid aims to be:
 
 - **Manual-first.** The request and response are the center of the interface,
   not a dashboard of speculative findings.
@@ -29,7 +32,7 @@ Wiremoth aims to be:
 
 ## Architecture
 
-Wiremoth is a set of small Rust components, with the user interface
+Perseid is a set of small Rust components, with the user interface
 independent from the proxy and analysis code:
 
 ```text
@@ -58,8 +61,8 @@ Current workspace layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/wiremoth-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events. |
-| `crates/wiremoth` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
+| `crates/perseid-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events. |
+| `crates/perseid` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
 
 HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
@@ -67,7 +70,7 @@ per-host certificates, rustls terminates the browser connection inside a
 forwarding, interception, scope, and rewrite pipeline as plain HTTP. Upstream
 connections verify origin certificates against the platform trust store. The
 CA private key is loaded by the app from disk; trust is installed and removed by
-the user in the browser, never by Wiremoth. Interception is off by default and
+the user in the browser, never by Perseid. Interception is off by default and
 pass-through hosts remain opaque.
 
 Planned additions include a disk-backed history store, replay/fuzzing workers,
@@ -126,7 +129,7 @@ Initial technology choices, subject to prototyping and measurement:
 
 ## Performance philosophy
 
-A small Rust binary does not automatically mean a small application. Wiremoth
+A small Rust binary does not automatically mean a small application. Perseid
 aims to minimize **idle CPU use, total resident memory, startup latency, and
 avoidable copies**, and to publish measurements instead of unverified
 performance claims.
@@ -155,7 +158,7 @@ The Milestone 0 baseline and measurement method are published in
 
 ## Non-goals
 
-For the initial parity target, Wiremoth is not trying to:
+For the initial parity target, Perseid is not trying to:
 
 - Replace a commercial vulnerability scanner or reproduce Burp Suite
   Professional's automated scanning, crawler, Collaborator/OAST, or project

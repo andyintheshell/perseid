@@ -1,10 +1,10 @@
 # Performance and memory
 
-Wiremoth aims to stay comfortable on modest hardware. This page records the
+Perseid aims to stay comfortable on modest hardware. This page records the
 Milestone 0 proof-of-concept measurements: idle memory, a full 2,000-entry
 history, and viewing large responses.
 
-![Wiremoth memory window showing current and peak memory with a rolling graph](images/wiremoth-memory.png)
+![Perseid memory window showing current and peak memory with a rolling graph](images/perseid-memory.png)
 
 These are development measurements from one Linux VM, not universal
 guarantees. Treat them as a sanity check and a reproducible baseline.
@@ -40,7 +40,7 @@ in the measurements above.
 ### Heap in use and resident memory
 
 The status bar's figure is **heap in use**: the bytes currently held by
-Wiremoth's allocator. It is the closest equivalent to the memory figure in
+Perseid's allocator. It is the closest equivalent to the memory figure in
 Burp Suite's status bar. The memory window adds the peak value and a rolling
 three-minute graph; this page keeps RSS for system-level comparison.
 
@@ -83,7 +83,7 @@ the reference VM breaks down roughly as follows:
 | --- | ---: |
 | `libLLVM` (Mesa shader compiler) | 44.6 MiB |
 | `libgallium` (Mesa graphics driver) | 12.0 MiB |
-| Wiremoth executable | 7.8 MiB |
+| Perseid executable | 7.8 MiB |
 | `[heap]` mapping | 11.3 MiB |
 | Anonymous mappings (stacks, buffers) | 6.0 MiB |
 | Other libraries and mappings | 10.4 MiB |
@@ -96,7 +96,7 @@ executable, Mesa, and other mapped libraries). The allocator tracker reports
 about 3 MiB in use at idle; anonymous RSS is larger because it also includes
 allocator slack, stacks, and buffers.
 
-The two Mesa mappings are not Wiremoth's data; they are the system graphics
+The two Mesa mappings are not Perseid's data; they are the system graphics
 driver. On this VM, the VMware `vmwgfx` driver uses Mesa's LLVM shader
 compiler. Forcing the llvmpipe software path raised idle RSS to about 186 MiB,
 so it is not a lower-memory fallback here. Other GPUs and driver versions will
@@ -118,15 +118,15 @@ graphics drivers, desktop settings, and captured content.
 | Display | X11, 2880x1800 at 200% UI scale |
 | Window | 1280x820 logical points (2560x1640 physical pixels) |
 | Toolchain | rustc 1.95.0, release build |
-| Wiremoth limits | 1 MiB capture limit, 2,000 exchange history |
+| Perseid limits | 1 MiB capture limit, 2,000 exchange history |
 
 ## Method
 
 Build and start a release binary:
 
 ```sh
-cargo build --release -p wiremoth
-GDK_SCALE=2 QT_SCALE_FACTOR=2 ./target/release/wiremoth \
+cargo build --release -p perseid
+GDK_SCALE=2 QT_SCALE_FACTOR=2 ./target/release/perseid \
   --listen 127.0.0.1:8080 \
   --capture-limit 1048576 \
   --history-limit 2000
@@ -135,7 +135,7 @@ GDK_SCALE=2 QT_SCALE_FACTOR=2 ./target/release/wiremoth \
 For an external reading, locate the process and read its resident memory:
 
 ```sh
-PID=$(pgrep -n -f './target/release/wiremoth')
+PID=$(pgrep -n -f './target/release/perseid')
 grep -E 'VmRSS|VmHWM|RssAnon|RssFile|RssShmem' "/proc/$PID/status"
 ```
 
@@ -155,7 +155,7 @@ curl -sS -x http://127.0.0.1:8080 -o /dev/null \
 
 Large-response tests used two 8 MiB files served by a loopback Python server:
 a repeated-text file for the Raw text view and random bytes for the binary
-preview and Hex view. Each was requested through Wiremoth with the default
+preview and Hex view. Each was requested through Perseid with the default
 capture limit, then opened in the response pane.
 
 No external hosts were contacted for these measurements. See

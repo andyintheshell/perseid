@@ -1,6 +1,6 @@
 # Burp Suite Community parity
 
-**Goal:** Wiremoth aims to be a practical alternative to Burp Suite Community
+**Goal:** Perseid aims to be a practical alternative to Burp Suite Community
 Edition (CE) for manual web security testing: the same capabilities, adapted
 to a Rust-native, memory-bounded, keyboard-first tool.
 
@@ -9,7 +9,7 @@ This is a direction, not a claim. Several capabilities below are still planned.
 ## What parity means
 
 Parity means that for every task supported by Burp CE's built-in manual
-toolkit, Wiremoth offers an equivalent, documented workflow. It does not mean
+toolkit, Perseid offers an equivalent, documented workflow. It does not mean
 identical UI, identical protocols or internals, or byte-for-byte compatibility
 with Burp extensions.
 
@@ -31,7 +31,7 @@ as previews rather than presented as working features. Familiar navigation is
 part of the goal; reproducing every control before its engine exists is not.
 
 Parity here means capability, not artificial restrictions. Burp CE rate-limits
-Intruder to encourage upgrades; Wiremoth's fuzzer will not reproduce that
+Intruder to encourage upgrades; Perseid's fuzzer will not reproduce that
 limit. Scope and concurrency remain explicit, user-controlled safety settings.
 
 ## Capability matrix
@@ -40,7 +40,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 **Planned** (assigned to a milestone), **Deviation** (intentional difference),
 **Non-goal** (explicitly outside parity).
 
-| Capability | Burp CE | Wiremoth | Status | Milestone |
+| Capability | Burp CE | Perseid | Status | Milestone |
 | --- | --- | --- | --- | --- |
 | Loopback HTTP/1.1 proxy and forwarding | Yes | Yes | Working | — |
 | Intercept, edit, forward, or drop messages | Yes | Plain HTTP, head and buffered-body editing | Working | — |
@@ -68,7 +68,7 @@ Interception, scope enforcement, and match/replace cover plain HTTP and
 decrypted HTTPS. HTTPS `CONNECT` targets can be blocked by scope. TLS
 interception is opt-in: it requires a locally generated CA, a manually trusted
 certificate in the browser, and the TLS toggle. The CA private key stays local;
-Wiremoth never installs trust automatically. Hosts on the pass-through list stay
+Perseid never installs trust automatically. Hosts on the pass-through list stay
 opaque, and HTTP/1.1 is the only protocol negotiated inside the tunnel. See
 [HTTPS interception](tls.md) for the trust and removal workflow.
 Interception buffers bodies up to `--intercept-limit`; larger or streaming
@@ -81,7 +81,7 @@ and body rules still operate on the wire representation, and forwarding keeps
 the original response encoding. Scope enforcement is opt-in, and an empty scope
 allows every host.
 
-Burp Suite's status bar exposes a memory figure. Wiremoth's equivalent is
+Burp Suite's status bar exposes a memory figure. Perseid's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;
 it is available on every platform. RSS and its anonymous/file-backed split are
 documented in [Performance and memory](performance.md) for system-level
@@ -89,22 +89,22 @@ comparison; they include mapped libraries and graphics-driver code.
 
 ## Deliberate deviations
 
-- **External browser instead of bundled Chromium.** Wiremoth is used with any
+- **External browser instead of bundled Chromium.** Perseid is used with any
   browser or HTTP client configured to proxy through it. This keeps the binary
   small, avoids owning a browser engine, and lets users keep their normal
   browser profile and devtools. Browser-side tooling such as DOM Invader is
   not part of the parity target.
-- **No binary BApp compatibility.** Burp extensions are Java-based. Wiremoth
+- **No binary BApp compatibility.** Burp extensions are Java-based. Perseid
   acknowledges extension capability but plans a native extension point after
   core parity rather than reproducing Burp's extension ABI. Features that are
   only reachable through BApps are not part of the parity claim.
 - **No artificial Intruder throttling.** Burp CE deliberately rate-limits
-  Intruder. Wiremoth will run fuzzing at the rate the user configures, bounded
+  Intruder. Perseid will run fuzzing at the rate the user configures, bounded
   by scope and resource settings rather than an upgrade restriction.
 - **Keyboard-first ergonomics.** Parity is about capabilities and outcomes,
   not reproducing Burp's mouse-driven workflow.
-- **Persistence is a Wiremoth extra.** Burp CE cannot save project files;
-  Wiremoth plans local, bounded SQLite history as part of its daily workflow.
+- **Persistence is a Perseid extra.** Burp CE cannot save project files;
+  Perseid plans local, bounded SQLite history as part of its daily workflow.
 
 ## Definition of done
 
@@ -129,8 +129,8 @@ or are explicitly authorized to test.
 | **M4 — Protocols and testing tools** | HTTP/2, WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |
 
-After M5, Wiremoth can claim CE manual-toolkit parity subject to the
+After M5, Perseid can claim CE manual-toolkit parity subject to the
 deviations above. Native extensions, passive/guided checks, and other
-Wiremoth-specific ideas continue after parity; see the [Roadmap](roadmap.md).
+Perseid-specific ideas continue after parity; see the [Roadmap](roadmap.md).
 
 Progress is tracked by updating this matrix at the end of each milestone.

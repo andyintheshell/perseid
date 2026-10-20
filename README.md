@@ -1,15 +1,12 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="branding/wiremoth-logo-dark.png">
-    <img src="branding/wiremoth-logo-light.png" alt="Wiremoth — inspect the wire" width="520">
-  </picture>
+  <img src="branding/perseid-readme-banner.png" alt="Perseid — inspect, modify, replay" width="100%">
 </p>
 
-# Wiremoth
+# Perseid
 
-**A lightweight, keyboard-first workbench for inspecting, replaying, and testing HTTP traffic.**
+**A lightweight web security workbench — inspect, modify, and replay HTTP traffic.**
 
-Wiremoth is a Rust-native web security tool for understanding what happens on
+Perseid is a Rust-native web security tool for understanding what happens on
 the wire: capture a request, inspect it, change it, send it again, and compare
 the responses. It is built for web security learning, CTFs, and authorized
 application testing — with no embedded browser and memory bounded by design.
@@ -20,7 +17,7 @@ application testing — with no embedded browser and memory bounded by design.
 > local-CA HTTPS interception, and a Burp-style Target/Proxy workspace work
 > today. See the [roadmap](docs/roadmap.md).
 
-![Wiremoth HTTP history with request and response detail](docs/images/wiremoth-main.png)
+![Perseid HTTP history with request and response detail](docs/images/perseid-main.png)
 
 ## What works today
 
@@ -32,7 +29,7 @@ application testing — with no embedded browser and memory bounded by design.
   header-only instead of being silently modified.
 - Opt-in HTTPS interception with a locally generated certificate authority,
   per-host certificates, a pass-through host list, and documented manual browser
-  trust and removal steps. Wiremoth never installs trust automatically.
+  trust and removal steps. Perseid never installs trust automatically.
 - Opt-in scope enforcement for HTTP and `CONNECT`, returning `403` for
   out-of-scope hosts. An empty scope allows every host, and enforcement is off
   by default.
@@ -57,7 +54,7 @@ application testing — with no embedded browser and memory bounded by design.
 
 ## Goal: Burp Suite Community parity
 
-Wiremoth's north star is **feature parity with Burp Suite Community Edition's
+Perseid's north star is **feature parity with Burp Suite Community Edition's
 manual toolkit**: proxy and history, HTTPS interception, Repeater, Decoder,
 Comparer, Sequencer, WebSockets, and Intruder-style fuzzing without artificial
 rate limits — adapted to an external browser and a memory-bounded Rust core.
@@ -69,10 +66,10 @@ and deliberate deviations live in
 ## Quick start
 
 ```sh
-cargo run -p wiremoth
+cargo run -p perseid
 ```
 
-The proxy listens on `127.0.0.1:8080` and the Wiremoth window opens. Point your
+The proxy listens on `127.0.0.1:8080` and the Perseid window opens. Point your
 browser — or an extension such as FoxyProxy — at that address for HTTP and
 HTTPS. To hold HTTP (and decrypted HTTPS) traffic, open **Proxy > Intercept**
 and click **Intercept is off** once to turn interception on. To decrypt HTTPS,
@@ -107,7 +104,7 @@ workflow design.
 
 ## License
 
-Wiremoth is dual-licensed under either of:
+Perseid is dual-licensed under either of:
 
 - [MIT License](LICENSE-MIT)
 - [Apache License, Version 2.0](LICENSE-APACHE)
