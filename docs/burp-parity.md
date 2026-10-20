@@ -51,7 +51,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
-| HTTPS interception with a local CA | Yes | Local CA, opt-in TLS interception, pass-through hosts, manual trust setup | Working | — |
+| HTTPS interception with a local CA | Yes | Automatic local CA, HTTPS interception on by default, local certificate page, pass-through hosts, manual trust setup | Working | — |
 | HTTP/2 proxying | Yes | No (HTTP/1.1 only) | Planned | M4 |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
 | Repeater | Yes | Read-only preview | Partial | M3 |
@@ -66,11 +66,13 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 
 Interception, scope enforcement, and match/replace cover plain HTTP and
 decrypted HTTPS. HTTPS `CONNECT` targets can be blocked by scope. TLS
-interception is opt-in: it requires a locally generated CA, a manually trusted
-certificate in the browser, and the TLS toggle. The CA private key stays local;
-Perseid never installs trust automatically. Hosts on the pass-through list stay
-opaque, and HTTP/1.1 is the only protocol negotiated inside the tunnel. See
-[HTTPS interception](tls.md) for the trust and removal workflow.
+interception is on by default, as it is in Burp: Perseid creates a local CA on
+first launch, serves its certificate from a local download page, and reuses the
+CA across restarts and updates. The user still installs trust manually in the
+browser; the CA private key stays local, and Perseid never writes to a trust
+store. Hosts on the pass-through list stay opaque, and HTTP/1.1 is the only
+protocol negotiated inside the tunnel. See [HTTPS interception](tls.md) for the
+trust and removal workflow.
 Interception buffers bodies up to `--intercept-limit`; larger or streaming
 bodies are held for header edits, and body rewrite rules apply only to buffered
 UTF-8 bodies. The message editor decodes gzip, deflate, and Brotli bodies in

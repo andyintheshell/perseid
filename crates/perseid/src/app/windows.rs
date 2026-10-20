@@ -1,4 +1,5 @@
-//! Floating windows: live memory usage and the About box.
+//! Floating windows: live memory usage, the About box, and first-run
+//! certificate setup.
 
 use egui::Label;
 
@@ -117,6 +118,94 @@ impl PerseidApp {
                 ui.weak("MIT OR Apache-2.0");
             });
         self.about_open = open;
+    }
+
+    pub(super) fn tls_setup_window(&mut self, ctx: &egui::Context) {
+        if !self.tls_setup_open || self.proxy.is_none() {
+            return;
+        }
+        if ctx.input(|input| input.key_pressed(Key::Escape)) {
+            self.tls_setup_open = false;
+            return;
+        }
+
+        let portal_url = self.certificate_page_url();
+        let cert_path = ca_store::cert_path(&self.ca_dir);
+        let mut open = self.tls_setup_open;
+        let mut open_page = false;
+        let mut dismiss = false;
+        egui::Window::new("Trust Perseid's HTTPS certificate")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.set_max_width(500.0);
+                ui.label(
+                    RichText::new("HTTPS interception is ready")
+                        .size(17.0)
+                        .strong()
+                        .color(theme::TEXT),
+                );
+                ui.label(
+                    "Perseid created a local certificate authority on first launch. To inspect \
+                     HTTPS, install its certificate in the browser you use for testing. Trust is \
+                     never installed automatically.",
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Certificate")
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+                ui.label(
+                    RichText::new(cert_path.display().to_string())
+                        .monospace()
+                        .small()
+                        .color(theme::TEXT),
+                );
+                ui.add_space(8.0);
+                if let Some(url) = &portal_url {
+                    ui.label(
+                        "The proxy serves a certificate download page. Open it, download the \
+                         certificate, and import it:",
+                    );
+                    ui.add_space(4.0);
+                    if ui.button("Open certificate page").clicked() {
+                        open_page = true;
+                    }
+                    ui.hyperlink_to(
+                        RichText::new(url)
+                            .monospace()
+                            .small()
+                            .color(theme::ACCENT_DARK),
+                        url,
+                    );
+                } else {
+                    ui.label(
+                        "Start the proxy, then open Proxy > TLS to use the certificate page or \
+                         import the file directly.",
+                    );
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    "Then point the browser at the Perseid proxy. Decrypted requests appear in \
+                     HTTP history, and you can turn interception off at any time under Proxy > \
+                     TLS.",
+                );
+                ui.add_space(10.0);
+                if ui.button("Not now").clicked() {
+                    dismiss = true;
+                }
+            });
+        if dismiss {
+            open = false;
+        }
+        if open_page && let Some(url) = portal_url {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+            open = false;
+        }
+        self.tls_setup_open = open;
     }
 }
 

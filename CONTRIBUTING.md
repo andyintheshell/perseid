@@ -32,6 +32,15 @@ The `perseid-proxy` crate also has a headless example for manual smoke tests:
 cargo run -p perseid-proxy --example headless
 ```
 
+Perseid creates its TLS certificate authority on first launch and reuses the
+same per-user CA for debug and release runs. That is deliberate: a development
+run keeps the certificate your browser already trusts. For experiments that
+should not touch your trusted CA, point the app at a scratch directory:
+
+```sh
+PERSEID_CA_DIR="$(mktemp -d)" cargo run -p perseid
+```
+
 ## Required checks
 
 Before sending a change, run the same checks as CI:

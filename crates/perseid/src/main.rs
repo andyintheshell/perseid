@@ -53,12 +53,17 @@ pub struct Args {
 
     /// Directory holding the TLS interception certificate authority
     /// (`perseid-ca.pem` and its private key). Defaults to
-    /// `$PERSEID_CA_DIR`, then `$XDG_DATA_HOME/perseid`.
+    /// `$PERSEID_CA_DIR`, then the platform data directory.
     #[arg(long, value_name = "DIR")]
     pub ca_dir: Option<std::path::PathBuf>,
 
-    /// Start with HTTPS interception enabled (requires an existing CA).
+    /// Start without decrypting HTTPS. The local CA is still created and
+    /// available for installation.
     #[arg(long)]
+    pub no_tls_intercept: bool,
+
+    /// Deprecated: HTTPS interception is enabled by default.
+    #[arg(long, hide = true)]
     pub tls_intercept: bool,
 
     /// Host that is never TLS-intercepted; repeat the flag for more hosts.

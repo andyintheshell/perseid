@@ -27,11 +27,13 @@
 //! - Opt-in scope enforcement for HTTP, HTTPS, and CONNECT targets, and
 //!   request/response match/replace rules compiled from
 //!   [`ProxySettings`].
-//! - HTTPS via CONNECT either passes through as an opaque tunnel (the
-//!   default) or is decrypted when [`ProxySettings::tls_intercept`] is on and
-//!   a [`CertificateAuthority`] is supplied in [`ProxyConfig::tls`]. Each
+//! - HTTPS via CONNECT either passes through as an opaque tunnel or is decrypted
+//!   when [`ProxySettings::tls_intercept`] is on and a
+//!   [`CertificateAuthority`] is supplied in [`ProxyConfig::tls`]. Each
 //!   decrypted request travels the same interception, scope, rewriting, and
 //!   capture pipeline as plain HTTP.
+//! - A local certificate page at the listener address (and `http://perseid/`)
+//!   downloads the public CA certificate. Portal requests are not captured.
 //!
 //! # Example
 //!
@@ -51,6 +53,7 @@ mod forward;
 mod intercept;
 mod message;
 mod policy;
+mod portal;
 mod rules;
 mod server;
 mod tls;
@@ -188,6 +191,7 @@ impl Proxy {
         let ctx = Arc::new(server::Ctx {
             client,
             tls_ca: tls_ca.clone(),
+            listen: addr,
             tx: tx as SyncSender<ProxyEvent>,
             notify: config.notify.clone(),
             dropped: dropped.clone(),

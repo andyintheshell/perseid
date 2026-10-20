@@ -30,8 +30,8 @@ proxy is running and lets you retry if the address is already in use.
 --history-limit <N>       maximum number of exchanges kept in memory [default: 2000]
 --history-bytes <BYTES>   maximum total body bytes retained by history [default: 268435456]
 --no-proxy                start the UI without the proxy
---ca-dir <DIR>            TLS interception CA directory [default: $PERSEID_CA_DIR or $XDG_DATA_HOME/perseid]
---tls-intercept           start with HTTPS interception enabled (requires a CA)
+--ca-dir <DIR>            TLS interception CA directory [default: $PERSEID_CA_DIR or the platform data directory]
+--no-tls-intercept        start without decrypting HTTPS (the local CA is still available)
 --tls-passthrough <HOST>  host that is never TLS-intercepted (repeatable)
 --ui-scale <FACTOR>       UI scale, e.g. 1.5 or 2 [default: system / desktop scale]
 ```
@@ -46,7 +46,7 @@ The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
 | Tab | Available today |
 | --- | --- |
 | **Target** | A host/path site map built from captured exchanges, and an editable scope list. Scope can filter the site map and history, and can optionally block out-of-scope traffic before it is forwarded. |
-| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds HTTP and decrypted HTTPS messages for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. **TLS** manages the local CA, the HTTPS decryption toggle, and the pass-through host list. |
+| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds HTTP and decrypted HTTPS messages for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. **TLS** shows the automatically created CA, opens the certificate page, and manages the HTTPS toggle, regeneration, removal, and pass-through hosts. |
 | **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
 | **Repeater** | A read-only preview of the selected request and response. Editing and resending arrive in Milestone 3. |
 
@@ -111,21 +111,28 @@ its cached copy does not look like a failed capture.
 
 ## HTTPS interception
 
-Perseid can decrypt HTTPS with a local certificate authority (CA). The CA is
-generated on demand and stored outside the proxy; its private key stays on your
-machine. Open **Proxy > TLS** to generate it, copy the certificate path, and
-import the certificate into your browser. Trust is always installed manually,
-never system-wide by Perseid. Step-by-step Firefox and Chromium instructions,
-pass-through configuration, and removal steps are in
-[HTTPS interception](tls.md).
+Perseid creates a local certificate authority (CA) automatically on first
+launch and stores it outside the proxy, in a per-user data directory. The CA is
+reused across restarts, debug and release builds, and application updates;
+replacing the binary does not invalidate browser trust. Interception is on by
+default; the private key stays on your machine.
 
-Decryption is off by default and requires both a loaded CA and the **Decrypt
-HTTPS** toggle. While it is on, each request inside a `CONNECT` tunnel appears
-as its own `https://` entry in HTTP history and flows through interception,
-scope, and match/replace like plain HTTP. The original `CONNECT` row records the
-tunnel and how many requests it carried. Hosts on the pass-through list stay
-opaque, as does all HTTPS while decryption is off. Only HTTP/1.1 is negotiated
-inside the tunnel.
+On first launch Perseid opens a certificate setup window. Install the
+certificate in the browser you use for testing. Open **Proxy > TLS > Open
+certificate page**, or browse directly to
+`http://127.0.0.1:8080/` while the proxy is running. Download
+`perseid-ca.pem` and import it; step-by-step Firefox and Chromium instructions,
+pass-through configuration, and removal steps are in
+[HTTPS interception](tls.md). Trust is always installed manually, never
+system-wide by Perseid. Once the proxy is configured, `http://perseid/` opens
+the same certificate page.
+
+Each request inside a decrypted `CONNECT` tunnel appears as its own `https://`
+entry in HTTP history and flows through interception, scope, and match/replace
+like plain HTTP. The original `CONNECT` row records the tunnel and how many
+requests it carried. Hosts on the pass-through list stay opaque, as does all
+HTTPS when you turn off **Intercept HTTPS** or start with
+`--no-tls-intercept`. Only HTTP/1.1 is negotiated inside the tunnel.
 
 ## Match/replace rules
 
@@ -182,7 +189,9 @@ leaves the filter. Clicking a row also selects it.
   `--capture-limit`, and interception buffers up to `--intercept-limit` per
   message. The oldest exchanges are evicted when either history bound is
   reached.
-- There is no disk persistence, project file, or settings persistence yet.
+- Captured traffic is in memory only; there is no project file or settings
+  persistence yet. The TLS certificate authority is the exception: it is
+  persisted so browser trust survives restarts and updates.
 
 ## HiDPI displays
 
@@ -213,8 +222,9 @@ scale.
 - **A request or `CONNECT` gets a `403`:** **Block out-of-scope traffic** is
   enabled and the host is not in the scope list. Add the host or turn the
   guardrail off.
-- **HTTPS sites show no decrypted traffic:** decryption is off, no CA is loaded,
-  or the host is on the pass-through list. Check the status in **Proxy > TLS**.
-  If the browser reports an untrusted certificate, import the current
-  `perseid-ca.pem` as described in [HTTPS interception](tls.md); regenerating
-  the CA requires importing the new certificate.
+- **HTTPS sites show no decrypted traffic:** **Intercept HTTPS** is off, the CA
+  could not be loaded, or the host is on the pass-through list. Check the status
+  in **Proxy > TLS**. If the browser reports an untrusted certificate, import the
+  current `perseid-ca.pem` from the certificate page as described in
+  [HTTPS interception](tls.md); regenerating the CA requires importing the new
+  certificate.

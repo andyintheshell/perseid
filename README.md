@@ -14,8 +14,8 @@ application testing — with no embedded browser and memory bounded by design.
 > [!IMPORTANT]
 > **Status: early prototype.** A loopback-only HTTP/1.1 proxy with editable
 > request/response interception, opt-in scope enforcement, match/replace rules,
-> local-CA HTTPS interception, and a Burp-style Target/Proxy workspace work
-> today. See the [roadmap](docs/roadmap.md).
+> automatic local-CA HTTPS interception, and a Burp-style Target/Proxy workspace
+> work today. See the [roadmap](docs/roadmap.md).
 
 ![Perseid HTTP history with request and response detail](docs/images/perseid-main.png)
 
@@ -27,9 +27,10 @@ application testing — with no embedded browser and memory bounded by design.
   is on/off** control: hold HTTP and decrypted HTTPS messages, edit the head and
   buffered body, then forward or drop. Bodies over the intercept limit stay
   header-only instead of being silently modified.
-- Opt-in HTTPS interception with a locally generated certificate authority,
-  per-host certificates, a pass-through host list, and documented manual browser
-  trust and removal steps. Perseid never installs trust automatically.
+- HTTPS interception on by default with a locally generated certificate
+  authority, per-host certificates, a built-in certificate download page, a
+  pass-through host list, and documented manual browser trust and removal steps.
+  Perseid creates the CA automatically and never installs trust automatically.
 - Opt-in scope enforcement for HTTP and `CONNECT`, returning `403` for
   out-of-scope hosts. An empty scope allows every host, and enforcement is off
   by default.
@@ -47,8 +48,8 @@ application testing — with no embedded browser and memory bounded by design.
   Hex keeps the original wire bytes.
 - Target site map grouped by host and path, plus an editable scope list shared
   by the view filter and the traffic guardrail.
-- `CONNECT` tunneling for HTTPS: opaque passthrough by default, decryption with
-  a locally generated CA when enabled.
+- `CONNECT` tunneling for HTTPS: decrypted by default with the local CA, with
+  pass-through hosts and an off switch when you need opaque tunnels.
 - Read-only Repeater preview and a clearly labelled Intruder preview; no fake
   controls are presented as working features.
 
@@ -69,12 +70,14 @@ and deliberate deviations live in
 cargo run -p perseid
 ```
 
-The proxy listens on `127.0.0.1:8080` and the Perseid window opens. Point your
-browser — or an extension such as FoxyProxy — at that address for HTTP and
-HTTPS. To hold HTTP (and decrypted HTTPS) traffic, open **Proxy > Intercept**
-and click **Intercept is off** once to turn interception on. To decrypt HTTPS,
-generate and trust the local CA as described in
-[HTTPS interception](docs/tls.md).
+The proxy listens on `127.0.0.1:8080` and the Perseid window opens. Perseid
+creates its local CA on first launch, opens a certificate setup window, and
+intercepts HTTPS by default. Open `http://127.0.0.1:8080/` directly, or use
+**Proxy > TLS > Open certificate page**, to download and install the certificate
+in your browser. Then point the browser — or an extension such as FoxyProxy —
+at `127.0.0.1:8080` for HTTP and HTTPS. To hold HTTP (and decrypted HTTPS) traffic, open **Proxy > Intercept**
+and click **Intercept is off** once to turn interception on. Full trust and
+removal steps are in [HTTPS interception](docs/tls.md).
 
 > Only test systems you own or have explicit permission to test. See
 > [Safety and privacy](docs/safety.md).
@@ -87,7 +90,7 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 | Document | Contents |
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Build, run, proxy setup, options, limitations |
-| [HTTPS interception](docs/tls.md) | Local CA setup, browser trust and removal, pass-through hosts |
+| [HTTPS interception](docs/tls.md) | Automatic local CA, certificate page, browser trust and removal, pass-through hosts |
 | [Design](docs/design.md) | Principles, architecture, technology, performance |
 | [Performance and memory](docs/performance.md) | M0 measurements, idle RSS breakdown, and method |
 | [Roadmap](docs/roadmap.md) | Milestones from prototype to Community parity |
