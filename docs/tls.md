@@ -114,9 +114,10 @@ the encrypted traffic has no plaintext request to show, so it does not add
 history rows either.
 
 Held interception, scope enforcement, and match/replace rules all apply to
-decrypted HTTPS messages exactly as they do to plain HTTP. Only HTTP/1.1 is
-negotiated inside the tunnel; the proxy advertises `http/1.1` to the browser and
-to the origin server.
+decrypted HTTPS messages exactly as they do to plain HTTP. Inside intercepted
+tunnels the proxy advertises `h2` and `http/1.1` through ALPN, preferring HTTP/2
+when the client supports it. The same preference is offered to HTTPS origins,
+with HTTP/1.1 as the fallback on both sides.
 
 Interception is on by default. Turn it off in **Proxy > TLS** for the current
 run, or start with:
@@ -199,9 +200,9 @@ next time it starts; that new authority is not trusted until you import it.
   TLS**, or start the proxy from the toolbar.
 - **Some sites fail while others work:** certificate pinning or a non-HTTP
   protocol. Add the host to the pass-through list.
-- **HTTP/2 or HTTP/3 sites behave differently:** Perseid negotiates HTTP/1.1
-  inside the tunnel and does not proxy QUIC. Disable HTTP/3/QUIC in the browser
-  if a site insists on it.
+- **HTTP/3 sites behave differently:** Perseid proxies HTTP/1.1 and HTTP/2 but
+  does not proxy QUIC. Disable HTTP/3/QUIC in the browser if a site insists on
+  it.
 - **No decrypted rows appear:** interception is off, no CA is loaded, or the
   host is on the pass-through list. Check the status in **Proxy > TLS**.
 - **Traffic is captured but not editable:** only bodies within

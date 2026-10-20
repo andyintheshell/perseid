@@ -88,6 +88,12 @@ editing. Larger or streaming bodies are still held for header edits, but their
 body bytes pass through unchanged and body editing is disabled. In the
 interception editor, binary bodies are shown as a read-only hex preview.
 
+HTTP/2 messages use a reconstructed editable head. The request line is
+origin-form, `:authority` is represented by a synthetic `Host` header, and
+response status lines omit the reason phrase. Editing that head updates the
+forwarded request or response; pseudo-headers are derived again when the
+message is sent.
+
 **Pretty** formats structured bodies for reading: JSON is indented, HTML and XML
 are nested, and URL-encoded forms get one decoded field per line. **Raw** shows
 the body as plain text and never mixes in a hex dump; binary bodies are rendered
@@ -140,7 +146,9 @@ like plain HTTP. The `CONNECT` tunnel itself is transport and is not shown as a
 separate row, matching Burp's HTTP history. Hosts on the pass-through list stay
 opaque, as does all HTTPS when you turn off **Intercept HTTPS** or start with
 `--no-tls-intercept`; because those connections are not decrypted, they add no
-HTTP history rows. Only HTTP/1.1 is negotiated inside the tunnel.
+HTTP history rows. HTTP/2 is negotiated inside the tunnel when the client
+offers it through ALPN; HTTP/1.1 remains the fallback, and HTTPS origins are
+offered h2 the same way.
 
 ## Match/replace rules
 
@@ -176,10 +184,13 @@ leaves the filter. Clicking a row also selects it.
 
 ## Current limitations
 
-- HTTP/1.1 only; HTTP/2 and WebSocket-specific handling are still planned.
-- HTTPS interception terminates HTTP/1.1 inside `CONNECT` tunnels. Certificate
-  pinning, non-HTTP TLS protocols, and clients that do not trust the local CA
-  need the pass-through list; HTTP/3/QUIC is not proxied.
+- HTTP/1.1 and HTTP/2 are proxied. HTTP/2 uses TLS ALPN for intercepted clients
+  and HTTPS origins, and h2c prior knowledge is accepted on the plain listener.
+  Cleartext origins use HTTP/1.1. WebSocket-specific handling and HTTP/3/QUIC
+  are still planned.
+- HTTPS interception terminates HTTP/1.1 or HTTP/2 inside `CONNECT` tunnels.
+  Certificate pinning, non-HTTP TLS protocols, and clients that do not trust
+  the local CA need the pass-through list.
 - Browser trust must be installed and removed manually. Perseid never edits a
   system or browser trust store.
 - Interception covers HTTP and decrypted HTTPS. Only buffered UTF-8 bodies can

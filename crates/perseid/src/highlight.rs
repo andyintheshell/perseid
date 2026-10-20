@@ -114,6 +114,58 @@ pub fn line_job(line: &str, role: LineRole, language: Language, font: &FontId) -
     job
 }
 
+/// Build the full message layout for a read-only text editor.
+///
+/// Unlike the Hex row renderer this lays out the whole message, but `egui`
+/// memoizes layout jobs, so the expensive shaping pass is only repeated when
+/// the text or wrap width changes. The job must preserve every byte of the
+/// input because it is also the buffer used for selection and copying.
+pub fn message_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
+    let lines: Vec<&str> = text.lines().collect();
+    let syntax = Syntax::from_lines(&lines);
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap_width;
+    job.wrap.break_anywhere = true;
+    job.keep_trailing_whitespace = true;
+
+    let mut segments = text.split('\n').peekable();
+    let mut index = 0;
+    while let Some(segment) = segments.next() {
+        let (line, carriage_return) = segment
+            .strip_suffix('\r')
+            .map_or((segment, ""), |line| (line, "\r"));
+        let line_job = line_job(line, syntax.role(index), syntax.language, font);
+        append_job(&mut job, line_job);
+        if !carriage_return.is_empty() {
+            job.append(carriage_return, 0.0, plain_format(font));
+        }
+        if segments.peek().is_some() {
+            job.append("\n", 0.0, plain_format(font));
+        }
+        index += 1;
+    }
+    job
+}
+
+fn append_job(destination: &mut LayoutJob, source: LayoutJob) {
+    let LayoutJob { text, sections, .. } = source;
+    for section in sections {
+        destination.append(
+            &text[section.byte_range.start.0..section.byte_range.end.0],
+            section.leading_space,
+            section.format,
+        );
+    }
+}
+
+fn plain_format(font: &FontId) -> TextFormat {
+    TextFormat {
+        font_id: font.clone(),
+        color: theme::TEXT,
+        ..Default::default()
+    }
+}
+
 fn start_line(job: &mut LayoutJob, line: &str, font: &FontId) {
     let mut parts = line.splitn(3, ' ');
     let first = parts.next().unwrap_or_default();
@@ -487,6 +539,41 @@ mod tests {
         assert_eq!(syntax.header_end, 2);
         assert_eq!(syntax.language, Language::Plain);
         assert_eq!(syntax.role(1), LineRole::Header);
+    }
+
+    #[test]
+    fn message_jobs_preserve_every_byte() {
+        let font = FontId::monospace(MESSAGE_FONT_SIZE);
+        let cases = [
+            "GET / HTTP/1.1\nHost: example.com\n\nbody",
+            "GET / HTTP/1.1\r\nHost: example.com\r\n\r\nbody\r\n",
+            "GET / HTTP/1.1\n\n",
+            "",
+            "Привет\nмир",
+        ];
+
+        for text in cases {
+            let job = message_job(text, 120.0, &font);
+            assert_eq!(job.text, text);
+        }
+    }
+
+    #[test]
+    fn message_jobs_wrap_long_unbroken_lines() {
+        let ctx = egui::Context::default();
+        let font = FontId::monospace(MESSAGE_FONT_SIZE);
+        let text = "GET / HTTP/1.1\nHost: example.com\n\n\
+                    {\"value\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}";
+        let mut rows = 0;
+
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let job = message_job(text, 80.0, &font);
+            let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+            rows = galley.rows.len();
+        })
+        .drop_without_applying_deltas();
+
+        assert!(rows > text.lines().count(), "long lines should wrap");
     }
 
     #[test]

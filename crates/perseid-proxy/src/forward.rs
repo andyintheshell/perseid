@@ -71,6 +71,9 @@ struct Exchange {
     capture: bool,
     policy: PolicySnapshot,
     request: RequestInfo,
+    /// Protocol the client used, independent of the protocol negotiated with
+    /// the origin. Responses must be framed for this side of the proxy.
+    downstream_version: Version,
 }
 
 /// The transport a request arrived on. Origin-form targets are resolved
@@ -143,12 +146,22 @@ async fn handle_with(
     let capture = ctx.capture_enabled();
     let policy = ctx.policy();
     let (mut parts, body) = req.into_parts();
+    let downstream_version = parts.version;
     let raw_uri = parts.uri.clone();
+    // HTTP/2 head editing uses an origin-form request line, so a later
+    // resolution of the edited target cannot rely on the absolute URI alone.
+    // Keep the scheme the client originally asked for; otherwise an h2c
+    // request for `https://host/path` would be re-resolved as cleartext.
+    let default_scheme = match raw_uri.scheme_str() {
+        Some("https") => ConnScheme::Https,
+        Some("http") => ConnScheme::Http,
+        _ => conn_scheme,
+    };
 
     let target = match resolve_target(
         &parts.uri,
         &parts.headers,
-        conn_scheme,
+        default_scheme,
         fallback_authority.as_deref(),
     ) {
         Ok(target) => target,
@@ -157,7 +170,7 @@ async fn handle_with(
             let request = RequestInfo {
                 method: parts.method.to_string(),
                 uri: raw_uri.to_string(),
-                scheme: conn_scheme.as_str().to_string(),
+                scheme: default_scheme.as_str().to_string(),
                 host: parts
                     .headers
                     .get(HOST)
@@ -184,7 +197,8 @@ async fn handle_with(
         start,
         capture,
         policy,
-        request: build_request_info(&parts, &target, &raw_uri, conn_scheme),
+        request: build_request_info(&parts, &target, &raw_uri, default_scheme),
+        downstream_version,
     };
     if exchange.policy.scope_enforced() && !exchange.policy.in_scope(&exchange.request.host) {
         ctx.block_by_scope();
@@ -226,7 +240,13 @@ async fn handle_with(
     }
 
     if exchange.policy.intercept_requests() {
-        let head = serialize_request_head(&parts.method, &parts.uri, parts.version, &parts.headers);
+        let head = serialize_request_head(
+            &parts.method,
+            &parts.uri,
+            parts.version,
+            &parts.headers,
+            fallback_authority.as_deref(),
+        );
         let body = body_source.buffered().map(<[u8]>::to_vec);
         let (decision_tx, decision_rx) = oneshot::channel();
         let item = InterceptItem::Request(InterceptRequest::new(
@@ -306,8 +326,13 @@ async fn handle_with(
         // Only round-trip the head when a rule can change it. Serializing an
         // untouched head would lossily rewrite non-UTF-8 header values.
         if exchange.policy.has_request_head_rules() {
-            let mut head =
-                serialize_request_head(&parts.method, &parts.uri, parts.version, &parts.headers);
+            let mut head = serialize_request_head(
+                &parts.method,
+                &parts.uri,
+                parts.version,
+                &parts.headers,
+                fallback_authority.as_deref(),
+            );
             exchange.policy.apply_request_head(&mut head);
             let parsed = match parse_request_head(&head) {
                 Ok(parsed) => parsed,
@@ -347,7 +372,7 @@ async fn handle_with(
     let target = match resolve_target(
         &parts.uri,
         &parts.headers,
-        conn_scheme,
+        default_scheme,
         fallback_authority.as_deref(),
     ) {
         Ok(target) => target,
@@ -363,7 +388,7 @@ async fn handle_with(
             );
         }
     };
-    exchange.request = build_request_info(&parts, &target, &parts.uri, conn_scheme);
+    exchange.request = build_request_info(&parts, &target, &parts.uri, default_scheme);
 
     if exchange.policy.scope_enforced() && !exchange.policy.in_scope(&exchange.request.host) {
         ctx.block_by_scope();
@@ -401,6 +426,7 @@ async fn forward(
         capture,
         policy,
         request,
+        downstream_version,
     } = exchange;
 
     let host_header = match display_host(&target.authority).parse::<HeaderValue>() {
@@ -439,7 +465,10 @@ async fn forward(
     let mut upstream = Request::new(body);
     *upstream.method_mut() = parts.method;
     *upstream.uri_mut() = target.uri;
-    // Origin servers speak HTTP/1.1 to a proxy regardless of client version.
+    // Keep HTTP/1.1 as the request version for the legacy client. If the
+    // origin negotiates h2 over ALPN, hyper-util switches the pooled
+    // connection to HTTP/2 and derives the pseudo-headers from the URI and
+    // headers; if it stays on h1, the request is already in the right form.
     *upstream.version_mut() = Version::HTTP_11;
     let mut headers = HeaderMap::new();
     for (name, value) in forwarded_headers(&parts.headers) {
@@ -465,6 +494,7 @@ async fn forward(
                     capture,
                     policy,
                     request,
+                    downstream_version,
                 },
                 request_buffer,
                 response,
@@ -542,6 +572,7 @@ async fn relay(
         capture,
         policy,
         request,
+        downstream_version,
     } = exchange;
     let (mut parts, body) = response.into_parts();
     let mut body_source = BodySource::Incoming(body);
@@ -734,7 +765,9 @@ async fn relay(
 
     let mut out = Response::new(body);
     *out.status_mut() = parts.status;
-    *out.version_mut() = parts.version;
+    // The response head is captured with the origin's protocol, but the
+    // connection back to the client may have negotiated a different one.
+    *out.version_mut() = downstream_version;
     if let Some(phrase) = parts.extensions.get::<ReasonPhrase>() {
         out.extensions_mut().insert(phrase.clone());
     }

@@ -1,9 +1,16 @@
 //! End-to-end tests: real TCP client -> Perseid proxy -> local origin server.
 
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
+use http::{HeaderMap, Method, Response, StatusCode, Uri, Version};
+use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
+use hyper::service::service_fn;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use perseid_proxy::{
     CertificateAuthority, ExchangeResult, InterceptItem, InterceptKind, MatchReplaceRule, Proxy,
     ProxyConfig, ProxyEvent, ProxySettings, RequestInfo, RuleDirection, RulePart, StartError,
@@ -126,6 +133,54 @@ async fn raw_exchange(proxy: SocketAddr, request: &str) -> Vec<u8> {
 
 fn spawn_raw_client(proxy: SocketAddr, request: String) -> tokio::task::JoinHandle<Vec<u8>> {
     tokio::spawn(async move { raw_exchange(proxy, &request).await })
+}
+
+/// Send one HTTP/2 request over an already-connected transport and read the
+/// complete response. Used for h2c and for HTTP/2 inside an intercepted TLS
+/// tunnel.
+async fn h2_exchange<I>(io: I, uri: String) -> (Version, StatusCode, HeaderMap, Vec<u8>)
+where
+    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
+{
+    h2_exchange_with(io, Method::GET, uri, Bytes::new()).await
+}
+
+async fn h2_exchange_with<I>(
+    io: I,
+    method: Method,
+    uri: String,
+    body: Bytes,
+) -> (Version, StatusCode, HeaderMap, Vec<u8>)
+where
+    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
+{
+    let (mut sender, connection) = hyper::client::conn::http2::handshake(TokioExecutor::new(), io)
+        .await
+        .expect("HTTP/2 handshake");
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+
+    let request = hyper::Request::builder()
+        .method(method)
+        .uri(uri)
+        .version(Version::HTTP_2)
+        .body(Full::new(body))
+        .expect("HTTP/2 request");
+    let response = tokio::time::timeout(TIMEOUT, sender.send_request(request))
+        .await
+        .expect("proxy should answer the HTTP/2 request before the test timeout")
+        .expect("HTTP/2 request should succeed");
+    let version = response.version();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = tokio::time::timeout(TIMEOUT, response.into_body().collect())
+        .await
+        .expect("proxy should finish the HTTP/2 response")
+        .expect("HTTP/2 response body")
+        .to_bytes()
+        .to_vec();
+    (version, status, headers, body)
 }
 
 async fn next_intercept(proxy: &mut Proxy) -> InterceptItem {
@@ -1366,6 +1421,80 @@ fn origin_certificate(name: &str) -> (ServerConfig, String) {
     (config, cert.pem())
 }
 
+fn origin_certificate_h2(name: &str) -> (ServerConfig, String) {
+    let (mut config, pem) = origin_certificate(name);
+    config.alpn_protocols = vec![b"h2".to_vec()];
+    (config, pem)
+}
+
+#[derive(Debug)]
+struct CapturedH2Request {
+    version: Version,
+    method: Method,
+    uri: Uri,
+    body: Vec<u8>,
+}
+
+/// TLS origin that only offers `h2` through ALPN and reports every request.
+async fn spawn_h2_tls_origin(
+    name: &str,
+    body: &'static [u8],
+) -> (
+    SocketAddr,
+    String,
+    mpsc::UnboundedReceiver<CapturedH2Request>,
+) {
+    let (config, cert_pem) = origin_certificate_h2(name);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (request_tx, request_rx) = mpsc::unbounded_channel();
+    let config = Arc::new(config);
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let acceptor = TlsAcceptor::from(config.clone());
+            let request_tx = request_tx.clone();
+            tokio::spawn(async move {
+                let Ok(tls) = acceptor.accept(stream).await else {
+                    return;
+                };
+                assert_eq!(tls.get_ref().1.alpn_protocol(), Some(b"h2".as_slice()));
+                let service = service_fn(move |req: hyper::Request<Incoming>| {
+                    let request_tx = request_tx.clone();
+                    async move {
+                        let (parts, body_stream) = req.into_parts();
+                        let request_body = body_stream
+                            .collect()
+                            .await
+                            .map(|body| body.to_bytes().to_vec())
+                            .unwrap_or_default();
+                        let _ = request_tx.send(CapturedH2Request {
+                            version: parts.version,
+                            method: parts.method,
+                            uri: parts.uri,
+                            body: request_body,
+                        });
+                        Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "text/plain")
+                                .header("content-length", body.len())
+                                .body(Full::new(Bytes::from_static(body)))
+                                .expect("HTTP/2 origin response"),
+                        )
+                    }
+                });
+                let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(tls), service)
+                    .await;
+            });
+        }
+    });
+    (addr, cert_pem, request_rx)
+}
+
 /// TLS origin that speaks HTTP/1.1 and reports every request it receives.
 async fn spawn_tls_origin(
     name: &str,
@@ -1816,4 +1945,356 @@ async fn tls_authority_can_be_added_at_runtime() {
         results(&events).as_slice(),
         [ExchangeResult::Tunnel { .. }]
     ));
+}
+
+// ---------------------------------------------------------------------------
+// HTTP/2
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forwards_and_captures_h2c_requests() {
+    let (origin, origin_request) =
+        spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let proxy = test_proxy(64 * 1024, 64);
+
+    let stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let (version, status, _headers, body) =
+        h2_exchange(TokioIo::new(stream), format!("http://{origin}/h2c")).await;
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"ok");
+
+    let upstream = String::from_utf8_lossy(
+        &origin_request
+            .await
+            .expect("origin should receive the forwarded h2c request"),
+    )
+    .into_owned();
+    assert!(
+        upstream.starts_with("GET /h2c HTTP/1.1"),
+        "upstream request was: {upstream}"
+    );
+
+    let events = drain_until_finished(&proxy);
+    let request = started_of(&events);
+    assert_eq!(request.version, "HTTP/2");
+    assert_eq!(request.path, "/h2c");
+    let response = head_of(&events);
+    assert_eq!(response.version, "HTTP/1.1");
+    assert_eq!(finished_of(&events).request_body.data(), b"");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forwards_https_requests_over_an_h2_upstream() {
+    let (origin, origin_pem, mut origin_requests) =
+        spawn_h2_tls_origin("127.0.0.1", b"hello h2").await;
+    let proxy = proxy_with_tls(None, vec![origin_pem], ProxySettings::default());
+
+    let request =
+        format!("GET https://{origin}/up HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let response = raw_exchange(proxy.local_addr(), &request).await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(
+        text.starts_with("HTTP/1.1 200 OK"),
+        "HTTP/1.1 client response was: {text}"
+    );
+    assert_eq!(body_after_head(&response), b"hello h2");
+
+    let upstream = tokio::time::timeout(TIMEOUT, origin_requests.recv())
+        .await
+        .expect("origin should receive the request")
+        .expect("origin request channel");
+    assert_eq!(upstream.version, Version::HTTP_2);
+    assert_eq!(upstream.method, Method::GET);
+    assert_eq!(upstream.uri.path(), "/up");
+    assert_eq!(upstream.body, b"");
+
+    let events = drain_until_finished(&proxy);
+    assert_eq!(started_of(&events).version, "HTTP/1.1");
+    let response = head_of(&events);
+    assert_eq!(response.version, "HTTP/2");
+    assert_eq!(response.status, 200);
+    assert!(response.reason.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepts_h2_inside_a_tls_tunnel_and_forwards_it_as_h2() {
+    let (origin, origin_pem, mut origin_requests) =
+        spawn_h2_tls_origin("127.0.0.1", b"hello h2").await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca.clone()),
+        vec![origin_pem],
+        ProxySettings {
+            tls_intercept: true,
+            ..ProxySettings::default()
+        },
+    );
+
+    let mut stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let connect = format!("CONNECT {origin} HTTP/1.1\r\nHost: {origin}\r\n\r\n");
+    stream.write_all(connect.as_bytes()).await.unwrap();
+    let head = read_http_head(&mut stream).await;
+    assert!(
+        head.starts_with("HTTP/1.1 200"),
+        "unexpected CONNECT response: {head}"
+    );
+
+    let mut config = ClientConfig::builder()
+        .with_root_certificates(pem_roots(&[ca.cert_pem()]))
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"h2".to_vec()];
+    let connector = TlsConnector::from(Arc::new(config));
+    let name = ServerName::try_from("localhost".to_string()).expect("valid server name");
+    let tls = connector
+        .connect(name, stream)
+        .await
+        .expect("client TLS handshake should negotiate h2");
+    assert_eq!(tls.get_ref().1.alpn_protocol(), Some(b"h2".as_slice()));
+
+    let (version, status, _headers, body) =
+        h2_exchange(TokioIo::new(tls), format!("https://{origin}/secure")).await;
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"hello h2");
+
+    let upstream = tokio::time::timeout(TIMEOUT, origin_requests.recv())
+        .await
+        .expect("origin should receive the decrypted HTTP/2 request")
+        .expect("origin request channel");
+    assert_eq!(upstream.version, Version::HTTP_2);
+    assert_eq!(upstream.uri.path(), "/secure");
+
+    let events = drain_events(&proxy, 2);
+    let started = started_events(&events);
+    let inner = started
+        .iter()
+        .find(|request| request.method == "GET")
+        .expect("a decrypted GET exchange");
+    assert_eq!(inner.scheme, "https");
+    assert_eq!(inner.version, "HTTP/2");
+    assert_eq!(inner.path, "/secure");
+    let response = events
+        .iter()
+        .find_map(|event| match event {
+            ProxyEvent::ResponseHead { head, .. } if head.version == "HTTP/2" => Some(head),
+            _ => None,
+        })
+        .expect("an upstream HTTP/2 response head");
+    assert_eq!(response.status, 200);
+    assert!(
+        results(&events)
+            .iter()
+            .any(|result| matches!(result, ExchangeResult::InterceptedTls { requests: 1 })),
+        "expected one intercepted HTTP/2 exchange"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepts_and_forwards_an_edited_h2_request() {
+    let (origin, origin_request) =
+        spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let mut proxy = test_proxy_with(
+        ProxySettings {
+            intercept_requests: true,
+            ..ProxySettings::default()
+        },
+        64 * 1024,
+        64 * 1024,
+    );
+
+    let proxy_addr = proxy.local_addr();
+    let client = tokio::spawn(async move {
+        let stream = TcpStream::connect(proxy_addr).await.unwrap();
+        h2_exchange(TokioIo::new(stream), format!("http://{origin}/held")).await
+    });
+
+    let mut held = next_intercept(&mut proxy).await;
+    assert_eq!(held.kind(), InterceptKind::Request);
+    assert_eq!(held.request().version, "HTTP/2");
+    let head = held.head().to_string();
+    assert!(
+        head.starts_with("GET /held HTTP/2\r\n"),
+        "unexpected HTTP/2 head: {head:?}"
+    );
+    assert!(
+        head.to_ascii_lowercase()
+            .contains(&format!("host: {origin}\r\n")),
+        "HTTP/2 head lost :authority: {head:?}"
+    );
+    let edited = head.replace("GET /held HTTP/2", "GET /edited HTTP/2");
+    held.forward(&edited, None)
+        .expect("HTTP/2 request should forward");
+
+    let (version, status, _headers, body) = client.await.expect("h2c client task");
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"ok");
+
+    let upstream = String::from_utf8_lossy(
+        &origin_request
+            .await
+            .expect("origin should receive the edited request"),
+    )
+    .into_owned();
+    assert!(
+        upstream.starts_with("GET /edited HTTP/1.1"),
+        "upstream request was: {upstream}"
+    );
+
+    let events = drain_until_finished(&proxy);
+    assert_eq!(started_of(&events).version, "HTTP/2");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepts_and_forwards_an_edited_h2_response() {
+    let (origin, origin_pem, mut origin_requests) =
+        spawn_h2_tls_origin("127.0.0.1", b"hello h2").await;
+    let mut proxy = proxy_with_tls(
+        None,
+        vec![origin_pem],
+        ProxySettings {
+            intercept_responses: true,
+            ..ProxySettings::default()
+        },
+    );
+
+    let proxy_addr = proxy.local_addr();
+    let client = tokio::spawn(async move {
+        let stream = TcpStream::connect(proxy_addr).await.unwrap();
+        h2_exchange(TokioIo::new(stream), format!("https://{origin}/edit")).await
+    });
+
+    let mut held = next_intercept(&mut proxy).await;
+    assert_eq!(held.kind(), InterceptKind::Response);
+    let head = held.head().to_string();
+    assert!(
+        head.starts_with("HTTP/2 200\r\n"),
+        "unexpected HTTP/2 response head: {head:?}"
+    );
+    assert!(
+        !head.contains("OK"),
+        "HTTP/2 response head should not have a reason phrase: {head:?}"
+    );
+    held.forward("HTTP/2 201\r\nX-Edited: yes\r\n\r\n", None)
+        .expect("HTTP/2 response should forward");
+
+    let (version, status, headers, body) = client.await.expect("h2c client task");
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(headers.get("x-edited").unwrap(), "yes");
+    assert_eq!(body, b"hello h2");
+
+    let upstream = tokio::time::timeout(TIMEOUT, origin_requests.recv())
+        .await
+        .expect("origin should receive the request")
+        .expect("origin request channel");
+    assert_eq!(upstream.uri.path(), "/edit");
+
+    let events = drain_until_finished(&proxy);
+    let response = head_of(&events);
+    assert_eq!(response.version, "HTTP/2");
+    assert_eq!(response.status, 201);
+    assert!(response.reason.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h2c_absolute_https_requests_keep_their_scheme_after_head_rewrites() {
+    let (origin, origin_pem, mut origin_requests) =
+        spawn_h2_tls_origin("127.0.0.1", b"hello h2").await;
+    let proxy = proxy_with_tls(
+        None,
+        vec![origin_pem],
+        ProxySettings {
+            match_replace: vec![MatchReplaceRule {
+                enabled: true,
+                direction: RuleDirection::Request,
+                part: RulePart::Head,
+                pattern: "/rewritten".to_string(),
+                replacement: "/target".to_string(),
+                regex: false,
+            }],
+            ..ProxySettings::default()
+        },
+    );
+
+    let stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let (version, status, _headers, body) =
+        h2_exchange(TokioIo::new(stream), format!("https://{origin}/rewritten")).await;
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"hello h2");
+
+    let upstream = tokio::time::timeout(TIMEOUT, origin_requests.recv())
+        .await
+        .expect("origin should receive the rewritten request")
+        .expect("origin request channel");
+    assert_eq!(upstream.version, Version::HTTP_2);
+    assert_eq!(upstream.uri.path(), "/target");
+
+    let events = drain_until_finished(&proxy);
+    let request = started_of(&events);
+    assert_eq!(request.scheme, "https");
+    assert_eq!(request.version, "HTTP/2");
+    assert_eq!(request.path, "/target");
+    assert_eq!(head_of(&events).version, "HTTP/2");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepts_and_forwards_an_edited_h2_request_body() {
+    let (origin, origin_pem, mut origin_requests) = spawn_h2_tls_origin("127.0.0.1", b"ok").await;
+    let mut proxy = proxy_with_tls(
+        None,
+        vec![origin_pem],
+        ProxySettings {
+            intercept_requests: true,
+            ..ProxySettings::default()
+        },
+    );
+
+    let proxy_addr = proxy.local_addr();
+    let client = tokio::spawn(async move {
+        let stream = TcpStream::connect(proxy_addr).await.unwrap();
+        h2_exchange_with(
+            TokioIo::new(stream),
+            Method::POST,
+            format!("https://{origin}/body"),
+            Bytes::from_static(b"hello"),
+        )
+        .await
+    });
+
+    let mut held = next_intercept(&mut proxy).await;
+    assert_eq!(held.kind(), InterceptKind::Request);
+    assert_eq!(
+        held.body(),
+        Some(b"hello".as_slice()),
+        "the HTTP/2 request body should be buffered for editing"
+    );
+    let head = held.head().to_string();
+    assert!(
+        head.to_ascii_lowercase().contains("content-length: 5\r\n"),
+        "HTTP/2 body length was not represented in the head: {head:?}"
+    );
+    held.forward(&head, Some(b"world".to_vec()))
+        .expect("HTTP/2 request body should forward");
+
+    let (version, status, _headers, body) = client.await.expect("h2c client task");
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"ok");
+
+    let upstream = tokio::time::timeout(TIMEOUT, origin_requests.recv())
+        .await
+        .expect("origin should receive the edited body")
+        .expect("origin request channel");
+    assert_eq!(upstream.version, Version::HTTP_2);
+    assert_eq!(upstream.method, Method::POST);
+    assert_eq!(upstream.uri.path(), "/body");
+    assert_eq!(upstream.body, b"world");
+
+    let events = drain_until_finished(&proxy);
+    assert_eq!(started_of(&events).scheme, "https");
+    assert_eq!(finished_of(&events).request_body.data(), b"world");
+    assert_eq!(head_of(&events).version, "HTTP/2");
 }

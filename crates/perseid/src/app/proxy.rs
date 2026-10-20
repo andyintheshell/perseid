@@ -172,6 +172,9 @@ impl PerseidApp {
     }
 
     fn history_table(&mut self, ui: &mut egui::Ui) {
+        // The row itself is the click target. Selectable labels inside the
+        // cells would capture the click before the row response sees it.
+        ui.style_mut().interaction.selectable_labels = false;
         let rows = self.visible.len();
         if rows == 0 {
             empty_state(

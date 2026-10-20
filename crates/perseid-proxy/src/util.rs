@@ -15,8 +15,18 @@ pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) type ProxyBody = BoxBody<Bytes, BoxError>;
 
 /// `"HTTP/1.1"` etc. for display.
+///
+/// `Version`'s `Debug` form spells HTTP/2 as `HTTP/2.0`; the message editor and
+/// history use the on-the-wire names instead.
 pub(crate) fn version_str(version: Version) -> String {
-    format!("{version:?}")
+    match version {
+        Version::HTTP_09 => "HTTP/0.9".to_string(),
+        Version::HTTP_10 => "HTTP/1.0".to_string(),
+        Version::HTTP_11 => "HTTP/1.1".to_string(),
+        Version::HTTP_2 => "HTTP/2".to_string(),
+        Version::HTTP_3 => "HTTP/3".to_string(),
+        other => format!("{other:?}"),
+    }
 }
 
 /// Snapshot headers for the capture model, preserving order.

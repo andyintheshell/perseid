@@ -39,7 +39,7 @@ independent from the proxy and analysis code:
 External browser
       |
       v
-Local HTTP/1.1 proxy (TLS interception on by default)
+Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
       |
       +----> Scope and match/replace policy
       |
@@ -66,8 +66,8 @@ Current workspace layout:
 
 HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
-`CONNECT` tunnel, and decrypted HTTP/1.1 requests flow through the same
-forwarding, interception, scope, and rewrite pipeline as plain HTTP. The
+`CONNECT` tunnel, and decrypted HTTP/1.1 or HTTP/2 requests flow through the
+same forwarding, interception, scope, and rewrite pipeline as plain HTTP. The
 `CONNECT` tunnel is transport and is not inserted into HTTP history; the table
 shows the decrypted request/response exchanges, as Burp does. Upstream
 connections verify origin certificates against the platform trust store. The
@@ -105,7 +105,10 @@ milestone that will complete them. Intruder and Repeater do not present
 nonfunctional controls as if they already worked. **Proxy > Intercept** is a
 real editor: held messages show their raw head, editable buffered text body,
 and read-only binary preview, with Burp's single Intercept on/off control plus
-explicit Forward and Drop actions. Scope serves both as a view filter and, when
+explicit Forward and Drop actions. HTTP/2 messages use a reconstructed head:
+the request line is origin-form, `:authority` is represented by `Host`, and
+response status lines omit the reason phrase. Pseudo-headers are regenerated
+when the edited message is forwarded. Scope serves both as a view filter and, when
 enabled, as a traffic guardrail checked before interception and again after
 edits. **Proxy > TLS** shows the automatically created certificate authority,
 opens the local certificate download page, and manages the HTTPS decryption
@@ -123,7 +126,7 @@ Initial technology choices, subject to prototyping and measurement:
 
 - **Rust** for the application and networking components.
 - **Tokio** for asynchronous networking.
-- **hyper** for HTTP/1.1 forwarding; HTTP/2 and WebSocket handling are planned.
+- **hyper** for HTTP/1.1 and HTTP/2 forwarding; WebSocket handling is planned.
 - **regex** for match/replace rules, with rules compiled once per policy update.
 - **rustls** and an automatically generated CA for HTTPS interception. The CA
   persists across runs, interception is on by default, and the user installs
