@@ -129,7 +129,16 @@ fn format_request_head_with(item: &HistoryItem, decoded: &DecodeResult) -> Strin
         "{} {} {}\n",
         item.request.method, target, item.request.version
     ));
-    let headers = display_headers(&item.request.headers, decoded, Some(&item.request_body));
+    let mut headers = display_headers(&item.request.headers, decoded, Some(&item.request_body));
+    // HTTP/2 carries the authority as a pseudo-header, not as an ordinary
+    // header. Show it as Host so the displayed message matches the synthetic
+    // representation used by the interception editor.
+    if item.request.version.starts_with("HTTP/2")
+        && header_value(&headers, "host").is_none()
+        && !item.request.host.is_empty()
+    {
+        headers.insert(0, ("host".to_string(), item.request.host.clone()));
+    }
     push_headers(&mut out, &headers);
     out
 }
@@ -177,10 +186,14 @@ fn format_response_pretty_with(item: &HistoryItem, decoded: &DecodeResult) -> St
 fn format_response_head_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
     let mut out = String::new();
     if let Some(head) = &item.response {
-        out.push_str(&format!(
-            "{} {} {}\n",
-            head.version, head.status, head.reason
-        ));
+        if head.reason.is_empty() {
+            out.push_str(&format!("{} {}\n", head.version, head.status));
+        } else {
+            out.push_str(&format!(
+                "{} {} {}\n",
+                head.version, head.status, head.reason
+            ));
+        }
         let headers = display_headers(&head.headers, decoded, item.response_body());
         push_headers(&mut out, &headers);
     }
@@ -600,6 +613,32 @@ mod tests {
         assert!(response.raw.starts_with("HTTP/1.1 200 OK\n"));
         assert!(request.hex.contains("00000000  "));
         assert!(response.hex.contains("00000000  "));
+    }
+
+    #[test]
+    fn http2_views_show_authority_and_omit_the_reason_phrase() {
+        let mut item = item_with_bodies(Vec::new(), b"ok".to_vec());
+        item.request.version = "HTTP/2".to_string();
+        item.request.headers.retain(|(name, _)| name != "host");
+        let response = item.response.as_mut().unwrap();
+        response.version = "HTTP/2".to_string();
+        response.reason.clear();
+
+        let request = request_views(&item);
+        let response = response_views(&item);
+
+        assert!(
+            request
+                .raw
+                .starts_with("POST /upload HTTP/2\nHost: example.com\n"),
+            "unexpected HTTP/2 request view:\n{}",
+            request.raw
+        );
+        assert!(
+            response.raw.starts_with("HTTP/2 200\n"),
+            "unexpected HTTP/2 response view:\n{}",
+            response.raw
+        );
     }
 
     #[test]

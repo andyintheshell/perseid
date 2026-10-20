@@ -2,10 +2,11 @@
 //!
 //! With a certificate authority configured and [`ProxySettings::tls_intercept`]
 //! enabled, Perseid terminates the client TLS session with a certificate
-//! minted for the requested host, serves HTTP/1.1 inside the tunnel, and sends
-//! each decrypted request through the same interception, scope, rewriting, and
-//! capture pipeline as plain HTTP. Without interception, or for hosts on the
-//! pass-through list, the CONNECT stays an opaque byte tunnel.
+//! minted for the requested host, serves HTTP/2 or HTTP/1.1 inside the tunnel
+//! according to ALPN, and sends each decrypted request through the same
+//! interception, scope, rewriting, and capture pipeline as plain HTTP. Without
+//! interception, or for hosts on the pass-through list, the CONNECT stays an
+//! opaque byte tunnel.
 //!
 //! [`ProxySettings::tls_intercept`]: crate::ProxySettings::tls_intercept
 
@@ -16,9 +17,9 @@ use std::time::{Instant, SystemTime};
 
 use http::{Request, Response, StatusCode};
 use hyper::body::Incoming;
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use log::{debug, warn};
 use rustls::ServerConfig;
 use tokio::net::TcpStream;
@@ -190,9 +191,9 @@ pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<Pr
     response
 }
 
-/// Answer the CONNECT, upgrade, then terminate TLS and serve HTTP/1.1 inside
-/// the tunnel. The upgrade work happens in a task: the intercepted exchange's
-/// lifetime is the TLS session, which can carry many requests.
+/// Answer the CONNECT, upgrade, then terminate TLS and serve HTTP/2 or HTTP/1.1
+/// inside the tunnel. The upgrade work happens in a task: the intercepted
+/// exchange's lifetime is the TLS session, which can carry many requests.
 #[allow(clippy::too_many_arguments)]
 fn intercept(
     ctx: Arc<Ctx>,
@@ -287,7 +288,9 @@ async fn serve_intercepted(
         }
     });
 
-    http1::Builder::new()
+    // ALPN normally tells the client which protocol to use; the auto builder
+    // also detects the HTTP/2 preface for clients that do not negotiate ALPN.
+    auto::Builder::new(TokioExecutor::new())
         .preserve_header_case(true)
         .serve_connection(io, service)
         .await

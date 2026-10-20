@@ -28,7 +28,7 @@ pub struct RequestInfo {
     pub host: String,
     /// Origin-form path (`/a?b=c`), empty for CONNECT.
     pub path: String,
-    /// HTTP version of the client request, e.g. `HTTP/1.1`.
+    /// HTTP version of the client request, e.g. `HTTP/1.1` or `HTTP/2`.
     pub version: String,
     pub headers: HeaderList,
 }
@@ -36,7 +36,7 @@ pub struct RequestInfo {
 /// Status line and headers of an upstream response.
 #[derive(Debug, Clone)]
 pub struct ResponseHead {
-    /// HTTP version of the upstream response, e.g. `HTTP/1.1`.
+    /// HTTP version of the upstream response, e.g. `HTTP/1.1` or `HTTP/2`.
     pub version: String,
     pub status: u16,
     /// Reason phrase; `hyper` only records non-canonical phrases, so this may

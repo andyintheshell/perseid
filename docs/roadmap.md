@@ -47,11 +47,13 @@ definition of done, and deliberate deviations.
   preview work; persistence, editable replay, Decoder, and Comparer are not
   implemented.*
 
-- [ ] **Milestone 4 — Protocols and testing tools:** HTTP/2 and WebSocket
-  proxying with history, Sequencer, and unthrottled Intruder-style fuzzing
-  with explicit scope and user-controlled concurrency.
+- [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
+  history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
+  and user-controlled concurrency.
 
-  *Status: HTTP/1.1 only; the Intruder tab is a planned-workspace overview.*
+  *Status: HTTP/2 proxying landed ahead of this milestone; WebSocket handling,
+  Sequencer, and the Intruder engine remain. The Intruder tab is a
+  planned-workspace overview.*
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a

@@ -42,8 +42,8 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 
 | Capability | Burp CE | Perseid | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Loopback HTTP/1.1 proxy and forwarding | Yes | Yes | Working | — |
-| Intercept, edit, forward, or drop messages | Yes | Plain HTTP, head and buffered-body editing | Working | — |
+| Loopback HTTP/1.1 and HTTP/2 proxy and forwarding | Yes | Yes | Working | — |
+| Intercept, edit, forward, or drop messages | Yes | HTTP/1.1 and HTTP/2, head and buffered-body editing | Working | — |
 | Scope / target allowlist | Yes | View filter plus opt-in HTTP/CONNECT blocking | Working | — |
 | Target site map | Yes | Host/path tree from history | Partial | — |
 | Match/replace rules | Yes | Head and buffered UTF-8 body rules, literal or regex | Working | — |
@@ -52,7 +52,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
 | HTTPS interception with a local CA | Yes | Automatic local CA, HTTPS interception on by default, local certificate page, pass-through hosts, manual trust setup | Working | — |
-| HTTP/2 proxying | Yes | No (HTTP/1.1 only) | Planned | M4 |
+| HTTP/2 proxying | Yes | h2 over TLS via ALPN, h2c prior knowledge on the listener | Working | — |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
 | Repeater | Yes | Read-only preview | Partial | M3 |
 | Decoder | Yes | No | Planned | M3 |
@@ -70,10 +70,11 @@ interception is on by default, as it is in Burp: Perseid creates a local CA on
 first launch, serves its certificate from a local download page, and reuses the
 CA across restarts and updates. The user still installs trust manually in the
 browser; the CA private key stays local, and Perseid never writes to a trust
-store. Hosts on the pass-through list stay opaque, and HTTP/1.1 is the only
-protocol negotiated inside the tunnel. HTTP history follows Burp's model: it
-lists HTTP requests and responses, including decrypted HTTPS requests, but not
-the `CONNECT` transport tunnels that carry them. See
+store. Hosts on the pass-through list stay opaque. Inside intercepted tunnels
+Perseid negotiates HTTP/2 when the client offers it through ALPN and falls back
+to HTTP/1.1 otherwise; HTTPS origins are offered h2 the same way. HTTP history
+follows Burp's model: it lists HTTP requests and responses, including decrypted
+HTTPS requests, but not the `CONNECT` transport tunnels that carry them. See
 [HTTPS interception](tls.md) for the trust and removal workflow.
 Interception buffers bodies up to `--intercept-limit`; larger or streaming
 bodies are held for header edits, and body rewrite rules apply only to buffered
@@ -132,7 +133,7 @@ or are explicitly authorized to test.
 | **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete.)* |
 | **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. *(Complete.)* |
 | **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. |
-| **M4 — Protocols and testing tools** | HTTP/2, WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. |
+| **M4 — Protocols and testing tools** | WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. HTTP/2 landed ahead of this milestone. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |
 
 After M5, Perseid can claim CE manual-toolkit parity subject to the

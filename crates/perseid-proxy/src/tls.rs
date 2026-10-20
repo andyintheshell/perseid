@@ -203,9 +203,10 @@ impl CertificateAuthority {
         let mut config = ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(resolver);
-        // This milestone speaks HTTP/1.1 inside the tunnel. Offering only
-        // http/1.1 keeps a browser from negotiating a protocol we do not serve.
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        // Prefer HTTP/2 inside the tunnel while retaining HTTP/1.1 for clients
+        // that do not offer it. The connection builder detects the protocol
+        // from ALPN/the HTTP/2 preface.
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Arc::new(config)
     }
 }
@@ -320,9 +321,10 @@ pub fn upstream_client_config(
     let mut config = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
-    // This milestone speaks HTTP/1.1 to origins; do not offer h2 and then have
-    // to downgrade the connection.
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    // Let the upstream client negotiate the best protocol the origin supports.
+    // hyper-rustls reports the selected ALPN protocol to hyper-util, which
+    // switches the pooled connection to HTTP/2 when the origin selects it.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(Arc::new(config))
 }
 

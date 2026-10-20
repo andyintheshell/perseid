@@ -12,17 +12,19 @@ the responses. It is built for web security learning, CTFs, and authorized
 application testing — with no embedded browser and memory bounded by design.
 
 > [!IMPORTANT]
-> **Status: early prototype.** A loopback-only HTTP/1.1 proxy with editable
-> request/response interception, opt-in scope enforcement, match/replace rules,
-> automatic local-CA HTTPS interception, and a Burp-style Target/Proxy workspace
-> work today. See the [roadmap](docs/roadmap.md).
+> **Status: early prototype.** A loopback-only HTTP/1.1 and HTTP/2 proxy with
+> editable request/response interception, opt-in scope enforcement,
+> match/replace rules, automatic local-CA HTTPS interception, and a Burp-style
+> Target/Proxy workspace work today. See the [roadmap](docs/roadmap.md).
 
 ![Perseid HTTP history with request and response detail](docs/images/perseid-main.png)
 
 ## What works today
 
-- Loopback HTTP/1.1 proxy with configurable listen address, capture limit,
-  interception limit, and count/byte history bounds.
+- Loopback HTTP/1.1 and HTTP/2 proxy with configurable listen address, capture
+  limit, interception limit, and count/byte history bounds. HTTP/2 is negotiated
+  with intercepted clients and HTTPS origins over TLS, while h2c prior knowledge
+  is accepted on the plain listener.
 - Editable request and response interception behind one Burp-style **Intercept
   is on/off** control: hold HTTP and decrypted HTTPS messages, edit the head and
   buffered body, then forward or drop. Bodies over the intercept limit stay

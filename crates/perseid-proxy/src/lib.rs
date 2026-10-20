@@ -21,7 +21,10 @@
 //!
 //! # Current scope
 //!
-//! - Plain HTTP/1.1 proxying with full request/response capture.
+//! - HTTP/1.1 and HTTP/2 proxying with full request/response capture. The
+//!   plain listener accepts h2c prior knowledge; intercepted TLS sessions and
+//!   HTTPS origins negotiate `h2` through ALPN, with HTTP/1.1 as the fallback.
+//!   Cleartext origins use HTTP/1.1.
 //! - Request and response interception with editable heads and buffered UTF-8
 //!   bodies, plus explicit forward and drop decisions.
 //! - Opt-in scope enforcement for HTTP, HTTPS, and CONNECT targets, and

@@ -32,9 +32,10 @@ env_logger = "0.11"
 flate2 = "1.1"
 http = "1"
 http-body-util = "0.1"
-hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
     "http1",
+    "http2",
     "logging",
     "native-tokio",
     "ring",
@@ -44,6 +45,8 @@ hyper-util = { version = "0.1", features = [
     "client",
     "client-legacy",
     "http1",
+    "http2",
+    "server-auto",
     "tokio",
 ] }
 rcgen = { version = "0.14", default-features = false, features = [

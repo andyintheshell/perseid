@@ -1,4 +1,4 @@
-//! TCP accept loop and per-connection HTTP/1 service.
+//! TCP accept loop and per-connection HTTP/1 or HTTP/2 service.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -8,13 +8,13 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use hyper::body::Incoming;
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response};
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use log::{debug, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
@@ -188,10 +188,11 @@ fn spawn_connection(
             let ctx = ctx.clone();
             async move { Ok::<_, Infallible>(dispatch(ctx, req).await) }
         });
-        let connection = http1::Builder::new()
-            .preserve_header_case(true)
-            .serve_connection(io, service)
-            .with_upgrades();
+        // The auto builder serves HTTP/1.1 (including CONNECT upgrades) and
+        // HTTP/2 with prior knowledge on the same listener. Browsers normally
+        // reach the plain listener with HTTP/1.1; clients may use h2c.
+        let builder = auto::Builder::new(TokioExecutor::new()).preserve_header_case(true);
+        let connection = builder.serve_connection_with_upgrades(io, service);
         if let Err(err) = connection.await {
             debug!("connection from {peer} closed with error: {err}");
         }

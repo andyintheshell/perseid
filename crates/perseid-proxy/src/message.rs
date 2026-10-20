@@ -1,6 +1,13 @@
-//! Parsing and serializing editable HTTP/1 message heads.
+//! Parsing and serializing editable HTTP/1 and HTTP/2 message heads.
+//!
+//! HTTP/2 has no request line or textual head on the wire. Interception uses a
+//! synthetic representation: an origin-form request line with the `Host`
+//! derived from `:authority`, and a status line without a reason phrase. The
+//! parser accepts both `HTTP/2` and the older `HTTP/2.0` spelling.
 
-use http::header::{HeaderName, HeaderValue};
+use std::borrow::Cow;
+
+use http::header::{HOST, HeaderName, HeaderValue};
 use http::{HeaderMap, Method, StatusCode, Uri, Version};
 use hyper::ext::ReasonPhrase;
 
@@ -21,31 +28,63 @@ pub(crate) struct ParsedResponseHead {
 }
 
 /// The visible request line and headers, terminated by a blank line.
+///
+/// HTTP/2 requests use an origin-form target and a synthetic `Host` header so
+/// the editor can represent the `:scheme`, `:authority`, and `:path`
+/// pseudo-headers. `fallback_host` is the CONNECT authority for intercepted
+/// requests whose URI has no authority.
 pub(crate) fn serialize_request_head(
     method: &Method,
     uri: &Uri,
     version: Version,
     headers: &HeaderMap,
+    fallback_host: Option<&str>,
 ) -> String {
-    let mut out = format!("{} {} {}\r\n", method, uri, version_str(version));
-    push_headers(&mut out, headers);
+    let target = if version == Version::HTTP_2 {
+        Cow::Borrowed(
+            uri.path_and_query()
+                .map(|path| path.as_str())
+                .unwrap_or("/"),
+        )
+    } else {
+        Cow::Owned(uri.to_string())
+    };
+    let mut out = format!("{} {} {}\r\n", method, target, version_str(version));
+
+    if version == Version::HTTP_2 {
+        let mut headers = headers.clone();
+        if let Some(authority) = uri.authority().map(|a| a.as_str()).or(fallback_host)
+            && let Ok(value) = HeaderValue::from_str(authority)
+        {
+            headers.insert(HOST, value);
+        }
+        push_headers(&mut out, &headers);
+    } else {
+        push_headers(&mut out, headers);
+    }
     out.push_str("\r\n");
     out
 }
 
 /// The visible response status line and headers, terminated by a blank line.
+///
+/// HTTP/2 status lines have no reason phrase.
 pub(crate) fn serialize_response_head(
     version: Version,
     status: StatusCode,
     reason: &str,
     headers: &HeaderMap,
 ) -> String {
-    let mut out = format!(
-        "{} {} {}\r\n",
-        version_str(version),
-        status.as_u16(),
-        reason
-    );
+    let mut out = if version == Version::HTTP_2 {
+        format!("{} {}\r\n", version_str(version), status.as_u16())
+    } else {
+        format!(
+            "{} {} {}\r\n",
+            version_str(version),
+            status.as_u16(),
+            reason
+        )
+    };
     push_headers(&mut out, headers);
     out.push_str("\r\n");
     out
@@ -191,6 +230,7 @@ fn parse_version(version: &str) -> Result<Version, String> {
     match version {
         "HTTP/1.0" => Ok(Version::HTTP_10),
         "HTTP/1.1" => Ok(Version::HTTP_11),
+        "HTTP/2" | "HTTP/2.0" => Ok(Version::HTTP_2),
         _ => Err(format!("unsupported HTTP version `{version}`")),
     }
 }
@@ -220,10 +260,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_http2_heads_without_pseudo_headers() {
+        let parsed = parse_request_head("GET /h2 HTTP/2\r\nHost: example.com\r\n\r\n").unwrap();
+        assert_eq!(parsed.version, Version::HTTP_2);
+        assert_eq!(parsed.uri, "/h2");
+        assert_eq!(parsed.headers.get("host").unwrap(), "example.com");
+
+        let parsed = parse_response_head("HTTP/2 200\r\nX-Test: yes\r\n\r\n").unwrap();
+        assert_eq!(parsed.version, Version::HTTP_2);
+        assert_eq!(parsed.status, StatusCode::OK);
+        assert!(parsed.reason.is_none());
+    }
+
+    #[test]
     fn rejects_malformed_heads() {
         assert!(parse_request_head("GET / HTTP/1.1\r\nBroken\r\n\r\n").is_err());
         assert!(parse_response_head("HTTP/1.1 999 Nope\r\n\r\n").is_err());
-        assert!(parse_request_head("GET / HTTP/2.0\r\n\r\n").is_err());
+        assert!(parse_request_head("GET / HTTP/3\r\n\r\n").is_err());
+        assert!(parse_request_head("GET / HTTP/2\r\n:method: GET\r\n\r\n").is_err());
         assert!(parse_request_head("GET / HTTP/1.1\r\n Host: example.com\r\n\r\n").is_err());
     }
 
@@ -237,10 +291,43 @@ mod tests {
             &"/path?q=1".parse().unwrap(),
             Version::HTTP_11,
             &headers,
+            None,
         );
         let parsed = parse_request_head(&head).unwrap();
         assert_eq!(parsed.method, Method::GET);
         assert_eq!(parsed.uri, "/path?q=1");
         assert_eq!(parsed.headers.get("x-test").unwrap(), "yes");
+    }
+
+    #[test]
+    fn http2_requests_are_shown_with_origin_form_and_authority() {
+        let headers = HeaderMap::new();
+        let head = serialize_request_head(
+            &Method::GET,
+            &"https://example.com:8443/path?q=1".parse().unwrap(),
+            Version::HTTP_2,
+            &headers,
+            None,
+        );
+        assert!(
+            head.starts_with("GET /path?q=1 HTTP/2\r\nhost: example.com:8443\r\n"),
+            "unexpected head: {head:?}"
+        );
+        let parsed = parse_request_head(&head).unwrap();
+        assert_eq!(parsed.version, Version::HTTP_2);
+        assert_eq!(parsed.uri, "/path?q=1");
+        assert_eq!(parsed.headers.get("host").unwrap(), "example.com:8443");
+    }
+
+    #[test]
+    fn http2_responses_have_no_reason_phrase() {
+        let headers = HeaderMap::new();
+        let head = serialize_response_head(
+            Version::HTTP_2,
+            StatusCode::NO_CONTENT,
+            "No Content",
+            &headers,
+        );
+        assert_eq!(head, "HTTP/2 204\r\n\r\n");
     }
 }
