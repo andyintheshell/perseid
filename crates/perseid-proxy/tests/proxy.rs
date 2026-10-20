@@ -295,6 +295,68 @@ async fn forwards_and_captures_plain_http() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn serves_the_ca_download_page_on_the_listener_address() {
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().expect("address"),
+        tls: TlsConfig {
+            authority: Some(ca.clone()),
+            ..TlsConfig::default()
+        },
+        ..ProxyConfig::default()
+    })
+    .expect("proxy starts");
+    let addr = proxy.local_addr();
+
+    let request = format!("GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    let response = raw_exchange(addr, &request).await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.starts_with("HTTP/1.1 200"), "response was: {text}");
+    assert!(text.contains("/perseid-ca.pem"), "response was: {text}");
+    assert!(text.contains("Firefox"), "response was: {text}");
+    assert!(text.contains("Perseid CA"), "response was: {text}");
+
+    let request =
+        format!("GET /perseid-ca.pem HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    let response = raw_exchange(addr, &request).await;
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.starts_with("HTTP/1.1 200"), "response was: {text}");
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("content-type: application/x-pem-file"),
+        "response was: {text}"
+    );
+    assert_eq!(body_after_head(&response), ca.cert_pem().as_bytes());
+
+    // Browsers that send loopback traffic through the proxy use absolute-form;
+    // serve the portal instead of trying to forward the request to the proxy
+    // itself.
+    let request =
+        format!("GET http://{addr}/ HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    let response = raw_exchange(addr, &request).await;
+    assert!(
+        String::from_utf8_lossy(&response).contains("Trust Perseid's HTTPS certificate"),
+        "response was: {}",
+        String::from_utf8_lossy(&response)
+    );
+
+    // `http://perseid/` is the short address to give users once they have
+    // configured the proxy.
+    let request = "GET http://perseid/ HTTP/1.1\r\nHost: perseid\r\nConnection: close\r\n\r\n";
+    let response = raw_exchange(addr, request).await;
+    assert!(
+        String::from_utf8_lossy(&response).contains("Trust Perseid's HTTPS certificate"),
+        "response was: {}",
+        String::from_utf8_lossy(&response)
+    );
+
+    assert!(
+        proxy.try_recv().is_none(),
+        "the certificate page must not appear in HTTP history"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn captures_chunked_responses_without_interception() {
     let origin = spawn_origin(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n\

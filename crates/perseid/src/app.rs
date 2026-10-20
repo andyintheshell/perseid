@@ -178,6 +178,8 @@ pub struct PerseidApp {
     tls_ca_error: Option<String>,
     /// Whether CONNECT targets are decrypted (subject to the pass-through list).
     tls_intercept: bool,
+    /// Show the first-run certificate setup window.
+    tls_setup_open: bool,
     tls_passthrough: Vec<String>,
     tls_passthrough_input: String,
     /// Scale reported by the windowing system (physical pixels per point).
@@ -236,15 +238,44 @@ impl PerseidApp {
 
         let mark = branding::mark_texture(&cc.egui_ctx);
 
-        let ca_dir = args.ca_dir.clone().unwrap_or_else(ca_store::default_dir);
-        let (tls_ca, tls_ca_error) = match ca_store::load(&ca_dir) {
-            Ok(ca) => (ca, None),
-            Err(err) => (None, Some(err)),
+        let screenshot_mode = {
+            #[cfg(feature = "screenshots")]
+            {
+                args.screenshot_dir.is_some()
+            }
+            #[cfg(not(feature = "screenshots"))]
+            {
+                false
+            }
         };
-        let tls_intercept = args.tls_intercept && tls_ca.is_some();
-        if args.tls_intercept && tls_ca.is_none() {
-            log::warn!("--tls-intercept ignored: no certificate authority is configured");
+        let ca_dir = args.ca_dir.clone().unwrap_or_else(ca_store::default_dir);
+        // Create the CA once, on first launch, and reuse it forever after. The
+        // screenshot driver supplies its own in-memory CA so documentation
+        // builds never touch the user's real trust material.
+        let (tls_ca, tls_ca_error, ca_created) = if screenshot_mode {
+            (None, None, false)
+        } else {
+            match ca_store::ensure(&ca_dir) {
+                Ok((ca, created)) => {
+                    if created {
+                        log::info!(
+                            "created the local TLS certificate authority at {}",
+                            ca_dir.display()
+                        );
+                    }
+                    (Some(ca), None, created)
+                }
+                Err(err) => {
+                    log::warn!("could not prepare the TLS certificate authority: {err}");
+                    (None, Some(err), false)
+                }
+            }
+        };
+        if args.tls_intercept {
+            log::warn!("--tls-intercept is deprecated; HTTPS interception is enabled by default");
         }
+        let tls_intercept = !args.no_tls_intercept && tls_ca.is_some();
+        let tls_setup_open = ca_created && tls_intercept;
 
         let mut app = Self {
             proxy: None,
@@ -281,6 +312,7 @@ impl PerseidApp {
             tls_ca,
             tls_ca_error,
             tls_intercept,
+            tls_setup_open,
             tls_passthrough: args.tls_passthrough.clone(),
             tls_passthrough_input: String::new(),
             native_ui_scale,
@@ -321,6 +353,23 @@ impl PerseidApp {
             app.start_proxy(notify);
         }
         app
+    }
+
+    /// URL of the built-in certificate page for the running proxy, if any.
+    ///
+    /// Loopback aliases are used when the proxy binds a wildcard address so
+    /// the link is clickable from the same machine.
+    pub(super) fn certificate_page_url(&self) -> Option<String> {
+        self.proxy.as_ref().map(|proxy| {
+            let addr = proxy.local_addr();
+            let host = match addr.ip() {
+                std::net::IpAddr::V4(ip) if ip.is_unspecified() => "127.0.0.1".to_string(),
+                std::net::IpAddr::V6(ip) if ip.is_unspecified() => "[::1]".to_string(),
+                std::net::IpAddr::V4(ip) => ip.to_string(),
+                std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+            };
+            format!("http://{host}:{}/", addr.port())
+        })
     }
 
     fn start_proxy(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
@@ -786,7 +835,7 @@ impl PerseidApp {
             if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
                 ui.separator();
                 ui.label(
-                    RichText::new(format!("#{} {}", item.id, item.request.method))
+                    RichText::new(format!("#{} {}", item.number, item.request.method))
                         .small()
                         .color(theme::TEXT_MUTED),
                 );
@@ -917,6 +966,7 @@ impl eframe::App for PerseidApp {
 
         self.memory_window(&ctx);
         self.about_window(&ctx);
+        self.tls_setup_window(&ctx);
 
         #[cfg(feature = "screenshots")]
         self.drive_screenshots(&ctx);

@@ -39,7 +39,7 @@ independent from the proxy and analysis code:
 External browser
       |
       v
-Local HTTP/1.1 proxy (opt-in TLS interception)
+Local HTTP/1.1 proxy (TLS interception on by default)
       |
       +----> Scope and match/replace policy
       |
@@ -67,11 +67,15 @@ Current workspace layout:
 HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
 `CONNECT` tunnel, and decrypted HTTP/1.1 requests flow through the same
-forwarding, interception, scope, and rewrite pipeline as plain HTTP. Upstream
+forwarding, interception, scope, and rewrite pipeline as plain HTTP. The
+`CONNECT` tunnel is transport and is not inserted into HTTP history; the table
+shows the decrypted request/response exchanges, as Burp does. Upstream
 connections verify origin certificates against the platform trust store. The
-CA private key is loaded by the app from disk; trust is installed and removed by
-the user in the browser, never by Perseid. Interception is off by default and
-pass-through hosts remain opaque.
+CA is created automatically on first launch and loaded by the app from a stable
+per-user data directory; trust is installed and removed by the user in the
+browser, never by Perseid. Interception is on by default, and pass-through hosts
+remain opaque. The proxy also serves the certificate as a local download page,
+so installing trust does not require finding the file on disk.
 
 Planned additions include a disk-backed history store, replay/fuzzing workers,
 and a native extension point. Network operations run on their own runtime and
@@ -103,9 +107,9 @@ real editor: held messages show their raw head, editable buffered text body,
 and read-only binary preview, with Burp's single Intercept on/off control plus
 explicit Forward and Drop actions. Scope serves both as a view filter and, when
 enabled, as a traffic guardrail checked before interception and again after
-edits. **Proxy > TLS** manages the local certificate authority, the HTTPS
-decryption toggle, and the pass-through host list, with inline trust and removal
-guidance.
+edits. **Proxy > TLS** shows the automatically created certificate authority,
+opens the local certificate download page, and manages the HTTPS decryption
+toggle, regeneration, removal, and the pass-through host list.
 
 The interface is keyboard-friendly: tab switches, history navigation, filtering,
 and zoom all have shortcuts. A mouse remains fully supported. A compact
@@ -121,8 +125,9 @@ Initial technology choices, subject to prototyping and measurement:
 - **Tokio** for asynchronous networking.
 - **hyper** for HTTP/1.1 forwarding; HTTP/2 and WebSocket handling are planned.
 - **regex** for match/replace rules, with rules compiled once per policy update.
-- **rustls** and a locally generated CA for HTTPS interception. Interception is
-  opt-in, and the user installs and removes browser trust manually.
+- **rustls** and an automatically generated CA for HTTPS interception. The CA
+  persists across runs, interception is on by default, and the user installs
+  and removes browser trust manually.
 - **egui + eframe** for a native desktop interface, using the `glow`
   renderer.
 - **SQLite** for searchable, disk-backed history (planned).

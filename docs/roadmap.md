@@ -30,12 +30,13 @@ definition of done, and deliberate deviations.
 - [x] **Milestone 2 — HTTPS:** local CA generation, TLS interception,
   documented browser trust setup, and pass-through controls.
 
-  *Complete: a locally generated ECDSA certificate authority mints per-host
-  certificates for intercepted `CONNECT` tunnels. Decryption is opt-in and
-  starts only when a CA is loaded and the TLS toggle is on. Trust is installed
-  and removed manually in the browser; Perseid never touches a system or
-  browser trust store. Pass-through hosts stay opaque, scope can still block
-  tunnels, and decrypted exchanges flow through the same interception,
+  *Complete: a locally generated ECDSA certificate authority is created on
+  first launch, persisted in a stable per-user directory, and reused across
+  updates. Decryption is on by default and can be turned off for a run.
+  The proxy serves the certificate from a local download page; trust is still
+  installed and removed manually in the browser, and Perseid never touches a
+  system or browser trust store. Pass-through hosts stay opaque, scope can still
+  block tunnels, and decrypted exchanges flow through the same interception,
   match/replace, and bounded-capture pipeline as plain HTTP. See
   [HTTPS interception](tls.md).*
 

@@ -177,7 +177,7 @@ impl PerseidApp {
             empty_state(
                 ui,
                 "No exchanges to show",
-                "Start the proxy, point a browser at it, and browse an HTTP site. The filter and scope can also hide the history.",
+                "Start the proxy, point a browser at it, and browse an HTTP or HTTPS site. The filter and scope can also hide the history.",
             );
             return;
         }
@@ -205,7 +205,15 @@ impl PerseidApp {
 
         table
             .header(22.0, |mut header| {
-                for title in ["#", "Method", "URL", "Status", "Length", "MIME type", "Time"] {
+                for title in [
+                    "#",
+                    "Method",
+                    "URL",
+                    "Status",
+                    "Length",
+                    "MIME type",
+                    "Time",
+                ] {
                     header.col(|ui| {
                         ui.label(
                             RichText::new(title)
@@ -227,7 +235,7 @@ impl PerseidApp {
                     row.set_selected(self.selected == Some(id));
                     row.col(|ui| {
                         ui.label(
-                            RichText::new(item.id.to_string())
+                            RichText::new(item.number.to_string())
                                 .small()
                                 .color(theme::TEXT_MUTED),
                         );
@@ -242,8 +250,7 @@ impl PerseidApp {
                     });
                     row.col(|ui| {
                         ui.label(
-                            RichText::new(view::status_text(item))
-                                .color(view::status_color(item)),
+                            RichText::new(view::status_text(item)).color(view::status_color(item)),
                         );
                     });
                     row.col(|ui| {
@@ -271,9 +278,7 @@ impl PerseidApp {
                     });
 
                     let hover = if item.is_tunnel() {
-                        format!(
-                            "{url}\nCONNECT tunnel: payload not decrypted until TLS interception lands."
-                        )
+                        format!("{url}\nCONNECT tunnel: payload was not decrypted.")
                     } else {
                         url
                     };

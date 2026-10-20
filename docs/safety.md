@@ -57,15 +57,16 @@ When persistent history and exports are added:
 
 HTTPS interception uses a certificate authority generated and stored locally.
 
-- The CA private key stays on the user's machine in the CA directory
-  (`--ca-dir`, `PERSEID_CA_DIR`, or `$XDG_DATA_HOME/perseid`). The directory
-  is created owner-only and the key is written owner-readable only.
+- Perseid creates the CA automatically on first launch and reuses it across
+  restarts and updates. The private key stays on the user's machine in the CA
+  directory (`--ca-dir`, `PERSEID_CA_DIR`, or the platform data directory). The
+  directory is created owner-only and the key is written owner-readable only.
 - Trust must be installed deliberately by the user in each browser. Perseid
-  never writes to system or browser trust stores, and never installs the CA
-  silently.
-- Interception is off by default and requires both a loaded CA and the TLS
-  toggle. Turning it off, or adding a host to the pass-through list, keeps that
-  traffic opaque.
+  serves a local certificate download page, but never writes to system or
+  browser trust stores and never installs the CA silently.
+- Interception is on by default, matching Burp and ZAP. Turning it off, or
+  adding a host to the pass-through list, keeps that traffic opaque. The CA and
+  its private key remain available unless the user deletes the files.
 - Removal is deliberate and documented in [HTTPS interception](tls.md): remove
   the browser trust entry, then delete the CA files.
 - Pass-through hosts are an exclude list matched like scope (exact host,

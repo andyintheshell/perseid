@@ -333,42 +333,8 @@ impl PerseidApp {
             &date,
         );
 
-        // The CONNECT row and its decrypted request are separate history items,
-        // just as the proxy reports them.
-        self.history.apply(ProxyEvent::Started {
-            id: 8,
-            timestamp: later,
-            request: RequestInfo {
-                method: "CONNECT".to_owned(),
-                uri: "https://example.com:443".to_owned(),
-                scheme: "https".to_owned(),
-                host: "example.com:443".to_owned(),
-                path: String::new(),
-                version: "HTTP/1.1".to_owned(),
-                headers: vec![
-                    ("host".to_owned(), "example.com:443".to_owned()),
-                    ("proxy-connection".to_owned(), "Keep-Alive".to_owned()),
-                ],
-            },
-        });
-        self.history.apply(ProxyEvent::ResponseHead {
-            id: 8,
-            head: ResponseHead {
-                version: "HTTP/1.1".to_owned(),
-                status: 200,
-                reason: "Connection established".to_owned(),
-                headers: Vec::new(),
-            },
-        });
-        self.history.apply(ProxyEvent::Finished {
-            id: 8,
-            end: ExchangeEnd {
-                duration: Duration::from_millis(1),
-                request_body: CapturedBody::default(),
-                result: ExchangeResult::InterceptedTls { requests: 1 },
-            },
-        });
-
+        // Only the decrypted HTTP request gets a history row. The CONNECT
+        // tunnel that carries it is transport plumbing, as in Burp.
         let example_headers = vec![
             ("host".to_owned(), "example.com".to_owned()),
             ("user-agent".to_owned(), CURL_UA.to_owned()),
@@ -376,7 +342,7 @@ impl PerseidApp {
         ];
         demo_http(
             &mut self.history,
-            9,
+            8,
             later,
             "GET",
             "https://example.com/",

@@ -24,7 +24,7 @@ use crate::intercept::{InterceptDecision, InterceptItem};
 use crate::policy::{Policy, PolicySnapshot};
 use crate::tls::CertificateAuthority;
 use crate::util::ProxyBody;
-use crate::{forward, tunnel};
+use crate::{forward, portal, tunnel};
 
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
@@ -33,6 +33,9 @@ pub(crate) struct Ctx {
     /// traffic on the passthrough path even when interception is enabled.
     /// Swapped at runtime by [`crate::Proxy::set_tls_authority`].
     pub(crate) tls_ca: Arc<RwLock<Option<Arc<CertificateAuthority>>>>,
+    /// Address this proxy is listening on, used to recognise the local CA
+    /// download page without forwarding the request to itself.
+    pub(crate) listen: SocketAddr,
     pub(crate) tx: SyncSender<ProxyEvent>,
     pub(crate) notify: Option<Arc<dyn Fn() + Send + Sync>>,
     pub(crate) dropped: Arc<AtomicU64>,
@@ -198,6 +201,8 @@ fn spawn_connection(
 async fn dispatch(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<ProxyBody> {
     if req.method() == Method::CONNECT {
         tunnel::handle(ctx, req).await
+    } else if portal::matches(&req, ctx.listen) {
+        portal::handle(&ctx, req)
     } else {
         forward::handle(ctx, req).await
     }

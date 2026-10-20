@@ -16,9 +16,14 @@ pub const CA_CERT_FILE: &str = "perseid-ca.pem";
 /// Private key file name inside the CA directory.
 pub const CA_KEY_FILE: &str = "perseid-ca-key.pem";
 
-/// Where the CA is stored when `--ca-dir` is not given: the Perseid data
-/// directory under `$XDG_DATA_HOME` (or `~/.local/share`). `PERSEID_CA_DIR`
-/// overrides both, which keeps sandboxed runs and tests out of the real home.
+/// Where the CA is stored when `--ca-dir` is not given.
+///
+/// Linux and other Unix-like systems use the Perseid data directory under
+/// `$XDG_DATA_HOME` (or `~/.local/share`), macOS uses
+/// `~/Library/Application Support/perseid`, and Windows uses
+/// `%LOCALAPPDATA%\perseid` (falling back to `%APPDATA%`). `PERSEID_CA_DIR`
+/// overrides all of them, which keeps sandboxed runs and tests out of the
+/// real home.
 pub fn default_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("PERSEID_CA_DIR").filter(|value| !value.is_empty()) {
         return PathBuf::from(dir);
@@ -26,13 +31,35 @@ pub fn default_dir() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .filter(|value| !value.is_empty())
-                .map(|home| PathBuf::from(home).join(".local").join("share"))
-        })
+        .or_else(platform_data_dir)
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("perseid")
+}
+
+#[cfg(target_os = "macos")]
+fn platform_data_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(|home| {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn platform_data_dir() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("APPDATA"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn platform_data_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(|home| PathBuf::from(home).join(".local").join("share"))
 }
 
 pub fn cert_path(dir: &Path) -> PathBuf {
@@ -75,6 +102,21 @@ pub fn load(dir: &Path) -> Result<Option<Arc<CertificateAuthority>>, String> {
         .map_err(|err| format!("could not load the CA from {}: {err}", dir.display()))
 }
 
+/// Load the stored CA, creating and persisting one when the directory is
+/// empty.
+///
+/// An existing CA is never replaced here: the certificate the browser trusts
+/// stays stable across restarts and upgrades. A half-present or unreadable CA
+/// is reported as an error instead of being overwritten silently.
+///
+/// Returns the CA and whether it was created by this call.
+pub fn ensure(dir: &Path) -> Result<(Arc<CertificateAuthority>, bool), String> {
+    match load(dir)? {
+        Some(ca) => Ok((ca, false)),
+        None => generate(dir).map(|ca| (ca, true)),
+    }
+}
+
 /// Generate a fresh CA and persist it (directory `0700`, key `0600`, public
 /// certificate `0644`).
 pub fn generate(dir: &Path) -> Result<Arc<CertificateAuthority>, String> {
@@ -83,12 +125,17 @@ pub fn generate(dir: &Path) -> Result<Arc<CertificateAuthority>, String> {
     fs::create_dir_all(dir).map_err(|err| format!("could not create {}: {err}", dir.display()))?;
     set_mode(dir, 0o700);
     let key = key_path(dir);
-    fs::write(&key, ca.key_pem())
-        .map_err(|err| format!("could not write {}: {err}", key.display()))?;
-    set_mode(&key, 0o600);
     let cert = cert_path(dir);
-    fs::write(&cert, ca.cert_pem())
-        .map_err(|err| format!("could not write {}: {err}", cert.display()))?;
+    if let Err(err) = fs::write(&key, ca.key_pem()) {
+        return Err(format!("could not write {}: {err}", key.display()));
+    }
+    set_mode(&key, 0o600);
+    if let Err(err) = fs::write(&cert, ca.cert_pem()) {
+        // Do not leave a private key without its certificate behind; the next
+        // launch would otherwise treat the pair as corrupt.
+        let _ = fs::remove_file(&key);
+        return Err(format!("could not write {}: {err}", cert.display()));
+    }
     set_mode(&cert, 0o644);
     Ok(Arc::new(ca))
 }
@@ -138,6 +185,28 @@ mod tests {
 
         delete(&dir).expect("delete");
         assert!(load(&dir).expect("empty after delete").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ensure_creates_once_and_reuses_the_same_ca() {
+        let dir = temp_dir("ensure");
+        let (first, created) = ensure(&dir).expect("first ensure");
+        assert!(created);
+        let (second, created) = ensure(&dir).expect("second ensure");
+        assert!(!created);
+        assert_eq!(first.cert_pem(), second.cert_pem());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ensure_does_not_replace_a_half_present_ca() {
+        let dir = temp_dir("ensure-half");
+        generate(&dir).expect("generate");
+        fs::remove_file(key_path(&dir)).expect("remove key");
+        let error = ensure(&dir).expect_err("half pair is an error");
+        assert!(error.contains("private key"), "{error}");
+        assert!(cert_path(&dir).exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
