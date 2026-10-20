@@ -528,6 +528,20 @@ fn build_request(request: RepeaterRequest) -> Result<Request<ProxyBody>, String>
         headers.append(name, value);
     }
 
+    // Let hyper derive Host/:authority from the URI when the editor kept the
+    // default host. Sending an explicit Host alongside HTTP/2 :authority is
+    // redundant and is rejected by strict origins. A non-default Host is kept
+    // below for virtual-host testing.
+    let default_host = uri.authority().is_some_and(|authority| {
+        headers.get(HOST).is_some_and(|host| {
+            host.as_bytes()
+                .eq_ignore_ascii_case(authority.as_str().as_bytes())
+        })
+    });
+    if default_host {
+        headers.remove(HOST);
+    }
+
     let body = Full::new(Bytes::from(request.body)).boxed_response();
     let mut upstream = Request::new(body);
     *upstream.method_mut() = method;
@@ -654,6 +668,29 @@ mod tests {
                 .is_err()
         );
         assert!(RepeaterRequest::parse("GET / HTTP/1.1\n\n", Vec::new(), "http", "").is_err());
+    }
+
+    #[test]
+    fn lets_hyper_add_the_default_host_but_keeps_a_virtual_one() {
+        let default = RepeaterRequest::parse(
+            "GET / HTTP/1.1\nHost: example.com\n\n",
+            Vec::new(),
+            "https",
+            "example.com",
+        )
+        .unwrap();
+        let built = build_request(default).unwrap();
+        assert!(built.headers().get("host").is_none());
+
+        let virtual_host = RepeaterRequest::parse(
+            "GET / HTTP/1.1\nHost: virtual.example\n\n",
+            Vec::new(),
+            "https",
+            "example.com",
+        )
+        .unwrap();
+        let built = build_request(virtual_host).unwrap();
+        assert_eq!(built.headers().get("host").unwrap(), "virtual.example");
     }
 
     #[test]
