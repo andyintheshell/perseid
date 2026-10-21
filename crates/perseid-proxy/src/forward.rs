@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
 use http::header::{ACCEPT_ENCODING, CONTENT_LENGTH, HOST, TRANSFER_ENCODING};
-use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
+use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Incoming};
 use hyper::ext::ReasonPhrase;
@@ -429,17 +429,6 @@ async fn forward(
         downstream_version,
     } = exchange;
 
-    let host_header = match display_host(&target.authority).parse::<HeaderValue>() {
-        Ok(value) => value,
-        Err(_) => {
-            let message = "invalid authority in request target".to_string();
-            if capture {
-                finish_failed(&ctx, start.id, start.started, None, message.clone());
-            }
-            return text_response(StatusCode::BAD_REQUEST, &message);
-        }
-    };
-
     let request_buffer = new_buffer();
     let request_limit = if capture { ctx.capture_limit } else { 0 };
     let body = if capture {
@@ -472,7 +461,10 @@ async fn forward(
     *upstream.version_mut() = Version::HTTP_11;
     let mut headers = HeaderMap::new();
     for (name, value) in forwarded_headers(&parts.headers) {
-        if name == ACCEPT_ENCODING {
+        // Let hyper derive Host for HTTP/1.1 and :authority for HTTP/2 from
+        // the target URI. An explicit Host header alongside HTTP/2 :authority
+        // is invalid and strict origins such as Google reject the request.
+        if name == ACCEPT_ENCODING || name == HOST {
             continue;
         }
         headers.append(name, value);
@@ -482,7 +474,6 @@ async fn forward(
     }
     // `Content-Length` was stripped: the body's size hint drives framing.
     debug_assert!(headers.get(CONTENT_LENGTH).is_none());
-    headers.insert(HOST, host_header);
     *upstream.headers_mut() = headers;
 
     match ctx.client.request(upstream).await {
@@ -923,15 +914,31 @@ async fn buffer_body(source: &mut BodySource, limit: usize, kind: &str) -> Resul
 
 /// Map an upstream client failure to a proxy error page.
 fn classify(err: &ClientError) -> (StatusCode, String) {
+    let detail = error_chain(err);
     if err.is_connect() {
         (
             StatusCode::BAD_GATEWAY,
-            format!("could not connect to the upstream server: {err}"),
+            format!("could not connect to the upstream server: {detail}"),
         )
     } else {
         (
             StatusCode::BAD_GATEWAY,
-            format!("upstream request failed: {err}"),
+            format!("upstream request failed: {detail}"),
         )
     }
+}
+
+/// Flatten an error and its sources for the proxy error page and history.
+///
+/// hyper-util's display text is often just `client error (SendRequest)`; the
+/// underlying HTTP/2 or TLS failure is one or more source links down.
+fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
 }
