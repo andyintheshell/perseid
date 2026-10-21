@@ -1,16 +1,18 @@
 //! The egui application: a Burp-style workspace over the captured traffic.
 //!
 //! The navigation intentionally mirrors the tools Burp users already know:
-//! Target, Proxy, Intruder, and Repeater. Proxy history, editable interception,
-//! the Target site map, scope enforcement, match/replace rules, and the direct
-//! Repeater are live; Intruder remains a clearly marked preview until its
-//! engine lands.
+//! Target, Proxy, Intruder, Repeater, and Decoder. Proxy history, editable
+//! interception, the Target site map, scope enforcement, match/replace rules,
+//! the direct Repeater, and Decoder's encode/decode/hash chain are live;
+//! Intruder remains a clearly marked preview until its engine lands.
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
-//! [`intercept`], [`proxy`], [`repeater`], [`rules`], [`target`], [`previews`],
-//! [`windows`], [`widgets`], [`message_view`], [`util`], and [`scale`].
+//! [`decoder`], [`intercept`], [`proxy`], [`repeater`], [`rules`], [`target`],
+//! [`previews`], [`windows`], [`widgets`], [`message_view`], [`util`], and
+//! [`scale`].
 
+mod decoder;
 mod intercept;
 mod message_view;
 mod previews;
@@ -90,6 +92,10 @@ const TAB_REPEATER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::ne
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::R,
 );
+const TAB_DECODER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    Key::D,
+);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum MainTab {
@@ -98,15 +104,17 @@ enum MainTab {
     Proxy,
     Intruder,
     Repeater,
+    Decoder,
 }
 
 impl MainTab {
     /// Burp's tool order, so muscle memory carries over.
-    const ALL: [(Self, &'static str); 4] = [
+    const ALL: [(Self, &'static str); 5] = [
         (Self::Target, "Target"),
         (Self::Proxy, "Proxy"),
         (Self::Intruder, "Intruder"),
         (Self::Repeater, "Repeater"),
+        (Self::Decoder, "Decoder"),
     ];
 }
 
@@ -174,6 +182,7 @@ pub struct PerseidApp {
     repeater_tabs: Vec<repeater::RepeaterTab>,
     repeater_active: usize,
     repeater_next_tab: u64,
+    decoder: decoder::DecoderState,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
     scope_enabled: bool,
@@ -316,6 +325,7 @@ impl PerseidApp {
             repeater_tabs: Vec::new(),
             repeater_active: 0,
             repeater_next_tab: 1,
+            decoder: decoder::DecoderState::new(),
             site_map: None,
             scope: BTreeSet::new(),
             scope_enabled: false,
@@ -607,12 +617,13 @@ impl PerseidApp {
     fn keyboard(&mut self, ctx: &egui::Context) {
         self.zoom_shortcuts(ctx);
 
-        let (target, proxy, intruder, repeater) = ctx.input_mut(|input| {
+        let (target, proxy, intruder, repeater, decoder) = ctx.input_mut(|input| {
             (
                 input.consume_shortcut(&TAB_TARGET_SHORTCUT),
                 input.consume_shortcut(&TAB_PROXY_SHORTCUT),
                 input.consume_shortcut(&TAB_INTRUDER_SHORTCUT),
                 input.consume_shortcut(&TAB_REPEATER_SHORTCUT),
+                input.consume_shortcut(&TAB_DECODER_SHORTCUT),
             )
         });
         if target {
@@ -626,6 +637,9 @@ impl PerseidApp {
         }
         if repeater {
             self.main_tab = MainTab::Repeater;
+        }
+        if decoder {
+            self.main_tab = MainTab::Decoder;
         }
 
         // Ctrl+Enter is the Burp-style send gesture. Consume it before
@@ -806,6 +820,7 @@ impl PerseidApp {
             ui.ctx().format_shortcut(&TAB_PROXY_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_INTRUDER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_REPEATER_SHORTCUT),
+            ui.ctx().format_shortcut(&TAB_DECODER_SHORTCUT),
         ];
         ui.horizontal(|ui| {
             for (index, (tab, label)) in MainTab::ALL.iter().enumerate() {
@@ -971,6 +986,7 @@ impl PerseidApp {
             MainTab::Proxy => self.proxy_tab(ui),
             MainTab::Intruder => self.intruder_view(ui),
             MainTab::Repeater => self.repeater_view(ui),
+            MainTab::Decoder => self.decoder_view(ui),
         }
     }
 }
@@ -1038,7 +1054,8 @@ mod tests {
                 MainTab::Target,
                 MainTab::Proxy,
                 MainTab::Intruder,
-                MainTab::Repeater
+                MainTab::Repeater,
+                MainTab::Decoder
             ]
         );
     }

@@ -26,10 +26,10 @@ Source: [Burp Suite Community Edition](https://portswigger.net/burp/communitydow
 (checked October 2026).
 
 The workspace deliberately follows Burp's tool order: **Target**, **Proxy**,
-**Intruder**, and **Repeater**. Tools that are not implemented yet are labelled
-as previews rather than presented as working features; Intruder is the
-remaining preview. Familiar navigation is part of the goal; reproducing every
-control before its engine exists is not.
+**Intruder**, **Repeater**, and **Decoder**. Tools that are not implemented yet
+are labelled as previews rather than presented as working features; Intruder is
+the remaining preview. Familiar navigation is part of the goal; reproducing
+every control before its engine exists is not.
 
 Parity here means capability, not artificial restrictions. Burp CE rate-limits
 Intruder to encourage upgrades; Perseid's fuzzer will not reproduce that
@@ -56,7 +56,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | HTTP/2 proxying | Yes | h2 over TLS via ALPN, h2c prior knowledge on the listener | Working | — |
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
 | Repeater | Yes | Editable HTTP/HTTPS request tabs seeded from history, target/virtual-host control, direct replay, and Pretty/Raw/Hex responses; no WebSocket replay or saved tabs yet | Partial | M3 (HTTP/HTTPS); WS in M4 |
-| Decoder | Yes | No | Planned | M3 |
+| Decoder | Yes | Stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms | Partial | M3 |
 | Comparer | Yes | No | Planned | M3 |
 | Sequencer | Yes | No | Planned | M4 |
 | Intruder-style request fuzzing | Yes (rate-limited demo) | No | Planned (unthrottled) | M4 |
@@ -100,6 +100,21 @@ so it remains usable when the proxy is stopped. It deliberately bypasses
 interception, match/replace rules, and scope enforcement, and its exchanges do
 not appear in Proxy history. Responses are bounded by `--capture-limit`.
 WebSocket Repeater and saved tabs remain part of the M3/M4 work.
+
+Decoder follows Burp's stacked-panel model. Every operation appends an
+editable Text/Hex panel, and applying an operation to an earlier panel replaces
+the downstream chain. The Decode as and Encode as menus contain Burp's nine
+entries: Plain, URL, HTML, Base64, ASCII hex, Hex, Octal, Binary, and Gzip.
+Hex, Octal, and Binary intentionally reproduce Burp's numeric digit-run
+conversions; ASCII hex is the byte-oriented hexadecimal codec. Transforms apply
+to the selected text when there is a selection and preserve the surrounding
+prefix and suffix. Smart decode recognizes gzip, URL, HTML, Base64, and ASCII
+hex, adds one panel per layer, and stops after 12 layers or a cycle. Hash
+support covers 31 common algorithms. Remaining gaps are the long tail of
+provider-specific hashes (SKEIN, TupleHash, and OID aliases), a Send to Decoder
+action from message editors, and persistence of the panel chain. Hex panels are
+read-only and preview at most 64 KiB, while Copy exports all retained bytes;
+each transform is capped at 8 MiB of input and 16 MiB of output.
 
 Burp Suite's status bar exposes a memory figure. Perseid's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;

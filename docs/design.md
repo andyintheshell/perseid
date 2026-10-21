@@ -55,6 +55,8 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
                Native egui interface
                        |
                        +----> Repeater (direct HTTP/HTTPS client, own runtime)
+                       |
+                       +----> Decoder (local byte transforms and hashes)
 ```
 
 Current workspace layout:
@@ -62,7 +64,7 @@ Current workspace layout:
 | Component | Responsibility |
 | --- | --- |
 | `crates/perseid-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events, and the direct Repeater client. |
-| `crates/perseid` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Repeater tabs and editor, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
+| `crates/perseid` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Repeater tabs and editor, Decoder panels and transform engine, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
 
 HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
@@ -84,6 +86,18 @@ therefore works when the proxy is stopped and avoids re-entering interception,
 match/replace, or scope policy. Responses are captured with the same byte limit
 as proxy traffic and delivered to the UI over a channel.
 
+Decoder is a local utility and never touches the network. Its byte-level engine
+lives in `crates/perseid/src/decoder.rs`, independent of egui so the transforms
+can be unit-tested directly. The panel chain, selection handling, coloring, and
+widgets live beside it in `crates/perseid/src/app/decoder.rs`. A transform
+accepts at most 8 MiB and may produce at most 16 MiB, including preserved
+prefix and suffix bytes; gzip decompression is bounded by the same output cap.
+Results carry byte ranges tagged with the operation that produced them, and the
+Text and Hex views use those ranges for their operation colors. Applying an
+operation truncates the panels after its source and appends the result, so the
+chain cannot describe transformations that no longer produced the visible
+bytes.
+
 Planned additions include a disk-backed history store, fuzzing workers, and a
 native extension point. Network operations run on their own runtime and
 communicate with the UI through a bounded channel so a slow interface cannot
@@ -98,9 +112,9 @@ lets users keep their normal browser, extensions, and devtools.
 ## Interface direction
 
 The workspace follows Burp's tool organization so existing users can find
-familiar surfaces immediately: **Target**, **Proxy**, **Intruder**, and
-**Repeater**, in that order. **Proxy > HTTP history** is the default landing
-view because it is the live capture surface.
+familiar surfaces immediately: **Target**, **Proxy**, **Intruder**,
+**Repeater**, and **Decoder**, in that order. **Proxy > HTTP history** is the
+default landing view because it is the live capture surface.
 
 The visual language is a warm, low-contrast light theme: near-white surfaces,
 pale orange selection states, and a burnt-orange accent. The palette lives in
@@ -112,7 +126,10 @@ milestone that will complete them. Intruder is the remaining preview and does
 not present nonfunctional controls as if they already worked. **Repeater** is a
 real editor with request tabs seeded from HTTP history, a target bar, an
 editable raw request, direct Send (`Ctrl`+`Enter`), and Pretty/Raw/Hex
-responses. **Proxy > Intercept** is a real editor: held messages show their raw
+responses. **Decoder** is a stack of real transform panels: Text and read-only
+Hex views, Decode as and Encode as menus, a hash menu, Smart decode, and
+selection-aware transforms that replace the downstream chain. **Proxy >
+Intercept** is a real editor: held messages show their raw
 head, editable buffered text body, and read-only binary preview, with Burp's
 single Intercept on/off control plus explicit Forward and Drop actions. HTTP/2
 messages use a reconstructed head: the request line is origin-form,
@@ -144,6 +161,9 @@ Initial technology choices, subject to prototyping and measurement:
   and removes browser trust manually.
 - **egui + eframe** for a native desktop interface, using the `glow`
   renderer.
+- **base64**, **flate2**, **html-escape**, **num-bigint**, and the RustCrypto
+  digest crates for Decoder. The transforms are implemented in-process and
+  bounded; Decoder does not embed a scripting engine.
 - **SQLite** for searchable, disk-backed history (planned).
 
 ## Performance philosophy

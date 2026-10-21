@@ -14,8 +14,9 @@ application testing — with no embedded browser and memory bounded by design.
 > [!IMPORTANT]
 > **Status: early prototype.** A loopback-only HTTP/1.1 and HTTP/2 proxy with
 > editable request/response interception, opt-in scope enforcement,
-> match/replace rules, automatic local-CA HTTPS interception, and an editable
-> HTTP/HTTPS Repeater work today. See the [roadmap](docs/roadmap.md).
+> match/replace rules, automatic local-CA HTTPS interception, an editable
+> HTTP/HTTPS Repeater, and a Burp-style Decoder work today. See the
+> [roadmap](docs/roadmap.md).
 
 ![Perseid HTTP history with request and response detail](docs/images/perseid-main.png)
 
@@ -38,8 +39,8 @@ application testing — with no embedded browser and memory bounded by design.
   by default.
 - Match/replace rules for request and response heads and buffered UTF-8 bodies,
   using literal text or Rust regular expressions with capture references.
-- Burp-style workspace with **Target**, **Proxy**, **Intruder**, and
-  **Repeater** tabs in the familiar order, in a warm light theme.
+- Burp-style workspace with **Target**, **Proxy**, **Intruder**, **Repeater**,
+  and **Decoder** tabs in the familiar order, in a warm light theme.
 - Bounded in-memory history (exchange count and total captured-body bytes)
   with one row per HTTP request, filtering, a scope view filter, and keyboard
   navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`). `CONNECT` transport
@@ -60,6 +61,14 @@ application testing — with no embedded browser and memory bounded by design.
   uses its own direct HTTP/HTTPS client, so it works with the proxy stopped and
   can test a virtual `Host` against a different connection target. WebSocket
   replay is not supported yet.
+- Burp-style **Decoder** with stacked, editable panels. Decode and encode as
+  Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, or Gzip; hash
+  with 31 common algorithms; or let Smart decode add one panel per detected
+  layer. Transforms apply to the selected text when there is a selection, and
+  applying an operation to an earlier panel replaces the downstream chain.
+  Inputs are capped at 8 MiB and outputs at 16 MiB. The long tail of
+  provider-specific hashes (SKEIN, TupleHash, and OID aliases) and a
+  **Send to Decoder** action are not implemented yet.
 - A clearly labelled Intruder preview; no fake controls are presented as
   working features.
 
@@ -112,8 +121,8 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 
 Contributions, testing feedback, and design discussions are welcome. Start with
 [CONTRIBUTING.md](CONTRIBUTING.md). Particularly useful early feedback is
-low-memory Linux behavior, HTTP correctness, accessibility, and Repeater
-workflow design.
+low-memory Linux behavior, HTTP correctness, accessibility, and Repeater and
+Decoder workflow design.
 
 ## License
 
