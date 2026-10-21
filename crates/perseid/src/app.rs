@@ -2,18 +2,20 @@
 //!
 //! The navigation intentionally mirrors the tools Burp users already know:
 //! Target, Proxy, Intruder, and Repeater. Proxy history, editable interception,
-//! the Target site map, scope enforcement, and match/replace rules are live;
-//! Intruder and Repeater are clearly marked previews until their engines land.
+//! the Target site map, scope enforcement, match/replace rules, and the direct
+//! Repeater are live; Intruder remains a clearly marked preview until its
+//! engine lands.
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
-//! [`intercept`], [`proxy`], [`rules`], [`target`], [`previews`], [`windows`],
-//! [`widgets`], [`message_view`], [`util`], and [`scale`].
+//! [`intercept`], [`proxy`], [`repeater`], [`rules`], [`target`], [`previews`],
+//! [`windows`], [`widgets`], [`message_view`], [`util`], and [`scale`].
 
 mod intercept;
 mod message_view;
 mod previews;
 mod proxy;
+mod repeater;
 mod rules;
 mod scale;
 #[cfg(feature = "screenshots")]
@@ -33,7 +35,7 @@ use std::time::Duration;
 use egui::{Color32, Key, RichText, Stroke};
 use perseid_proxy::{
     CertificateAuthority, InterceptItem, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings,
-    TlsConfig,
+    Repeater, TlsConfig,
 };
 
 use self::intercept::InterceptDraft;
@@ -57,7 +59,6 @@ const FILTER_ID: &str = "perseid.filter";
 const PROXY_DETAIL_ID: &str = "perseid.proxy.detail";
 const PROXY_REQUEST_ID: &str = "perseid.proxy.request";
 const TARGET_TREE_ID: &str = "perseid.target.tree";
-const REPEATER_REQUEST_ID: &str = "perseid.repeater.request";
 
 /// Content size (in egui points) the window aims for at startup.
 const DESIGN_WINDOW_SIZE: egui::Vec2 = egui::vec2(1280.0, 820.0);
@@ -167,6 +168,12 @@ pub struct PerseidApp {
     target_section: TargetSection,
     request_view: MessageView,
     response_view: MessageView,
+    /// Direct replay engine, started on the first Send so a proxy-off run can
+    /// still use Repeater.
+    repeater: Option<Repeater>,
+    repeater_tabs: Vec<repeater::RepeaterTab>,
+    repeater_active: usize,
+    repeater_next_tab: u64,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
     scope_enabled: bool,
@@ -305,6 +312,10 @@ impl PerseidApp {
             target_section: TargetSection::default(),
             request_view: MessageView::default(),
             response_view: MessageView::default(),
+            repeater: None,
+            repeater_tabs: Vec::new(),
+            repeater_active: 0,
+            repeater_next_tab: 1,
             site_map: None,
             scope: BTreeSet::new(),
             scope_enabled: false,
@@ -452,6 +463,17 @@ impl PerseidApp {
     }
 
     fn drain_events(&mut self, ctx: &egui::Context) {
+        // Repeater is independent of the proxy, so drain it before the proxy
+        // early return. A result may arrive while the proxy is stopped.
+        self.drain_repeater_results();
+        if self
+            .repeater_tabs
+            .iter()
+            .any(repeater::RepeaterTab::is_pending)
+        {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+
         let Some(proxy) = self.proxy.as_mut() else {
             return;
         };
@@ -604,6 +626,15 @@ impl PerseidApp {
         }
         if repeater {
             self.main_tab = MainTab::Repeater;
+        }
+
+        // Ctrl+Enter is the Burp-style send gesture. Consume it before
+        // `egui_wants_keyboard_input` so it works while the request editor has
+        // focus.
+        if self.main_tab == MainTab::Repeater
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::Enter))
+        {
+            self.send_active_repeater();
         }
 
         let on_history =
@@ -831,6 +862,16 @@ impl PerseidApp {
                         .small()
                         .color(theme::ACCENT_DARK),
                 );
+            }
+
+            let repeater_pending = self
+                .repeater_tabs
+                .iter()
+                .filter(|tab| tab.is_pending())
+                .count();
+            if repeater_pending > 0 {
+                ui.separator();
+                ui.colored_label(theme::BLUE, format!("{repeater_pending} Repeater pending"));
             }
 
             if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {

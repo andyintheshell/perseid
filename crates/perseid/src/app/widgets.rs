@@ -1,6 +1,6 @@
-//! Small shared egui widgets: tabs, cards, badges, empty states, and previews.
+//! Small shared egui widgets: tabs, cards, badges, and empty states.
 
-use egui::{Color32, Label, RichText, Stroke};
+use egui::{Color32, RichText, Stroke};
 
 use crate::theme;
 
@@ -125,24 +125,6 @@ pub(super) fn page_pad<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, add_contents)
         .inner
-}
-
-pub(super) fn preview_pane(ui: &mut egui::Ui, title: &str, subtitle: &str, text: &str, salt: &str) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(title).strong().color(theme::TEXT));
-        ui.label(RichText::new(subtitle).small().color(theme::TEXT_MUTED));
-    });
-    ui.separator();
-    egui::ScrollArea::both()
-        .id_salt(("perseid.preview", salt))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.add(
-                Label::new(RichText::new(text).monospace().color(theme::TEXT))
-                    .selectable(true)
-                    .wrap_mode(egui::TextWrapMode::Extend),
-            );
-        });
 }
 
 pub(super) fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {

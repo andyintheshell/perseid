@@ -33,17 +33,22 @@ aids, not permission to test an arbitrary host.
   `CONNECT` target is checked before a tunnel opens; with TLS interception
   enabled, decrypted requests are checked as well. Without interception, only
   the tunnel target is visible.
-- The prototype has no telemetry. Apart from proxied traffic, the application
-  does not make network requests; opening the project link in the About window
-  is an explicit user action.
+- **Repeater sends directly to the target and bypasses the proxy guardrails.**
+  Scope filtering and blocking, interception, and match/replace rules do not
+  apply to Repeater sends, and Repeater exchanges are not added to Proxy
+  history. Confirm the target and request before clicking **Send**.
+- The prototype has no telemetry. Apart from proxied and explicit Repeater
+  traffic, the application does not make network requests; opening the project
+  link in the About window is an explicit user action.
 
 ## Data handling
 
-For now, captured history and held interception messages live in memory only
-and disappear when the process exits. Dropping the proxy handle or closing the
-application releases held messages and aborts their exchanges. There is no disk
-persistence, export, or background upload. The only files Perseid writes are
-the TLS certificate authority and its private key described below.
+For now, captured history, held interception messages, and Repeater tabs and
+responses live in memory only and disappear when the process exits. Dropping
+the proxy handle or closing the application releases held messages and aborts
+their exchanges. There is no disk persistence, export, or background upload.
+The only files Perseid writes are the TLS certificate authority and its private
+key described below.
 
 When persistent history and exports are added:
 

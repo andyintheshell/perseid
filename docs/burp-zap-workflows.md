@@ -14,9 +14,11 @@ documentation.
   edit and replay it, then compare the results**. Proxy history is the entry
   point; Repeater (or ZAP's manual request editor) is where most hypotheses are
   actually tested.
-- Perseid already has the entry point — proxy capture, interception, scope, and
-  message inspection — but only a read-only Repeater preview. **Editable replay
-  is the largest gap in the daily workflow**, not scanner coverage.
+- Perseid now covers the entry point and editable replay for HTTP and HTTPS:
+  proxy capture, interception, scope, message inspection, and a tabbed Repeater
+  seeded from history. The remaining daily-workflow gaps are WebSocket replay,
+  session convenience, persistence, Decoder, and Comparer — not scanner
+  coverage.
 - Burp CE is explicitly a manual toolkit.[1] PortSwigger calls Repeater and
   Intruder "the center of the Burp Suite manual testing workflow" and says they
   have been "among Burp Suite's most popular tools" since 2003.[11] Burp's
@@ -174,7 +176,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Workflow | Burp CE rank | ZAP rank | Perseid today | Priority |
 | --- | --- | --- | --- | --- |
 | Proxy capture and HTTP history | 1 | 2 | **Working**, with a bounded in-memory history, metadata filter, and scope filter; no persistence or body search. | Maintain and harden |
-| Repeater / manual request editor | 2 | 4 | **Partial**: read-only preview of the selected request and response; cannot edit, send, or keep replay tabs. | **P0 — M3** |
+| Repeater / manual request editor | 2 | 4 | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. No WebSocket replay, saved tabs, or persistence; replay bypasses proxy scope and rewriting. | Maintain; WebSocket in M4 |
 | Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: head and buffered UTF-8 body editing, forward/drop, match/replace afterward. Large, streaming, binary, and WebSocket messages are limited or absent. | Maintain |
 | Target scope and site map | 4 | 3 | **Partial**: scope filtering and blocking work; the site map is built from captured history only. No crawl, parameter discovery, annotations, or persisted scope. | Maintain; improve with search |
 | Intruder / fuzzer | 5 | 6 | **Missing**: the Intruder tab is a planned-workspace overview. | **P1 — M4** |
@@ -196,27 +198,29 @@ Perseid's current support is documented in the
 
 ## What this means for the roadmap
 
-### 1. Editable Repeater is the keystone, not one item among four
+### 1. Repeater has landed; finish the loop around it
 
 Milestone 3 already lists persistent history, search, Repeater, Decoder, and
-Comparer. The rankings support that scope, but they also imply an order:
-**Repeater first**. Without editable replay, Decoder and Comparer do not
-complete a testing loop, and persistent history mostly stores traffic the user
-cannot actively test. A read-only Repeater preview is honest, but it is still
-the point where the current product stops.
+Comparer. The rankings put Repeater first, and editable HTTP/HTTPS replay now
+exists: a request can be seeded from history, edited in its own tab, sent
+directly to the target, and inspected in Pretty/Raw/Hex. That closes the gap
+where the product stopped after capture.
 
-If M3 has to be split, ship the replay engine plus persistent, searchable
-history first. Decoder and Comparer can follow within the same milestone.
+The remaining M3 work should build around that loop rather than repeat it:
+persistent, searchable history keeps replay material across launches; Decoder
+makes payload transformation part of the edit step; Comparer closes the
+"change one thing and compare" loop. WebSocket Repeater and saved tabs belong
+with the M4 protocol and persistence work.
 
 ### 2. Add a small session-handling slice
 
 Session and authentication handling ranks seventh in both tools. Perseid can
 proxy authenticated browsing because the external browser holds the cookies,
-but Repeater and Intruder will not be pleasant without a way to keep a session
-alive. The smallest useful slice is:
+and seeding a Repeater tab copies the selected request's headers, including
+`Cookie`. Repeated testing still needs a way to keep that session alive and
+refresh credentials. The smallest useful slice is:
 
 - a per-host cookie jar populated from `Set-Cookie`;
-- reuse of the selected exchange's cookies in Repeater;
 - an optional "update cookies from response" behavior;
 - later, a simple login macro or re-authentication request.
 
@@ -234,7 +238,7 @@ The M4 scope is directionally right. Within it:
 2. **WebSockets** come next because both tools support them and modern targets
    increasingly use them, but the workflow is target-dependent.
 3. **Sequencer** is the lowest-frequency M4 item in both rankings. It is still
-   part of CE parity, but it should not delay Repeater, fuzzing, or session
+   part of CE parity, but it should not delay fuzzing, WebSockets, or session
    handling.
 
 ### 4. Treat evidence export as a cheap early win, not a reporting suite

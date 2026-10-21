@@ -14,8 +14,8 @@ application testing — with no embedded browser and memory bounded by design.
 > [!IMPORTANT]
 > **Status: early prototype.** A loopback-only HTTP/1.1 and HTTP/2 proxy with
 > editable request/response interception, opt-in scope enforcement,
-> match/replace rules, automatic local-CA HTTPS interception, and a Burp-style
-> Target/Proxy workspace work today. See the [roadmap](docs/roadmap.md).
+> match/replace rules, automatic local-CA HTTPS interception, and an editable
+> HTTP/HTTPS Repeater work today. See the [roadmap](docs/roadmap.md).
 
 ![Perseid HTTP history with request and response detail](docs/images/perseid-main.png)
 
@@ -55,8 +55,13 @@ application testing — with no embedded browser and memory bounded by design.
   by the view filter and the traffic guardrail.
 - `CONNECT` tunneling for HTTPS: decrypted by default with the local CA, with
   pass-through hosts and an off switch when you need opaque tunnels.
-- Read-only Repeater preview and a clearly labelled Intruder preview; no fake
-  controls are presented as working features.
+- Editable **Repeater** with request tabs, a Burp-style target bar, a raw
+  request editor, and Pretty/Raw/Hex responses seeded from HTTP history. Replay
+  uses its own direct HTTP/HTTPS client, so it works with the proxy stopped and
+  can test a virtual `Host` against a different connection target. WebSocket
+  replay is not supported yet.
+- A clearly labelled Intruder preview; no fake controls are presented as
+  working features.
 
 ## Goal: Burp Suite Community parity
 
