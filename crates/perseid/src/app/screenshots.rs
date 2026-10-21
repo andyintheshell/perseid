@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use perseid_proxy::{
+use crate::proxy::{
     CapturedBody, CertificateAuthority, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo,
     ResponseHead,
 };

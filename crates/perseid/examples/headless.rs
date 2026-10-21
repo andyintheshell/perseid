@@ -1,15 +1,15 @@
 //! Headless smoke test: run the proxy and print captured events.
 //!
 //! ```sh
-//! cargo run -p perseid-proxy --example headless
+//! cargo run -p perseid --example headless
 //! curl -x http://127.0.0.1:8080 http://example.com/
 //! ```
 
 use std::time::Duration;
 
-use perseid_proxy::{ExchangeResult, Proxy, ProxyConfig, ProxyEvent};
+use perseid::proxy::{ExchangeResult, Proxy, ProxyConfig, ProxyEvent};
 
-fn main() -> Result<(), perseid_proxy::StartError> {
+fn main() -> Result<(), perseid::proxy::StartError> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .init();

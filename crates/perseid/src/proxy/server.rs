@@ -19,19 +19,19 @@ use log::{debug, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::events::ProxyEvent;
-use crate::intercept::{InterceptDecision, InterceptItem};
-use crate::policy::PolicySnapshot;
-use crate::tls::CertificateAuthority;
-use crate::util::ProxyBody;
-use crate::{forward, portal, tunnel};
+use crate::proxy::events::ProxyEvent;
+use crate::proxy::intercept::{InterceptDecision, InterceptItem};
+use crate::proxy::policy::PolicySnapshot;
+use crate::proxy::tls::CertificateAuthority;
+use crate::proxy::util::ProxyBody;
+use crate::proxy::{forward, portal, tunnel};
 
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
     pub(crate) client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
     /// The local CA that mints interception certificates. `None` keeps CONNECT
     /// traffic on the passthrough path even when interception is enabled.
-    /// Swapped at runtime by [`crate::Proxy::set_tls_authority`].
+    /// Swapped at runtime by [`crate::proxy::Proxy::set_tls_authority`].
     pub(crate) tls_ca: Arc<RwLock<Option<Arc<CertificateAuthority>>>>,
     /// Address this proxy is listening on, used to recognise the local CA
     /// download page without forwarding the request to itself.

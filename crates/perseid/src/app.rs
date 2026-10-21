@@ -34,11 +34,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use egui::{Color32, Key, RichText, Stroke};
-use perseid_proxy::{
+use crate::proxy::{
     CertificateAuthority, InterceptItem, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings,
     Repeater, TlsConfig,
 };
+use egui::{Color32, Key, RichText, Stroke};
 
 use self::intercept::InterceptDraft;
 

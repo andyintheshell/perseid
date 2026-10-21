@@ -19,18 +19,18 @@ use hyper_util::client::legacy::Error as ClientError;
 use log::debug;
 use tokio::sync::oneshot;
 
-use crate::capture::{BodyBuffer, EndReason, TeeBody, new_buffer, snapshot};
-use crate::events::{
+use crate::proxy::capture::{BodyBuffer, EndReason, TeeBody, new_buffer, snapshot};
+use crate::proxy::events::{
     CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
 };
-use crate::intercept::{InterceptDecision, InterceptItem};
-use crate::message::{
+use crate::proxy::intercept::{InterceptDecision, InterceptItem};
+use crate::proxy::message::{
     ParsedResponseHead, editor_reason, parse_request_head, parse_response_head,
     serialize_request_head, serialize_response_head,
 };
-use crate::policy::PolicySnapshot;
-use crate::server::Ctx;
-use crate::util::{
+use crate::proxy::policy::PolicySnapshot;
+use crate::proxy::server::Ctx;
+use crate::proxy::util::{
     IntoProxyBody, ProxyBody, display_host, forwarded_headers, header_list,
     sanitized_accept_encoding, text_response, version_str,
 };

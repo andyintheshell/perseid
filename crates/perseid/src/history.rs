@@ -11,7 +11,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, SystemTime};
 
-use perseid_proxy::{CapturedBody, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
+use crate::proxy::{CapturedBody, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
 
 /// Default cap on captured request/response body bytes retained by history.
 ///
@@ -316,7 +316,7 @@ fn item_body_bytes(item: &HistoryItem) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use perseid_proxy::{ExchangeEnd, ExchangeResult, RequestInfo, ResponseHead};
+    use crate::proxy::{ExchangeEnd, ExchangeResult, RequestInfo, ResponseHead};
     use std::time::SystemTime;
 
     fn started(id: u64, method: &str) -> ProxyEvent {

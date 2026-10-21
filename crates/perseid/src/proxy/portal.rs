@@ -12,8 +12,8 @@ use http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE, HOST};
 use http::{Method, Request, Response, StatusCode};
 use hyper::body::Incoming;
 
-use crate::server::Ctx;
-use crate::util::{ProxyBody, text_body, text_response};
+use crate::proxy::server::Ctx;
+use crate::proxy::util::{ProxyBody, text_body, text_response};
 
 const CERT_PATH: &str = "/perseid-ca.pem";
 const PORTAL_HOST: &str = "perseid";

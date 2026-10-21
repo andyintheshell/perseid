@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 
-use crate::events::CapturedBody;
+use crate::proxy::events::CapturedBody;
 
 /// Shared buffer a [`TeeBody`] appends to.
 pub(crate) type BodyBuffer = Arc<Mutex<CapturedBody>>;

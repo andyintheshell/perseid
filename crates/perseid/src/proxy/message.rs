@@ -11,7 +11,7 @@ use http::header::{HOST, HeaderName, HeaderValue};
 use http::{HeaderMap, Method, StatusCode, Uri, Version};
 use hyper::ext::ReasonPhrase;
 
-use crate::util::version_str;
+use crate::proxy::util::version_str;
 
 pub(crate) struct ParsedRequestHead {
     pub(crate) method: Method,

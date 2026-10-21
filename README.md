@@ -10,6 +10,8 @@ Perseid is a Rust-native web security tool for understanding what happens on
 the wire: capture a request, inspect it, change it, send it again, and compare
 the responses. It is built for web security learning, CTFs, and authorized
 application testing — with no embedded browser and memory bounded by design.
+The desktop application and its interception proxy are both part of the single
+`perseid` crate; Rust callers can use the proxy as `perseid::proxy`.
 
 > [!IMPORTANT]
 > **Status: early prototype.** A loopback-only HTTP/1.1 and HTTP/2 proxy with

@@ -3,8 +3,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::rules::{MatchReplaceRule, RuleError};
-use crate::tls::CertificateAuthority;
+use crate::proxy::rules::{MatchReplaceRule, RuleError};
+use crate::proxy::tls::CertificateAuthority;
 
 /// Loopback-only by default: captured traffic may contain credentials.
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
@@ -14,8 +14,8 @@ pub const DEFAULT_CAPTURE_LIMIT: usize = 1024 * 1024;
 /// Maximum body bytes buffered for interception. Larger or streaming bodies
 /// are still held for header editing, but their bodies cannot be edited.
 pub const DEFAULT_INTERCEPT_LIMIT: usize = 1024 * 1024;
-/// Bound on queued [`crate::ProxyEvent`]s; when full, events are dropped and
-/// counted rather than growing memory without limit.
+/// Bound on queued [`crate::proxy::ProxyEvent`]s; when full, events are
+/// dropped and counted rather than growing memory without limit.
 pub const DEFAULT_EVENT_QUEUE: usize = 256;
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bound on concurrent client connections.
@@ -61,7 +61,7 @@ impl ProxySettings {
     }
 }
 
-/// TLS interception configuration for [`crate::Proxy::start`].
+/// TLS interception configuration for [`crate::proxy::Proxy::start`].
 #[derive(Clone, Default)]
 pub struct TlsConfig {
     /// Certificate authority used to mint per-host certificates. Without one,
@@ -83,7 +83,7 @@ impl fmt::Debug for TlsConfig {
     }
 }
 
-/// Configuration for [`crate::Proxy::start`].
+/// Configuration for [`crate::proxy::Proxy::start`].
 #[derive(Clone)]
 pub struct ProxyConfig {
     /// Address to bind. Keep this on loopback unless you know what you're doing.

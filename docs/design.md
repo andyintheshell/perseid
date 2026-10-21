@@ -59,14 +59,18 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
                        +----> Decoder (local byte transforms and hashes)
 ```
 
-Current workspace layout:
+Current crate layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/perseid-proxy` | Loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events, and the direct Repeater client. |
-| `crates/perseid` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Repeater tabs and editor, Decoder panels and transform engine, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
+| `crates/perseid/src/proxy/` | Embedded proxy: loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events, and the direct Repeater client. Exposed as `perseid::proxy`. |
+| `crates/perseid/src/` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Repeater tabs and editor, Decoder panels and transform engine, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
 
-HTTPS interception lives in the proxy crate: a locally generated ECDSA CA mints
+The proxy stays behind its own module boundary even though it is compiled into
+the application crate. The UI talks to it through the `perseid::proxy` API, so
+proxy behavior remains testable without the UI.
+
+HTTPS interception lives in the proxy module: a locally generated ECDSA CA mints
 per-host certificates, rustls terminates the browser connection inside a
 `CONNECT` tunnel, and decrypted HTTP/1.1 or HTTP/2 requests flow through the
 same forwarding, interception, scope, and rewrite pipeline as plain HTTP. The
@@ -80,7 +84,7 @@ remain opaque. The proxy also serves the certificate as a local download page,
 so installing trust does not require finding the file on disk.
 
 Repeater deliberately sits beside the proxy rather than behind it: the
-`perseid-proxy` crate exposes a direct HTTP/HTTPS client with its own runtime
+`perseid::proxy` module exposes a direct HTTP/HTTPS client with its own runtime
 and connection pool, and the UI sends edited messages to that engine. Replay
 therefore works when the proxy is stopped and avoids re-entering interception,
 match/replace, or scope policy. Responses are captured with the same byte limit

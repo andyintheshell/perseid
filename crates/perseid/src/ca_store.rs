@@ -1,15 +1,14 @@
 //! Local storage for the TLS interception certificate authority.
 //!
-//! The CA lives outside the proxy crate so the library stays free of
-//! filesystem policy: the app decides where the certificate and private key
-//! go, and tells the user how to trust — and remove — them. See
-//! `docs/tls.md`.
+//! The CA lives outside the proxy module so the proxy stays free of filesystem
+//! policy: the app decides where the certificate and private key go, and tells
+//! the user how to trust — and remove — them. See `docs/tls.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use perseid_proxy::CertificateAuthority;
+use crate::proxy::CertificateAuthority;
 
 /// Certificate file name inside the CA directory.
 pub const CA_CERT_FILE: &str = "perseid-ca.pem";

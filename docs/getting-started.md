@@ -1,7 +1,8 @@
 # Getting started
 
-Perseid builds as a small Cargo workspace: `perseid-proxy` (the proxy library)
-and `perseid` (the desktop application).
+Perseid is a single Cargo package: the desktop application and its embedded
+proxy library live together in `crates/perseid`. The proxy is available to Rust
+callers as `perseid::proxy`.
 
 ## Requirements
 
@@ -11,7 +12,7 @@ and `perseid` (the desktop application).
 
 ## Build and run
 
-From the workspace root:
+From the repository root:
 
 ```sh
 cargo run -p perseid

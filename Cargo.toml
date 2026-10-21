@@ -1,10 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/perseid",
-    "crates/perseid-proxy",
-]
-default-members = ["crates/perseid"]
+members = ["crates/perseid"]
 
 [workspace.package]
 version = "0.1.0"
