@@ -14,11 +14,11 @@ documentation.
   edit and replay it, then compare the results**. Proxy history is the entry
   point; Repeater (or ZAP's manual request editor) is where most hypotheses are
   actually tested.
-- Perseid now covers the entry point and editable replay for HTTP and HTTPS:
-  proxy capture, interception, scope, message inspection, and a tabbed Repeater
-  seeded from history. The remaining daily-workflow gaps are WebSocket replay,
-  session convenience, persistence, Decoder, and Comparer — not scanner
-  coverage.
+- Perseid now covers the entry point, editable replay, and local payload
+  transformation: proxy capture, interception, scope, message inspection, a
+  tabbed Repeater seeded from history, and a Burp-style Decoder. The remaining
+  daily-workflow gaps are WebSocket replay, session convenience, persistence,
+  and Comparer — not scanner coverage.
 - Burp CE is explicitly a manual toolkit.[1] PortSwigger calls Repeater and
   Intruder "the center of the Burp Suite manual testing workflow" and says they
   have been "among Burp Suite's most popular tools" since 2003.[11] Burp's
@@ -182,7 +182,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Intruder / fuzzer | 5 | 6 | **Missing**: the Intruder tab is a planned-workspace overview. | **P1 — M4** |
 | Automated scan and alert triage | Pro only | 1 | **Missing**: no scanner, passive checks, or alert management. | **Non-goal** |
 | Spidering and crawling | Pro only | 5 | **Missing**: no crawler or automated content discovery. | **Non-goal** |
-| Decoder / encoder | 6 | 9 | **Missing**: no user-facing encode/decode/hash tool. Compressed-body display is not a general transform workflow. | **P0 — M3** |
+| Decoder / encoder | 6 | 9 | **Partial**: local transforms work with stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms. No Send to Decoder, SKEIN/TupleHash/OID aliases, or persisted chains; 8 MiB input / 16 MiB output caps. | Maintain; fill hash gaps in M3 |
 | Authentication and session handling | 7 | 7 | **Partial**: an external browser keeps its own cookies while proxying; Perseid has no cookie jar, login macro, token refresh, per-user context, or session rules. | **P1 — add to M3/M4** |
 | Match/replace rewriting | 8 | Replacer add-on | **Working**: request/response head and buffered UTF-8 body rules, literal or regex, applied after interception. Runtime-only and not persisted. | Maintain |
 | Comparer / diff | 9 | 12 | **Missing**: no two-message diff view. | **P0 — M3** |
@@ -198,19 +198,23 @@ Perseid's current support is documented in the
 
 ## What this means for the roadmap
 
-### 1. Repeater has landed; finish the loop around it
+### 1. Repeater and Decoder have landed; finish the loop around them
 
 Milestone 3 already lists persistent history, search, Repeater, Decoder, and
 Comparer. The rankings put Repeater first, and editable HTTP/HTTPS replay now
 exists: a request can be seeded from history, edited in its own tab, sent
-directly to the target, and inspected in Pretty/Raw/Hex. That closes the gap
-where the product stopped after capture.
+directly to the target, and inspected in Pretty/Raw/Hex. Decoder now provides
+the matching local transformation surface: stacked panels for URL, HTML,
+Base64, ASCII hex, numeric conversions, Gzip, hashes, and Smart decode, with
+selection-aware transforms and a replaceable downstream chain. That closes the
+gaps where the product stopped after capture or forced payload edits into an
+external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
-persistent, searchable history keeps replay material across launches; Decoder
-makes payload transformation part of the edit step; Comparer closes the
-"change one thing and compare" loop. WebSocket Repeater and saved tabs belong
-with the M4 protocol and persistence work.
+persistent, searchable history keeps replay material across launches; a Send to
+Decoder action would connect transformation directly to the edit step;
+Comparer closes the "change one thing and compare" loop. WebSocket Repeater and
+saved tabs belong with the M4 protocol and persistence work.
 
 ### 2. Add a small session-handling slice
 
@@ -270,7 +274,8 @@ signals would be:
 - **User interviews or opt-in local telemetry** showing whether Perseid users
   spend most of their time browsing, replaying, fuzzing, or exporting.
 - **Authentication blockers** reported during Repeater testing. If auth is the
-  first thing users hit, the session slice moves ahead of Decoder and Comparer.
+  first thing users hit, the session slice moves ahead of Comparer and the
+  remaining Decoder gaps.
 - **Target mix.** WebSocket-heavy applications would move WebSocket testing up;
   API-heavy work would move import/export and automation up.
 - **Audience mix.** If Perseid attracts CI/AppSec engineers rather than manual

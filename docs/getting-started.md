@@ -40,8 +40,8 @@ Run `cargo run -p perseid -- --help` for the authoritative list.
 
 ## Workspace
 
-The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
-`P`, `I`, or `R` (use `Cmd` on macOS).
+The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift` plus
+`T`, `P`, `I`, `R`, or `D` (use `Cmd` on macOS).
 
 | Tab | Available today |
 | --- | --- |
@@ -49,6 +49,7 @@ The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift`+`T`,
 | **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds HTTP and decrypted HTTPS messages for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. **TLS** shows the automatically created CA, opens the certificate page, and manages the HTTPS toggle, regeneration, removal, and pass-through hosts. |
 | **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
 | **Repeater** | Editable request tabs seeded from HTTP history, a target bar, direct Send, and Pretty/Raw/Hex responses. HTTP/HTTPS only; WebSocket replay is not supported yet. |
+| **Decoder** | Stacked Text/Hex panels with Decode as, Encode as, Hash, and Smart decode; selection-aware transforms and a replaceable downstream chain. Common hashes only; read-only Hex and no Send to Decoder yet. |
 
 The scope input accepts a bare host, a `host:port` authority, or a full URL;
 matching also covers subdomains and ignores ports. Toggle **Filter views to the
@@ -159,6 +160,72 @@ bodies can be lossy. A seed warning asks you to review the body before sending.
 WebSocket messages, saved Repeater tabs, and project persistence are not
 implemented yet.
 
+## Decoder
+
+Decoder is the local transformation workspace. Open it with **Decoder** or
+`Ctrl`+`Shift`+`D`, type or paste into the first panel, then choose an
+operation. Every operation adds a new editable panel below the source; the
+operation's color and name appear as a chip on the result. Applying another
+operation to an earlier panel replaces the panels downstream, so the visible
+chain always matches the operations that produced it.
+
+Each panel has **Text** and **Hex** views. Text is editable monospace content.
+Hex is a read-only byte dump with the same operation colors. When a result is
+binary, including Gzip output, the panel opens in Hex automatically. A binary
+panel can be switched to Text for a lossy preview, but editing it replaces the
+bytes with UTF-8 text. Hex rendering stops at 64 KiB per panel; the panel's
+**Copy** button and the toolbar's **Copy output** still export the complete
+contents. Use **Clear** to reset the chain.
+
+The **Decode as** and **Encode as** menus contain the same nine entries in
+Burp order:
+
+- **Plain** copies the input (or selection) into a new panel without changing
+  it. It is useful for branching a chain before trying different operations.
+- **URL** decodes `%xx` escapes, or percent-encodes every byte using lowercase
+  hexadecimal. Decoding leaves malformed escapes untouched.
+- **HTML** decodes named and numeric entities, or encodes every character as
+  `&#x...;`, matching Burp's all-character output rather than only escaping
+  metacharacters.
+- **Base64** accepts standard and URL-safe alphabets, with or without padding,
+  and ignores whitespace. Encoding always uses the standard padded alphabet.
+- **ASCII hex** is the byte-oriented hexadecimal format: two digits per byte,
+  with whitespace ignored. It requires an even number of digits.
+- **Hex**, **Octal**, and **Binary** are not byte encodings. They reproduce
+  Burp's numeric digit-run behavior: **Encode as > Hex** turns the decimal run
+  in `port 1234` into `port 4d2`, while **Decode as > Hex** turns the
+  hexadecimal run in `deadbeef` into `3735928559`. Use **ASCII hex** when you
+  mean bytes.
+- **Gzip** compresses or decompresses gzip data. Decompression is bounded by
+  the output limit rather than trusting the gzip header.
+
+**Hash** offers 31 common algorithms: BLAKE2B-160/256/384/512,
+BLAKE2S-128/160/224/256, BLAKE3, Keccak-224/256/384/512, MD2, MD4, MD5,
+RIPEMD-160, SHA-1, SHA-224/256/384/512, SHA-512/224, SHA-512/256,
+SHA3-224/256/384/512, SM3, Tiger, and Whirlpool. Output is lowercase
+hexadecimal text. The long tail of provider-specific Burp names (SKEIN,
+TupleHash, and OID aliases) is not implemented.
+
+**Smart decode** repeatedly detects and applies one layer at a time, adding a
+panel for each. It recognizes gzip, URL, HTML, Base64, and ASCII hex. Numeric
+Hex, Octal, and Binary are deliberately excluded so ordinary decimal values
+are not reinterpreted; for example, `%34%37` stops at `47`. It stops after 12
+layers, when no further layer is detected, or when a layer would repeat.
+Panels that produce no match show a notice rather than adding an empty panel.
+
+If text is selected in a Text panel, **Decode as**, **Encode as**, **Hash**,
+and **Smart decode** transform only that selection and leave the untransformed
+prefix and suffix in place. With no selection they transform the whole panel.
+The Hex view has no partial selection for transforms; switch to Text or apply
+the operation to all bytes.
+
+A single transform accepts at most 8 MiB of input and produces at most 16 MiB
+of output. These limits cover the whole panel, including preserved prefix and
+suffix bytes, and are reported in the panel instead of silently truncating.
+Decoder is currently a separate local surface: there is no **Send to Decoder**
+action from Proxy or Repeater, and the panel chain is not persisted between
+launches.
+
 ## HTTPS interception
 
 Perseid creates a local certificate authority (CA) automatically on first
@@ -242,6 +309,12 @@ leaves the filter. Clicking a row also selects it.
 - Repeater supports editable HTTP and HTTPS requests, but not WebSocket
   messages or saved tabs. It sends directly to the target, bypassing the proxy
   pipeline and scope enforcement. Intruder has no engine yet.
+- Decoder transforms at most 8 MiB of input and 16 MiB of output per
+  operation. Hex panels are read-only and preview at most 64 KiB; Copy exports
+  all retained bytes. Hash support omits SKEIN, TupleHash, and OID aliases, and
+  there is no Send to Decoder integration yet. The panel chain is runtime-only.
+  HTML encoding is text-oriented: binary input is represented as numeric
+  entities per byte, so high bytes do not round-trip as raw bytes.
 - History is in memory only. It is bounded by `--history-limit` and
   `--history-bytes`; captured bodies are capped per message by
   `--capture-limit`, and interception buffers up to `--intercept-limit` per
