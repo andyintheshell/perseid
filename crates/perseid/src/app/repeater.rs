@@ -7,10 +7,10 @@
 
 use std::time::{Duration, Instant};
 
-use egui::TextEdit;
-use perseid_proxy::{
+use crate::proxy::{
     DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterRequest, RepeaterResult,
 };
+use egui::TextEdit;
 
 use super::message_view::message_text;
 use super::widgets::{empty_state, message_mode_tab, section_tab};

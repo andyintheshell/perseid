@@ -8,7 +8,7 @@
 //! interception, or for hosts on the pass-through list, the CONNECT stays an
 //! opaque byte tunnel.
 //!
-//! [`ProxySettings::tls_intercept`]: crate::ProxySettings::tls_intercept
+//! [`ProxySettings::tls_intercept`]: crate::proxy::ProxySettings::tls_intercept
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -26,13 +26,13 @@ use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_rustls::TlsAcceptor;
 
-use crate::events::{
+use crate::proxy::events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
 };
-use crate::forward;
-use crate::server::Ctx;
-use crate::tls::CertificateAuthority;
-use crate::util::{ProxyBody, empty_body, header_list, text_response, version_str};
+use crate::proxy::forward;
+use crate::proxy::server::Ctx;
+use crate::proxy::tls::CertificateAuthority;
+use crate::proxy::util::{ProxyBody, empty_body, header_list, text_response, version_str};
 
 pub(crate) async fn handle(ctx: Arc<Ctx>, req: Request<Incoming>) -> Response<ProxyBody> {
     let id = ctx.next_id();

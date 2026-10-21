@@ -1,7 +1,7 @@
 //! Proxy tab: match/replace rules applied after interception.
 
+use crate::proxy::{MatchReplaceRule, RuleDirection, RulePart};
 use egui::TextEdit;
-use perseid_proxy::{MatchReplaceRule, RuleDirection, RulePart};
 
 use super::widgets::{card, empty_state, page_pad};
 use super::*;

@@ -2,8 +2,8 @@
 
 use log::debug;
 
-use crate::config::ProxySettings;
-use crate::rules::{CompiledRule, RuleDirection, RuleError};
+use crate::proxy::config::ProxySettings;
+use crate::proxy::rules::{CompiledRule, RuleDirection, RuleError};
 
 /// A consistent view of policy for one exchange.
 ///
@@ -223,7 +223,7 @@ fn without_port(host: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{MatchReplaceRule, RulePart};
+    use crate::proxy::rules::{MatchReplaceRule, RulePart};
 
     fn settings() -> ProxySettings {
         ProxySettings::default()

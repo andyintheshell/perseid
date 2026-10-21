@@ -10,7 +10,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use perseid_proxy::{Repeater, RepeaterConfig, RepeaterRequest, RepeaterResult};
+use perseid::proxy::{Repeater, RepeaterConfig, RepeaterRequest, RepeaterResult};
 use rcgen::{CertificateParams, KeyPair};
 use rustls::ServerConfig;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};

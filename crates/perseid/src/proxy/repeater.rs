@@ -23,10 +23,10 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 
-use crate::events::{CapturedBody, HeaderList};
-use crate::message::parse_request_head;
-use crate::tls::{self, UpstreamTlsError};
-use crate::util::{
+use crate::proxy::events::{CapturedBody, HeaderList};
+use crate::proxy::message::parse_request_head;
+use crate::proxy::tls::{self, UpstreamTlsError};
+use crate::proxy::util::{
     IntoProxyBody, ProxyBody, forwarded_headers, header_list, sanitized_accept_encoding,
     version_str,
 };
@@ -56,7 +56,7 @@ pub struct RepeaterConfig {
 impl Default for RepeaterConfig {
     fn default() -> Self {
         Self {
-            capture_limit: crate::DEFAULT_CAPTURE_LIMIT,
+            capture_limit: crate::proxy::DEFAULT_CAPTURE_LIMIT,
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),
             notify: None,

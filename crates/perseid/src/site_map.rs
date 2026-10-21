@@ -95,7 +95,7 @@ impl SiteMap {
 /// This delegates to the proxy so the view filter and the forwarding guardrail
 /// cannot drift apart.
 pub fn host_in_scope(host: &str, scope: &BTreeSet<String>) -> bool {
-    perseid_proxy::host_in_scope(host, scope.iter().map(String::as_str))
+    crate::proxy::host_in_scope(host, scope.iter().map(String::as_str))
 }
 
 /// Normalize user input for the scope list: accept a bare host, a host with a
@@ -122,7 +122,7 @@ mod tests {
     use std::collections::BTreeSet;
     use std::time::SystemTime;
 
-    use perseid_proxy::{ProxyEvent, RequestInfo};
+    use crate::proxy::{ProxyEvent, RequestInfo};
 
     use super::*;
     use crate::history::DEFAULT_HISTORY_BYTES;

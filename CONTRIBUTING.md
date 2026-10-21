@@ -18,7 +18,7 @@ Requirements:
 - Rust 1.95.0 or newer (edition 2024), matching `rust-toolchain.toml` and CI.
 - A Linux desktop session with OpenGL support for the UI.
 
-From the workspace root:
+From the repository root:
 
 ```sh
 cargo build --locked
@@ -26,10 +26,10 @@ cargo run -p perseid --locked
 cargo test --workspace --locked
 ```
 
-The `perseid-proxy` crate also has a headless example for manual smoke tests:
+The `perseid` crate includes a headless proxy example for manual smoke tests:
 
 ```sh
-cargo run -p perseid-proxy --example headless
+cargo run -p perseid --example headless
 ```
 
 Perseid creates its TLS certificate authority on first launch and reuses the
@@ -64,8 +64,8 @@ resolving to newer crates.
 
 Workspace manifests deliberately use semver-compatible ranges (for example,
 `egui = "0.37"`) rather than `=` pins. The lockfile supplies the pin for
-applications and CI, while ranges let downstream consumers of
-`perseid-proxy` share a compatible version. When a dependency is added or
+applications and CI, while ranges let downstream consumers of the `perseid`
+library share a compatible version. When a dependency is added or
 upgraded, run `cargo update` intentionally and include the resulting
 `Cargo.lock` change in the same pull request. Do not commit unrelated
 lockfiles from other toolchains.
@@ -93,12 +93,14 @@ publishes an inline preview.
 
 | Path | Contents |
 | --- | --- |
-| `crates/perseid-proxy/` | Proxy library: listener, forwarding, CONNECT tunnels, capture, events. |
-| `crates/perseid/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
+| `crates/perseid/src/proxy/` | Embedded proxy: listener, forwarding, CONNECT tunnels, capture, events, and the direct Repeater client. |
+| `crates/perseid/src/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
+| `crates/perseid/tests/` | End-to-end proxy and Repeater tests. |
+| `crates/perseid/examples/` | Headless proxy smoke-test example. |
 | `docs/` | User and design documentation. |
 | `branding/` | Logo and icon source assets. |
 
-Proxy behavior belongs behind the `perseid-proxy` API so it can be tested
+Proxy behavior belongs behind the `perseid::proxy` API so it can be tested
 without the UI. UI code should not block on network or disk work; events flow
 through the bounded channel.
 

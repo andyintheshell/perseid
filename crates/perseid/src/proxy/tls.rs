@@ -59,7 +59,7 @@ pub enum CaError {
 ///
 /// Generate one with [`CertificateAuthority::generate`] on first use, persist
 /// the two PEM documents somewhere only the user can read, and pass it to
-/// [`crate::ProxyConfig::tls`]. Loading an existing CA with
+/// [`crate::proxy::ProxyConfig::tls`]. Loading an existing CA with
 /// [`CertificateAuthority::from_pem`] lets the trust the user installed keep
 /// working across restarts.
 pub struct CertificateAuthority {

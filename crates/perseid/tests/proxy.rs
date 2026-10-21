@@ -11,7 +11,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use perseid_proxy::{
+use perseid::proxy::{
     CertificateAuthority, ExchangeResult, InterceptItem, InterceptKind, MatchReplaceRule, Proxy,
     ProxyConfig, ProxyEvent, ProxySettings, RequestInfo, RuleDirection, RulePart, StartError,
     TlsConfig,
@@ -276,7 +276,7 @@ fn started_of(events: &[ProxyEvent]) -> &RequestInfo {
         .expect("a Started event")
 }
 
-fn finished_of(events: &[ProxyEvent]) -> &perseid_proxy::ExchangeEnd {
+fn finished_of(events: &[ProxyEvent]) -> &perseid::proxy::ExchangeEnd {
     events
         .iter()
         .find_map(|event| match event {
@@ -286,7 +286,7 @@ fn finished_of(events: &[ProxyEvent]) -> &perseid_proxy::ExchangeEnd {
         .expect("a Finished event")
 }
 
-fn head_of(events: &[ProxyEvent]) -> &perseid_proxy::ResponseHead {
+fn head_of(events: &[ProxyEvent]) -> &perseid::proxy::ResponseHead {
     events
         .iter()
         .find_map(|event| match event {

@@ -9,7 +9,7 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 
-use crate::events::HeaderList;
+use crate::proxy::events::HeaderList;
 
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) type ProxyBody = BoxBody<Bytes, BoxError>;

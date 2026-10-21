@@ -1,7 +1,7 @@
 //! Editable interception queue and raw message editor.
 
+use crate::proxy::{CapturedBody, InterceptError, InterceptItem, InterceptKind};
 use egui::{Label, TextEdit};
-use perseid_proxy::{CapturedBody, InterceptError, InterceptItem, InterceptKind};
 
 use super::widgets::{card, empty_state, page_pad};
 use super::*;

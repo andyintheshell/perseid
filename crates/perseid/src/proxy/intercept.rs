@@ -6,8 +6,8 @@
 
 use tokio::sync::oneshot;
 
-use crate::events::RequestInfo;
-use crate::message::{parse_request_head, parse_response_head};
+use crate::proxy::events::RequestInfo;
+use crate::proxy::message::{parse_request_head, parse_response_head};
 
 #[derive(Debug)]
 pub(crate) enum InterceptDecision {
@@ -180,7 +180,7 @@ pub enum InterceptError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::RequestInfo;
+    use crate::proxy::events::RequestInfo;
 
     fn request_info() -> RequestInfo {
         RequestInfo {

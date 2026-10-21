@@ -1,9 +1,10 @@
-//! The Perseid interception proxy.
+//! The Perseid interception proxy, embedded in the main crate.
 //!
-//! One call to [`Proxy::start`] binds a listener, waits for the background
-//! runtime to become ready, and returns; the proxy runs on its own Tokio
-//! runtime in a dedicated thread so the caller (typically the egui UI thread)
-//! never blocks on network activity afterward.
+//! The proxy is available to Rust callers as `perseid::proxy`. One call to
+//! [`Proxy::start`] binds a listener, waits for the background runtime to
+//! become ready, and returns; the proxy runs on its own Tokio runtime in a
+//! dedicated thread so the caller (typically the egui UI thread) never blocks
+//! on network activity afterward.
 //!
 //! Captured traffic is delivered as [`ProxyEvent`]s over a bounded channel.
 //! Small and immutable by design: bodies are capped by
@@ -50,12 +51,12 @@
 //! # Example
 //!
 //! ```no_run
-//! let proxy = perseid_proxy::Proxy::start(Default::default())?;
+//! let proxy = perseid::proxy::Proxy::start(Default::default())?;
 //! println!("listening on {}", proxy.local_addr());
 //! while let Some(event) = proxy.try_recv() {
 //!     println!("{event:?}");
 //! }
-//! # Ok::<(), perseid_proxy::StartError>(())
+//! # Ok::<(), perseid::proxy::StartError>(())
 //! ```
 
 mod capture;
@@ -104,8 +105,8 @@ use hyper_util::rt::TokioExecutor;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 
-use crate::policy::PolicySnapshot;
-use crate::util::ProxyBody;
+use crate::proxy::policy::PolicySnapshot;
+use crate::proxy::util::ProxyBody;
 
 /// Failure to start the proxy itself (the listener, not individual requests).
 #[derive(Debug, thiserror::Error)]

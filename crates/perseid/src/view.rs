@@ -6,8 +6,8 @@ use egui::Color32;
 
 use crate::decode::{self, DecodeError};
 use crate::history::HistoryItem;
+use crate::proxy::CapturedBody;
 use crate::{pretty, theme};
-use perseid_proxy::CapturedBody;
 
 /// Maximum body bytes rendered as text.
 pub const TEXT_PREVIEW_LIMIT: usize = 256 * 1024;
@@ -590,7 +590,7 @@ mod tests {
     }
 
     fn item_with_bodies(request: Vec<u8>, response: Vec<u8>) -> HistoryItem {
-        use perseid_proxy::{ExchangeResult, RequestInfo, ResponseHead};
+        use crate::proxy::{ExchangeResult, RequestInfo, ResponseHead};
 
         HistoryItem {
             id: 1,
