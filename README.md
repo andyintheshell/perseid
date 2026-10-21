@@ -117,6 +117,7 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 | [Roadmap](docs/roadmap.md) | Milestones from prototype to Community parity |
 | [Burp Community parity](docs/burp-parity.md) | Definition of parity, capability matrix, deviations |
 | [Safety and privacy](docs/safety.md) | Authorized use, data handling, CA trust |
+| [Security policy](SECURITY.md) | Supported versions, private vulnerability reporting, response expectations |
 | [Contributing](CONTRIBUTING.md) | Development setup, checks, project layout |
 
 ## Contributing

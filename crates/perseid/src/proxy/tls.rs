@@ -299,8 +299,14 @@ pub fn upstream_client_config(
     let mut roots = rustls::RootCertStore::empty();
 
     let native = rustls_native_certs::load_native_certs();
-    for error in &native.errors {
-        warn!("could not load a platform root certificate: {error}");
+    if !native.errors.is_empty() {
+        // Log only the count. The error details are not needed for normal
+        // operation, and keeping them out of the log avoids treating
+        // certificate-store diagnostics as sensitive or machine-specific.
+        warn!(
+            "could not load {} platform root certificate(s); continuing with the rest",
+            native.errors.len()
+        );
     }
     for cert in native.certs {
         if let Err(err) = roots.add(cert) {

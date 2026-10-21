@@ -26,6 +26,33 @@ cargo run -p perseid --locked
 cargo test --workspace --locked
 ```
 
+The `dev` and `release` profiles set `debug = 0` so build artifacts and linker
+memory stay small on constrained machines. `test` inherits `dev`, and `bench`
+inherits `release`. This removes compiler debug info only; it does not change
+runtime behavior or disable `debug_assertions`. When you need source-level
+debugging, enable it for a single build without editing the manifest:
+
+```sh
+CARGO_PROFILE_DEV_DEBUG=2 cargo build
+CARGO_PROFILE_TEST_DEBUG=2 cargo test --workspace --locked
+```
+
+Use `line-tables-only` instead of `2` for a smaller middle ground that still
+supports line-level stepping.
+
+Cargo is limited to two parallel build jobs by the repository's
+`.cargo/config.toml`. This keeps peak rustc and linker memory bounded on small
+VMs. Override it for a faster build on a machine with more headroom, or reduce
+it further if the machine still struggles:
+
+```sh
+CARGO_BUILD_JOBS=4 cargo build
+CARGO_BUILD_JOBS=1 cargo test --workspace --locked
+```
+
+CI sets `CARGO_BUILD_JOBS=4` because GitHub's runners have enough memory for
+the full job count.
+
 The `perseid` crate includes a headless proxy example for manual smoke tests:
 
 ```sh
@@ -87,7 +114,9 @@ existing `target/debug/perseid`.
 The screenshots contain synthetic demo traffic, never captured traffic. The
 separate [Screenshots workflow](.github/workflows/screenshots.yml) runs the
 same script on UI changes, verifies the PNGs, uploads them as artifacts, and
-publishes an inline preview.
+publishes an inline preview. The pull-request workflow always starts and uses a
+small change-detection job to skip the screenshot build when no relevant paths
+changed. That keeps a skipped run from leaving a required check pending.
 
 ## Project layout
 

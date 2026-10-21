@@ -5,6 +5,7 @@
 //! the user how to trust — and remove — them. See `docs/tls.md`.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -122,21 +123,61 @@ pub fn generate(dir: &Path) -> Result<Arc<CertificateAuthority>, String> {
     let ca = CertificateAuthority::generate()
         .map_err(|err| format!("could not generate a certificate authority: {err}"))?;
     fs::create_dir_all(dir).map_err(|err| format!("could not create {}: {err}", dir.display()))?;
-    set_mode(dir, 0o700);
+    set_mode(dir, 0o700)
+        .map_err(|err| format!("could not restrict permissions on {}: {err}", dir.display()))?;
     let key = key_path(dir);
     let cert = cert_path(dir);
-    if let Err(err) = fs::write(&key, ca.key_pem()) {
-        return Err(format!("could not write {}: {err}", key.display()));
-    }
-    set_mode(&key, 0o600);
-    if let Err(err) = fs::write(&cert, ca.cert_pem()) {
+    if let Err(err) = write_file(&key, &ca.key_pem(), 0o600) {
         // Do not leave a private key without its certificate behind; the next
         // launch would otherwise treat the pair as corrupt.
         let _ = fs::remove_file(&key);
-        return Err(format!("could not write {}: {err}", cert.display()));
+        return Err(err);
     }
-    set_mode(&cert, 0o644);
+    if let Err(err) = write_file(&cert, ca.cert_pem(), 0o644) {
+        // Do not leave a private key without its certificate behind; the next
+        // launch would otherwise treat the pair as corrupt.
+        let _ = fs::remove_file(&key);
+        return Err(err);
+    }
     Ok(Arc::new(ca))
+}
+
+/// Write a CA file with its final permissions from the start.
+///
+/// `OpenOptionsExt::mode` applies when the file is created, so a new private
+/// key is never briefly readable by other local users. For an existing file
+/// (regeneration), permissions are corrected on the open handle before the
+/// contents are written. Errors are returned instead of being ignored: a key
+/// that cannot be made owner-only must not be used.
+fn write_file(path: &Path, contents: &str, mode: u32) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|err| format!("could not open {}: {err}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(mode))
+            .map_err(|err| {
+                format!(
+                    "could not restrict permissions on {} to {mode:o}: {err}",
+                    path.display()
+                )
+            })?;
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    file.write_all(contents.as_bytes())
+        .map_err(|err| format!("could not write {}: {err}", path.display()))?;
+    file.sync_all()
+        .map_err(|err| format!("could not sync {}: {err}", path.display()))?;
+    Ok(())
 }
 
 /// Remove the stored CA files, if present.
@@ -151,13 +192,15 @@ pub fn delete(dir: &Path) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) {
+fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) {}
+fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -219,6 +262,22 @@ mod tests {
         assert_eq!(mode(&dir), 0o700);
         assert_eq!(mode(&key_path(&dir)), 0o600);
         assert_eq!(mode(&cert_path(&dir)), 0o644);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regeneration_restores_owner_only_key_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("regenerate-modes");
+        generate(&dir).expect("generate");
+        let key = key_path(&dir);
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).expect("loosen key mode");
+
+        generate(&dir).expect("regenerate");
+
+        let mode = fs::metadata(&key).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         let _ = fs::remove_dir_all(&dir);
     }
 

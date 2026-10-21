@@ -83,5 +83,6 @@ If you believe you found a security issue in Perseid itself, please use a
 private GitHub security advisory:
 [report a vulnerability](https://github.com/andyintheshell/perseid/security/advisories/new).
 
-Please do not open a public issue containing working exploit details or
-captured sensitive traffic.
+See the [security policy](../SECURITY.md) for supported versions, response
+expectations, scope, and safe-harbor terms. Please do not open a public issue
+containing working exploit details or captured sensitive traffic.

@@ -1,0 +1,5 @@
+[build]
+# Keep peak rustc and linker memory bounded on small virtual machines. CI
+# overrides this with CARGO_BUILD_JOBS=4. Use `CARGO_BUILD_JOBS=1` for an even
+# smaller footprint when the machine is already under memory pressure.
+jobs = 2
