@@ -19,7 +19,7 @@ use std::ops::Range;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
-use blake2::digest::VariableOutput;
+use blake2::digest::consts::{U16, U20, U28, U32, U48, U64};
 use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
@@ -633,14 +633,14 @@ fn hash_bytes(algorithm: HashAlgorithm, input: &[u8]) -> Result<Vec<u8>> {
     use HashAlgorithm as H;
 
     let bytes = match algorithm {
-        H::Blake2b160 => blake2b(input, 20)?,
-        H::Blake2b256 => blake2b(input, 32)?,
-        H::Blake2b384 => blake2b(input, 48)?,
-        H::Blake2b512 => blake2b(input, 64)?,
-        H::Blake2s128 => blake2s(input, 16)?,
-        H::Blake2s160 => blake2s(input, 20)?,
-        H::Blake2s224 => blake2s(input, 28)?,
-        H::Blake2s256 => blake2s(input, 32)?,
+        H::Blake2b160 => digest::<blake2::Blake2b<U20>>(input),
+        H::Blake2b256 => digest::<blake2::Blake2b<U32>>(input),
+        H::Blake2b384 => digest::<blake2::Blake2b<U48>>(input),
+        H::Blake2b512 => digest::<blake2::Blake2b<U64>>(input),
+        H::Blake2s128 => digest::<blake2::Blake2s<U16>>(input),
+        H::Blake2s160 => digest::<blake2::Blake2s<U20>>(input),
+        H::Blake2s224 => digest::<blake2::Blake2s<U28>>(input),
+        H::Blake2s256 => digest::<blake2::Blake2s<U32>>(input),
         H::Blake3 => blake3::hash(input).as_bytes().to_vec(),
         H::Keccak224 => digest::<sha3::Keccak224>(input),
         H::Keccak256 => digest::<sha3::Keccak256>(input),
@@ -672,30 +672,6 @@ fn digest<D: digest::Digest + Default>(input: &[u8]) -> Vec<u8> {
     let mut hasher = D::new();
     hasher.update(input);
     hasher.finalize().to_vec()
-}
-
-fn blake2b(input: &[u8], length: usize) -> Result<Vec<u8>> {
-    variable_digest(blake2::Blake2bVar::new(length), input)
-}
-
-fn blake2s(input: &[u8], length: usize) -> Result<Vec<u8>> {
-    variable_digest(blake2::Blake2sVar::new(length), input)
-}
-
-fn variable_digest<D>(
-    hasher: std::result::Result<D, blake2::digest::InvalidOutputSize>,
-    input: &[u8],
-) -> Result<Vec<u8>>
-where
-    D: VariableOutput + blake2::digest::Update,
-{
-    let mut hasher = hasher.map_err(|_| TransformError::new("invalid BLAKE2 output length"))?;
-    hasher.update(input);
-    let mut output = vec![0u8; hasher.output_size()];
-    hasher
-        .finalize_variable(&mut output)
-        .map_err(|_| TransformError::new("could not finalize BLAKE2 digest"))?;
-    Ok(output)
 }
 
 /// Apply smart decoding until no further recognizable layer is found.
@@ -1041,6 +1017,40 @@ mod tests {
             hash_hex(HashAlgorithm::Keccak256, b"abc").unwrap(),
             "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45"
         );
+    }
+
+    #[test]
+    fn blake2_variable_lengths_match_known_vectors() {
+        let vectors = [
+            (
+                HashAlgorithm::Blake2b160,
+                "384264f676f39536840523f284921cdc68b6846b",
+            ),
+            (
+                HashAlgorithm::Blake2b256,
+                "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319",
+            ),
+            (
+                HashAlgorithm::Blake2b384,
+                "6f56a82c8e7ef526dfe182eb5212f7db9df1317e57815dbda46083fc30f54ee6c66ba83be64b302d7cba6ce15bb556f4",
+            ),
+            (
+                HashAlgorithm::Blake2s128,
+                "aa4938119b1dc7b87cbad0ffd200d0ae",
+            ),
+            (
+                HashAlgorithm::Blake2s160,
+                "5ae3b99be29b01834c3b508521ede60438f8de17",
+            ),
+            (
+                HashAlgorithm::Blake2s224,
+                "0b033fc226df7abde29f67a05d3dc62cf271ef3dfea4d387407fbd55",
+            ),
+        ];
+
+        for (algorithm, expected) in vectors {
+            assert_eq!(hash_hex(algorithm, b"abc").unwrap(), expected);
+        }
     }
 
     #[test]
