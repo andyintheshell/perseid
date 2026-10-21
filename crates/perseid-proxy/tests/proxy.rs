@@ -1432,6 +1432,7 @@ struct CapturedH2Request {
     version: Version,
     method: Method,
     uri: Uri,
+    headers: HeaderMap,
     body: Vec<u8>,
 }
 
@@ -1474,6 +1475,7 @@ async fn spawn_h2_tls_origin(
                             version: parts.version,
                             method: parts.method,
                             uri: parts.uri,
+                            headers: parts.headers,
                             body: request_body,
                         });
                         Ok::<_, Infallible>(
@@ -2007,6 +2009,16 @@ async fn forwards_https_requests_over_an_h2_upstream() {
     assert_eq!(upstream.version, Version::HTTP_2);
     assert_eq!(upstream.method, Method::GET);
     assert_eq!(upstream.uri.path(), "/up");
+    let expected_authority = origin.to_string();
+    assert_eq!(
+        upstream.uri.authority().map(|authority| authority.as_str()),
+        Some(expected_authority.as_str())
+    );
+    assert!(
+        upstream.headers.get("host").is_none(),
+        "HTTP/2 upstream request must use :authority, not Host: {:?}",
+        upstream.headers
+    );
     assert_eq!(upstream.body, b"");
 
     let events = drain_until_finished(&proxy);
