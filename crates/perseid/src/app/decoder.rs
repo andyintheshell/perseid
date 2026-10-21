@@ -10,7 +10,8 @@
 
 use std::ops::Range;
 
-use egui::text::LayoutJob;
+use egui::text::{CCursor, CCursorRange, LayoutJob};
+use egui::text_edit::TextEditState;
 use egui::{
     Align, Color32, FontId, Label, Layout, RichText, Stroke, TextEdit, TextFormat, TextStyle,
 };
@@ -258,6 +259,7 @@ struct Panel {
     operation: Option<engine::Transform>,
     view: ViewMode,
     selection: Option<Range<usize>>,
+    context_menu_open: bool,
     error: Option<String>,
     notice: Option<String>,
 }
@@ -285,6 +287,7 @@ impl Panel {
             operation,
             view,
             selection: None,
+            context_menu_open: false,
             error: None,
             notice: None,
         }
@@ -379,7 +382,11 @@ fn draw_editor(ui: &mut egui::Ui, panel: &mut Panel) -> bool {
     let mut edited = false;
     let mut editor_focused = false;
     let mut focused_selection = None;
-    egui::Frame::NONE
+    let menu_was_open = panel.context_menu_open;
+    let secondary_pressed =
+        ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary));
+    let editor_id = panel.editor_id();
+    let frame = egui::Frame::NONE
         .fill(Color32::WHITE)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(4.0)
@@ -394,7 +401,6 @@ fn draw_editor(ui: &mut egui::Ui, panel: &mut Panel) -> bool {
                         .max_height(EDITOR_HEIGHT)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            let editor_id = panel.editor_id();
                             let Panel { text, spans, .. } = panel;
                             let mut layouter =
                                 |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
@@ -425,10 +431,98 @@ fn draw_editor(ui: &mut egui::Ui, panel: &mut Panel) -> bool {
                 ViewMode::Hex => hex_view(ui, panel),
             }
         });
+    // A secondary click collapses the editor's selection but should still make
+    // the selection available to the context menu. Keep the last non-empty
+    // selection until the menu closes.
+    let preserve_selection =
+        menu_was_open || (secondary_pressed && frame.response.contains_pointer());
     if editor_focused {
-        panel.selection = focused_selection;
+        if focused_selection.is_some() {
+            panel.selection = focused_selection;
+        } else if !preserve_selection {
+            panel.selection = None;
+        }
     }
+
+    let context_menu = if panel.view == ViewMode::Text {
+        frame.response.container_context_menu(|ui| {
+            let selected = panel
+                .selection
+                .clone()
+                .and_then(|selection| panel.text.get(selection))
+                .map(str::to_owned);
+            let has_selection = selected.is_some();
+            if ui
+                .add_enabled(has_selection, egui::Button::new("Cut"))
+                .clicked()
+            {
+                focus_editor_with_selection(ui.ctx(), editor_id, panel);
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestCut);
+                ui.close();
+            }
+            if ui
+                .add_enabled(has_selection, egui::Button::new("Copy"))
+                .clicked()
+                && let Some(selected) = selected.as_deref()
+            {
+                ui.ctx().copy_text(selected.to_owned());
+                ui.close();
+            }
+            if ui.button("Paste").clicked() {
+                focus_editor_with_selection(ui.ctx(), editor_id, panel);
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("Select all").clicked() {
+                set_editor_selection(
+                    ui.ctx(),
+                    editor_id,
+                    Some(CCursorRange::select_all_str(&panel.text)),
+                );
+                panel.selection = Some(0..panel.text.len());
+                ui.close();
+            }
+        })
+    } else {
+        frame.response.container_context_menu(|ui| {
+            if ui.button("Copy hex").clicked() {
+                ui.ctx().copy_text(panel.copy_value());
+                ui.close();
+            }
+        })
+    };
+    panel.context_menu_open = context_menu.is_some();
+
     edited
+}
+
+/// Convert a byte range in `text` to the character range used by egui.
+fn char_range_for_selection(text: &str, selection: &Range<usize>) -> Option<CCursorRange> {
+    text.get(selection.clone())?;
+    let start = text[..selection.start].chars().count();
+    let end = text[..selection.end].chars().count();
+    Some(CCursorRange::two(CCursor::new(start), CCursor::new(end)))
+}
+
+fn focus_editor_with_selection(ctx: &egui::Context, editor_id: egui::Id, panel: &Panel) {
+    if let Some(selection) = panel
+        .selection
+        .as_ref()
+        .and_then(|selection| char_range_for_selection(&panel.text, selection))
+    {
+        set_editor_selection(ctx, editor_id, Some(selection));
+    }
+    ctx.memory_mut(|memory| memory.request_focus(editor_id));
+}
+
+fn set_editor_selection(ctx: &egui::Context, editor_id: egui::Id, range: Option<CCursorRange>) {
+    let mut state = TextEditState::load(ctx, editor_id).unwrap_or_default();
+    state.cursor.set_char_range(range);
+    state.store(ctx, editor_id);
+    ctx.memory_mut(|memory| memory.request_focus(editor_id));
 }
 
 fn draw_controls(ui: &mut egui::Ui, panel: &mut Panel, index: usize) -> Option<Action> {
@@ -912,6 +1006,14 @@ mod tests {
         assert_eq!(char_range_to_byte_range(text, 2, 3), Some(3..6));
         assert_eq!(char_range_to_byte_range(text, 3, 4), Some(6..7));
         assert_eq!(char_range_to_byte_range(text, 2, 2), None);
+    }
+
+    #[test]
+    fn context_selection_uses_character_offsets() {
+        let range = char_range_for_selection("héllo", &(1..3)).expect("valid selection");
+        let range = range.as_sorted_char_range();
+        assert_eq!((range.start.0, range.end.0), (1, 2));
+        assert!(char_range_for_selection("héllo", &(0..2)).is_none());
     }
 
     #[test]

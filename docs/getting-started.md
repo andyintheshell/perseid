@@ -167,7 +167,9 @@ Decoder is the local transformation workspace. Open it with **Decoder** or
 operation. Every operation adds a new editable panel below the source; the
 operation's color and name appear as a chip on the result. Applying another
 operation to an earlier panel replaces the panels downstream, so the visible
-chain always matches the operations that produced it.
+chain always matches the operations that produced it. Paste with `Ctrl`+`V`
+(`Cmd`+`V` on macOS) or right-click the text area for **Cut**, **Copy**,
+**Paste**, and **Select all**.
 
 Each panel has **Text** and **Hex** views. Text is editable monospace content.
 Hex is a read-only byte dump with the same operation colors. When a result is
