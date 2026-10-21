@@ -12,18 +12,14 @@ on:
       - "scripts/screenshots.sh"
       - "scripts/check_screenshots.py"
       - ".github/workflows/screenshots.yml"
+  # Do not path-filter pull requests at the workflow level. A workflow-level
+  # skip leaves its checks pending, which blocks a PR when that workflow is
+  # required. Detect relevant changes in a job instead; a skipped job completes
+  # successfully.
   pull_request:
-    paths:
-      - "crates/perseid/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "scripts/screenshots.sh"
-      - "scripts/check_screenshots.py"
-      - ".github/workflows/screenshots.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: screenshots-${{ github.ref }}
@@ -31,14 +27,56 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 4
 
 jobs:
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      screenshots: ${{ steps.filter.outputs.screenshots }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+
+      - name: Check changed paths
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "screenshots=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -z "$BASE_SHA" ]]; then
+            echo "pull request base SHA is missing" >&2
+            exit 1
+          fi
+          if git diff --quiet "$BASE_SHA"...HEAD -- \
+            crates/perseid \
+            Cargo.toml \
+            Cargo.lock \
+            rust-toolchain.toml \
+            scripts/screenshots.sh \
+            scripts/check_screenshots.py \
+            .github/workflows/screenshots.yml; then
+            echo "screenshots=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "screenshots=true" >> "$GITHUB_OUTPUT"
+          fi
+
   screenshots:
     name: Generate and verify
+    needs: changes
+    if: needs.changes.outputs.screenshots == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Linux and Xvfb dependencies
         run: |
@@ -60,9 +98,9 @@ jobs:
             libxrandr2 \
             libxi6
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Build with screenshot mode
         run: cargo build -p perseid --features screenshots --locked
@@ -74,7 +112,7 @@ jobs:
         run: python3 scripts/check_screenshots.py artifacts/screenshots
 
       - name: Upload screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: perseid-screenshots
           path: artifacts/screenshots/*.png
@@ -92,11 +130,26 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The shared preview branch is force-pushed so the summary can embed the
-      # images. It is skipped for pull requests from forks, where the token is
-      # read-only; the artifact is still available for those runs.
+  # The shared preview branch is force-pushed so the summary can embed the
+  # images. Keep the write token in a separate job: the build and test steps
+  # above only need contents: read. Fork pull requests still get the artifact;
+  # their read-only token is never asked to push.
+  publish:
+    name: Publish inline preview
+    needs: screenshots
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download screenshots
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: perseid-screenshots
+          path: artifacts/screenshots
+
       - name: Publish inline preview
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -120,5 +173,5 @@ jobs:
             echo
             echo "![Memory usage](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/perseid-memory.png?v=${GITHUB_RUN_ID})"
             echo
-            echo "_This preview branch shows the latest generated run. If the images do not load (for example, in a private repository), use the artifact link above._"
+            echo "_This preview branch shows the latest generated run. If the images do not load (for example, in a private repository), use the screenshots artifact from this run._"
           } >> "$GITHUB_STEP_SUMMARY"

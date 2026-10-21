@@ -79,3 +79,13 @@ tokio = { version = "1", features = [
     "sync",
     "time",
 ] }
+
+# Keep build artifacts and linker memory small on resource-constrained machines.
+# `test` inherits `dev` and `bench` inherits `release`. To debug a one-off build
+# with full debug info, override the profile setting from the environment, e.g.
+# `CARGO_PROFILE_DEV_DEBUG=2 cargo build` or `CARGO_PROFILE_TEST_DEBUG=2 cargo test`.
+[profile.dev]
+debug = 0
+
+[profile.release]
+debug = 0
