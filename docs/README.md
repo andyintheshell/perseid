@@ -11,7 +11,7 @@ in the roadmap is not necessarily available in the application.
 
 1. [Install the prerequisites and capture a local request](getting-started.md).
 2. [Configure HTTPS trust in a testing browser](tls.md).
-3. [Learn the capture → intercept → replay → decode workflow](workbench.md).
+3. [Learn the capture → intercept → replay → decode → compare workflow](workbench.md).
 4. [Check the safety and data-retention defaults](safety.md).
 
 You do not need to trust a CA to try plain HTTP. Keep the proxy on loopback and
@@ -22,7 +22,7 @@ use a local lab or another target you are explicitly authorized to test.
 | Guide | What it answers |
 | --- | --- |
 | [Getting started](getting-started.md) | Which platforms and dependencies? How do I build, run, and configure the app? |
-| [Workbench](workbench.md) | How do Target, Proxy, Intruder, Repeater, and Decoder work? What are the shortcuts and limits? |
+| [Workbench](workbench.md) | How do Target, Proxy, Intruder, Repeater, Decoder, and Comparer work? What are the shortcuts and limits? |
 | [HTTPS interception](tls.md) | Where is the CA? How do I install or remove trust and configure pass-through hosts? |
 | [Troubleshooting](troubleshooting.md) | Why is traffic missing, held, rejected, or failing TLS? What should go in a bug report? |
 | [Safety and privacy](safety.md) | What is retained? What does scope enforce? What happens to credentials and CA keys? |

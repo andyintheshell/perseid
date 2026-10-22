@@ -30,9 +30,9 @@ Source: [Burp Suite Community Edition](https://portswigger.net/burp/communitydow
 (checked October 2026).
 
 The workspace deliberately follows Burp's tool order: **Target**, **Proxy**,
-**Intruder**, **Repeater**, and **Decoder**. Familiar navigation is part of the
-goal; reproducing every control before its engine exists is not. Comparer and
-Sequencer remain planned and are not presented as working tools.
+**Intruder**, **Repeater**, **Decoder**, and **Comparer**. Familiar navigation is
+part of the goal; reproducing every control before its engine exists is not.
+Sequencer remains planned and is not presented as a working tool.
 
 Parity here means capability, not artificial restrictions. Burp CE rate-limits
 Intruder to encourage upgrades; Perseid does not reproduce that limit. Scope and
@@ -60,7 +60,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | WebSocket proxy and frame history | Yes | No | Planned | M4 |
 | Repeater | Yes | Editable HTTP/HTTPS request tabs seeded from history, target/virtual-host control, direct replay, and Pretty/Raw/Hex responses; no WebSocket replay or saved tabs yet | Partial | M3 (HTTP/HTTPS); WS in M4 |
 | Decoder | Yes | Stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms | Partial | M3 |
-| Comparer | Yes | No | Planned | M3 |
+| Comparer | Yes | One shared item list seeded from history, paste, or file; bounded word/byte diffs; paired Text/Hex panes, difference navigation, and synchronized scrolling; in-memory only | Working | M3 |
 | Sequencer | Yes | No | Planned | M4 |
 | Intruder-style request fuzzing | Yes (rate-limited demo) | Editable `$$` positions, payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests, and Pretty/Raw/Hex results; one attack at a time, no payload processing or saved attacks | Working | M4 (landed early) |
 | Extension support | BApps | No | Deviation | Post-parity |
@@ -134,6 +134,18 @@ action from message editors, and persistence of the panel chain. Hex panels are
 read-only and preview at most 64 KiB, while Copy exports all retained bytes;
 each transform is capped at 8 MiB of input and 16 MiB of output.
 
+Comparer follows Burp's two-item model. Both selection tables show the same
+shared item list, so a message added once can be compared against any other
+row. Items can be sent from the Proxy history context menu (request to item 1,
+response to item 2), pasted from the clipboard, or loaded from a file. Word mode
+tokenizes ASCII whitespace and compares those tokens; byte mode compares the raw
+bytes. The result window offers independent Text/Hex views, modified/deleted/
+added highlighting, previous/next difference navigation, and optional
+synchronized scrolling. Comparisons are bounded: up to 200 in-memory items of
+8 MiB each, 2 MiB and 250,000 words per item for word mode, 512 KiB per item for
+byte mode, and a 500 ms diff deadline. Items, open results, and view settings
+are not persisted.
+
 Burp Suite's status bar exposes a memory figure. Perseid's equivalent is
 allocator heap in use, with the peak and a rolling graph in the memory window;
 it is available on every platform. RSS and its anonymous/file-backed split are
@@ -178,7 +190,7 @@ or are explicitly authorized to test.
 | --- | --- |
 | **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete.)* |
 | **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. *(Complete.)* |
-| **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. |
+| **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. *(Repeater, Decoder, and Comparer are complete; persistence remains.)* |
 | **M4 — Protocols and testing tools** | WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. HTTP/2 and Intruder landed ahead of this milestone. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |
 

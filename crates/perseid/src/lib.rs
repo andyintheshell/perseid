@@ -6,6 +6,7 @@
 mod app;
 mod branding;
 mod ca_store;
+mod comparer;
 mod decode;
 mod decoder;
 mod highlight;

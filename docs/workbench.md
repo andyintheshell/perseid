@@ -16,6 +16,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
+| **Comparer** | Word- or byte-level diffs between any two requests, responses, or loaded messages. |
 
 See the [screenshot gallery](screenshots.md) for each tab. The app opens on
 **Proxy > HTTP history**.
@@ -55,7 +56,8 @@ HTTPS. The [local walkthrough](getting-started.md#try-it-with-a-local-target)
 is a quick way to verify the path without a browser or CA trust.
 
 - **HTTP history** has one row per HTTP exchange, including decrypted HTTPS.
-  `CONNECT` transport tunnels do not get their own rows.
+  `CONNECT` transport tunnels do not get their own rows. Right-click a row to
+  send its request or response to Repeater, Intruder, or Comparer.
 - The text filter matches method, host, path, URI, and status—not response-body
   contents. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
@@ -146,8 +148,9 @@ HTTP/HTTPS client as Repeater, so an attack works with the proxy stopped or in
 `--no-proxy` mode. It does **not** pass through interception, match/replace, or
 Proxy history.
 
-1. Select a history exchange and choose **Send to Intruder**, or open Intruder
-   and paste or edit a raw request. Review the **Target** scheme and host.
+1. Right-click a history exchange and choose **Send to Intruder**, or open
+   Intruder and paste or edit a raw request. Review the **Target** scheme and
+   host.
 2. Wrap each value to fuzz in `$$`, for example
    `GET /product?id=$$1$$ HTTP/1.1`. Select text and click **Add $$** to wrap it,
    or place the cursor and use **Add $$** for an empty position (`$$$$`).
@@ -196,8 +199,8 @@ as the rest of the app. Results are not saved between launches.
 
 ## Repeater
 
-1. Select a history exchange and choose **Send to Repeater**, or open Repeater
-   and use `+` for a blank tab.
+1. Right-click a history exchange and choose **Send to Repeater**, or open
+   Repeater and use `+` for a blank tab.
 2. Review the **Target** scheme/host, raw request head, and body.
 3. Change one thing and click **Send**, or press `Ctrl`+`Enter` (`Cmd`+`Enter`
    on macOS).
@@ -292,13 +295,43 @@ Manual encode/decode/hash transforms accept at most 8 MiB of input and produce
 at most 16 MiB of output, including preserved selection prefixes/suffixes. There
 is no **Send to Decoder** action from message editors yet, and chains are not saved.
 
+## Comparer
+
+Comparer finds small changes between two messages. It uses one shared item
+collection: both **Select item 1** and **Select item 2** show the same rows, so
+select a different row in each table to choose the pair.
+
+- Right-click a history row and choose **Send request to Comparer** to add the
+  request as item 1, or **Send response to Comparer** to add the response as
+  item 2. The item is appended to the shared collection and selected in that
+  table.
+- **Paste** reads text from the clipboard; **Load** opens an in-app path dialog
+  that also accepts a dropped file. **Remove** deletes the item selected in the
+  table you last clicked, and **Clear** empties the collection.
+- Choose **Words** or **Bytes** under **Compare selected**. Word mode tokenizes
+  on ASCII whitespace and highlights changed tokens. Byte mode compares raw
+  bytes; it is useful when whitespace or encoding differences matter.
+
+The result window has a Text/Hex choice for each pane, Previous/Next difference
+buttons, length labels, and a color key for modified, deleted, and added data.
+Tick **Sync views** to mirror vertical scrolling and wheel input, or use the
+**Sync** button in either pane header. Text is a display-safe rendering of the
+bytes: control and invalid bytes appear as `·`, CRLF is shown as LF, and the
+panes are virtualized by line rather than laid out as one large document.
+
+Comparer keeps up to **200 items** of **8 MiB each** in memory. A word compare
+accepts up to **2 MiB and 250,000 words per item**; a byte compare accepts up to
+**512 KiB per item** because Myers' algorithm is more expensive on bytes.
+Oversized inputs are rejected with a message, and both modes give the diff
+algorithm a 500 ms deadline. Items and results are not saved between launches.
+
 ## Keyboard shortcuts
 
 Use `Cmd` in place of `Ctrl` on macOS unless noted.
 
 | Action | Shortcut |
 | --- | --- |
-| Target / Proxy / Intruder / Repeater / Decoder | `Ctrl`+`Shift`+`T` / `P` / `I` / `R` / `D` |
+| Target / Proxy / Intruder / Repeater / Decoder / Comparer | `Ctrl`+`Shift`+`T` / `P` / `I` / `R` / `D` / `C` |
 | Focus the history filter | `Ctrl`+`F` |
 | Leave the filter | `Esc` |
 | Move through history, when not editing text | `j` / `k` or up/down arrows |
@@ -320,8 +353,9 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Repeater request/head size | 8 MiB of retained request buffers; 64 KiB heads. The response capture limit must also fit the pending-work budget. |
 | Intruder work | Up to 32 simultaneous requests and one attack at a time; the engine queues up to 64 unread results or 64 MiB. |
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
-| Saved state | No persisted history, Intruder results, Repeater tabs, Decoder chains, scope, or rewrite rules. The local CA is persisted. |
-| Missing tools/protocols | No Comparer, Sequencer, WebSocket tooling, or HTTP/3/QUIC support. |
+| Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
+| Saved state | No persisted history, Intruder results, Repeater tabs, Decoder chains, Comparer items, scope, or rewrite rules. The local CA is persisted. |
+| Missing tools/protocols | No Sequencer, WebSocket tooling, or HTTP/3/QUIC support. |
 
 See [CLI options](getting-started.md#options) to change retention limits and
 [Safety and privacy](safety.md) for the data-handling implications. Larger

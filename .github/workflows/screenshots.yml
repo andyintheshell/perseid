@@ -178,6 +178,8 @@ jobs:
             [perseid-intruder.png]="Intruder"
             [perseid-repeater.png]="Repeater"
             [perseid-decoder.png]="Decoder"
+            [perseid-comparer.png]="Comparer"
+            [perseid-comparer-result.png]="Comparer - Result"
             [perseid-memory.png]="Memory usage"
           )
           order=(
@@ -190,6 +192,8 @@ jobs:
             perseid-intruder.png
             perseid-repeater.png
             perseid-decoder.png
+            perseid-comparer.png
+            perseid-comparer-result.png
             perseid-memory.png
           )
 
