@@ -1,10 +1,11 @@
-//! Intercepted-message table and raw message editor.
+//! Intercepted-message table and message editor.
 //!
 //! Burp holds intercepted messages in a list rather than showing only the
 //! front of a queue. The table keeps every waiting message visible, supports
 //! Burp-style single, range, and toggle selection, and edits the most recently
 //! selected message below it. Each entry keeps its own draft so switching rows
-//! never discards edits that have not been forwarded yet.
+//! never discards edits that have not been forwarded yet. Text bodies are
+//! editable in both Pretty and Raw, with edits synchronized between views.
 
 use std::collections::BTreeSet;
 
@@ -47,9 +48,18 @@ pub(super) struct InterceptDraft {
     pub view: MessageView,
     /// Complete Raw buffer, including the body when it is editable.
     pub raw: String,
-    /// Read-only Pretty/Hex representations rebuilt after Raw edits.
+    /// Complete Pretty buffer for an editable text body.
+    pub pretty: String,
+    /// Body portion of [`InterceptDraft::pretty`] when it was last generated.
+    /// Comparing it on an edit avoids rewriting the body when only a header
+    /// changed in the Pretty tab.
+    pretty_body_baseline: String,
+    /// Read-only Pretty/Hex representations rebuilt after edits. Pretty is
+    /// only read from here when the body itself is not editable.
     pub views: MessageViews,
     pub views_dirty: bool,
+    /// A Raw edit invalidated [`InterceptDraft::pretty`].
+    pub pretty_dirty: bool,
     pub error: Option<String>,
 }
 
@@ -69,6 +79,12 @@ impl InterceptDraft {
             head.clone()
         };
         let views = view::editor_views(&head, body.unwrap_or_default());
+        let pretty = if body_editable {
+            view::editor_pretty(&head, body.unwrap_or_default())
+        } else {
+            views.pretty.clone()
+        };
+        let pretty_body_baseline = normalized_pretty_body(&pretty);
 
         Self {
             head,
@@ -76,8 +92,11 @@ impl InterceptDraft {
             body_editable,
             view: MessageView::Pretty,
             raw,
+            pretty,
+            pretty_body_baseline,
             views,
             views_dirty: false,
+            pretty_dirty: false,
             error: None,
         }
     }
@@ -87,18 +106,46 @@ impl InterceptDraft {
     /// so typing in a large body does not reformat it on every keystroke.
     fn sync_from_raw(&mut self) {
         let normalized = self.raw.replace("\r\n", "\n");
-        if let Some(index) = normalized.find("\n\n") {
-            self.head = normalized[..index + 2].to_string();
-            self.body = normalized[index + 2..].to_string();
-        } else {
-            self.head = normalized;
-            self.body.clear();
-        }
+        let (head, body) = split_editor_message(&normalized);
+        self.head = head.to_string();
+        self.body = body.to_string();
         self.views_dirty = true;
+        self.pretty_dirty = self.body_editable;
         self.error = None;
     }
 
-    /// Rebuild the bounded Pretty/Hex previews after a Raw edit.
+    /// Split an edited Pretty message back into the head and body that
+    /// forwarding expects. The Raw buffer follows immediately so switching
+    /// tabs never loses the edit; bounded Hex formatting stays deferred.
+    fn sync_from_pretty(&mut self) {
+        let normalized = self.pretty.replace("\r\n", "\n");
+        let (head, body) = split_editor_message(&normalized);
+        self.head = head.to_string();
+        if body != self.pretty_body_baseline {
+            self.body = body.to_string();
+            self.pretty_body_baseline = body.to_string();
+        }
+        self.raw = if self.body_editable {
+            format!("{}{}", self.head, self.body)
+        } else {
+            self.head.clone()
+        };
+        self.views_dirty = true;
+        self.pretty_dirty = false;
+        self.error = None;
+    }
+
+    /// Rebuild the complete editable Pretty buffer after a Raw edit.
+    fn refresh_pretty(&mut self) {
+        if !self.pretty_dirty {
+            return;
+        }
+        self.pretty = view::editor_pretty(&self.head, self.body.as_bytes());
+        self.pretty_body_baseline = normalized_pretty_body(&self.pretty);
+        self.pretty_dirty = false;
+    }
+
+    /// Rebuild the bounded Pretty/Hex previews after an edit.
     fn refresh_views(&mut self, binary_body: &[u8]) {
         if !self.views_dirty {
             return;
@@ -648,10 +695,11 @@ impl PerseidApp {
                 }
                 let (body_status, body_color) = if body_buffered {
                     let size = view::human_bytes(body_len as u64);
-                    if body_is_text && draft.view == MessageView::Raw {
+                    if body_is_text && matches!(draft.view, MessageView::Pretty | MessageView::Raw)
+                    {
                         (format!("{size} · editable"), theme::TEXT_MUTED)
                     } else if body_is_text {
-                        (format!("{size} · edit in Raw"), theme::TEXT_MUTED)
+                        (format!("{size} · edit in Pretty or Raw"), theme::TEXT_MUTED)
                     } else {
                         (
                             format!("{size} · binary body, read-only (see Hex)"),
@@ -674,15 +722,36 @@ impl PerseidApp {
         ui.add_space(1.0);
 
         let mode = draft.view;
-        if mode == MessageView::Raw {
-            if message_editor(ui, id, pane, mode, &mut draft.raw) {
-                draft.sync_from_raw();
+        match mode {
+            MessageView::Raw => {
+                if message_editor(ui, id, pane, mode, &mut draft.raw) {
+                    draft.sync_from_raw();
+                }
             }
-        } else {
-            draft.refresh_views(item.body().unwrap_or_default());
-            message_text(ui, id, pane, mode, message_view_text(&draft.views, mode));
+            MessageView::Pretty if draft.body_editable => {
+                draft.refresh_pretty();
+                if message_editor(ui, id, pane, mode, &mut draft.pretty) {
+                    draft.sync_from_pretty();
+                }
+            }
+            MessageView::Pretty | MessageView::Hex => {
+                draft.refresh_views(item.body().unwrap_or_default());
+                message_text(ui, id, pane, mode, message_view_text(&draft.views, mode));
+            }
         }
     }
+}
+
+fn split_editor_message(text: &str) -> (&str, &str) {
+    match text.find("\n\n") {
+        Some(index) => (&text[..index + 2], &text[index + 2..]),
+        None => (text, ""),
+    }
+}
+
+fn normalized_pretty_body(pretty: &str) -> String {
+    let normalized = pretty.replace("\r\n", "\n");
+    split_editor_message(&normalized).1.to_string()
 }
 
 fn head_declares_body(head: &str) -> bool {
@@ -723,8 +792,11 @@ mod tests {
             body_editable: true,
             view: MessageView::Raw,
             raw: raw.to_string(),
+            pretty: view::editor_pretty(head, b"old"),
+            pretty_body_baseline: "old\n".to_string(),
             views: view::editor_views(head, b"old"),
             views_dirty: false,
+            pretty_dirty: false,
             error: Some("stale error".to_string()),
         }
     }
@@ -749,6 +821,55 @@ mod tests {
 
         assert!(!draft.views_dirty);
         assert!(draft.views.raw.contains("new body"));
+    }
+
+    #[test]
+    fn pretty_edits_split_into_head_and_body_and_update_raw() {
+        let mut draft = draft_with_raw("POST /items HTTP/1.1\nHost: example.com\n\nold");
+        draft.pretty =
+            "POST /pretty HTTP/1.1\nHost: example.com\n\n{\n  \"ok\": true\n}".to_string();
+        draft.sync_from_pretty();
+
+        assert_eq!(draft.head, "POST /pretty HTTP/1.1\nHost: example.com\n\n");
+        assert_eq!(draft.body, "{\n  \"ok\": true\n}");
+        assert_eq!(
+            draft.raw,
+            "POST /pretty HTTP/1.1\nHost: example.com\n\n{\n  \"ok\": true\n}"
+        );
+        assert!(draft.views_dirty, "Hex should refresh before it is opened");
+        assert!(!draft.pretty_dirty, "the Pretty buffer is already current");
+        assert!(draft.error.is_none());
+    }
+
+    #[test]
+    fn pretty_header_edits_do_not_reformat_the_forwarded_body() {
+        let mut draft = draft_with_raw("POST /items HTTP/1.1\nHost: example.com\n\nold");
+        draft.pretty = "POST /items HTTP/1.1\nHost: changed.example\n\nold\n".to_string();
+        draft.sync_from_pretty();
+
+        assert_eq!(
+            draft.head,
+            "POST /items HTTP/1.1\nHost: changed.example\n\n"
+        );
+        assert_eq!(draft.body, "old", "the original wire body should be kept");
+        assert_eq!(
+            draft.raw,
+            "POST /items HTTP/1.1\nHost: changed.example\n\nold"
+        );
+    }
+
+    #[test]
+    fn raw_edits_rebuild_the_pretty_buffer_when_it_is_opened() {
+        let mut draft = draft_with_raw(
+            "POST /items HTTP/1.1\nHost: example.com\nContent-Type: application/json\n\n{\"ok\":true}",
+        );
+        draft.sync_from_raw();
+
+        assert!(draft.pretty_dirty);
+        draft.refresh_pretty();
+
+        assert!(!draft.pretty_dirty);
+        assert!(draft.pretty.contains("\"ok\": true"));
     }
 
     #[test]
