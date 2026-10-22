@@ -66,3 +66,21 @@ jobs:
 
       - name: Check packaging
         run: cargo package --workspace --allow-dirty --locked
+
+  # Keep the status-check name required by the repository ruleset. This gate
+  # succeeds only after every parallel platform job has succeeded.
+  required-check:
+    name: Format, lint, test
+    if: always()
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all platform checks
+        env:
+          PLATFORM_CHECKS_RESULT: ${{ needs.checks.result }}
+        run: |
+          if [[ "$PLATFORM_CHECKS_RESULT" != "success" ]]; then
+            echo "Platform checks finished with: $PLATFORM_CHECKS_RESULT" >&2
+            exit 1
+          fi
