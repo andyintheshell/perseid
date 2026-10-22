@@ -7,8 +7,14 @@ callers as `perseid::proxy`.
 ## Requirements
 
 - Rust 1.95.0, as pinned in `rust-toolchain.toml` (edition 2024).
-- A Linux desktop session with OpenGL support (X11 or Wayland).
+- A graphical desktop with OpenGL support to run the UI; on Linux, use X11 or
+  Wayland. The test suite itself runs headlessly.
 - A browser or HTTP client that can be configured to use a proxy.
+
+CI runs formatting, linting, tests, and package checks on Linux, Apple Silicon
+macOS, and Windows. The Linux workflow is the reference for native package
+instructions; the other jobs are cross-platform compile/test checks, not a
+promise of release installers or support for every desktop configuration.
 
 ## Build and run
 

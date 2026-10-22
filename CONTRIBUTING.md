@@ -16,7 +16,14 @@ the easiest to review.
 Requirements:
 
 - Rust 1.95.0 or newer (edition 2024), matching `rust-toolchain.toml` and CI.
-- A Linux desktop session with OpenGL support for the UI.
+- A graphical desktop with OpenGL support to run the UI. CI tests do not open
+  the app window; the screenshot workflow is a separate Linux/Xvfb check.
+
+The required CI workflow runs format, Clippy, tests, and packaging in three
+parallel jobs: Linux, macOS on Apple Silicon, and Windows. Linux installs its
+native UI build dependencies; the other runners use their hosted platform
+toolchains. This is build/test coverage, not a claim that release packaging or
+every desktop environment is supported equally on all platforms.
 
 From the repository root:
 
@@ -50,8 +57,8 @@ CARGO_BUILD_JOBS=4 cargo build
 CARGO_BUILD_JOBS=1 cargo test --workspace --locked
 ```
 
-CI sets `CARGO_BUILD_JOBS=4` because GitHub's runners have enough memory for
-the full job count.
+CI sets `CARGO_BUILD_JOBS=4` on all three runners to keep the same check shape;
+reduce the local job count if your machine has less memory.
 
 The `perseid` crate includes a headless proxy example for manual smoke tests:
 
