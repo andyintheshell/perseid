@@ -8,8 +8,8 @@ toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
 **Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
-milestones are complete. HTTP/HTTPS Intruder, Repeater, and Decoder work, while
-persistent history, richer search, and Comparer remain. HTTP/2 and Intruder
+milestones are complete. HTTP/HTTPS Intruder, Repeater, Decoder, and Comparer
+work, while persistent history and richer search remain. HTTP/2 and Intruder
 arrived ahead of the protocol milestone. This is a sequence of capabilities, not
 a schedule or release promise.
 
@@ -52,13 +52,15 @@ a schedule or release promise.
 - [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
   search, Repeater, Decoder, and response diff (Comparer).
 
-  *Status: in-memory history, basic filtering, editable HTTP/HTTPS Repeater, and
-  Decoder work. Repeater has request tabs, history seeding, target and virtual
-  host control, direct replay, and Pretty/Raw/Hex responses; WebSocket replay
-  and saved tabs are not implemented. Decoder has stacked Text/Hex panels,
-  Burp-compatible encode/decode menus, 31 common hashes, Smart decode, and
-  selection-aware transforms; SKEIN/TupleHash/OID aliases and Send to Decoder
-  are still missing. Persistence and Comparer remain.*
+  *Status: in-memory history, basic filtering, editable HTTP/HTTPS Repeater,
+  Decoder, and Comparer work. Repeater has request tabs, history seeding, target
+  and virtual host control, direct replay, and Pretty/Raw/Hex responses;
+  WebSocket replay and saved tabs are not implemented. Decoder has stacked
+  Text/Hex panels, Burp-compatible encode/decode menus, 31 common hashes, Smart
+  decode, and selection-aware transforms; SKEIN/TupleHash/OID aliases and Send
+  to Decoder are still missing. Comparer has a shared item list, word and byte
+  diffs, paired Text/Hex result panes, difference navigation, and synchronized
+  scrolling, with bounded in-memory items. Persistence remains.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope

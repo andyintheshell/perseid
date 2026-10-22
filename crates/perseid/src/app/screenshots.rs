@@ -20,6 +20,7 @@ use crate::proxy::{
     MatchReplaceRule, ProxyEvent, RequestInfo, ResponseHead, RuleDirection, RulePart,
 };
 
+use super::comparer::ComparerState;
 use super::decoder::DecoderState;
 use super::intercept::InterceptEntry;
 use super::intruder::IntruderState;
@@ -53,6 +54,8 @@ const SCENE_FILES: &[&str] = &[
     "perseid-intruder.png",
     "perseid-repeater.png",
     "perseid-decoder.png",
+    "perseid-comparer.png",
+    "perseid-comparer-result.png",
 ];
 
 const CURL_UA: &str = "curl/8.22.0";
@@ -169,6 +172,11 @@ impl ScreenshotDriver {
                             frames_left: 3,
                         };
                     } else {
+                        // The result window is independent of the tab, so
+                        // reset the scene before capturing the memory window.
+                        if let Err(err) = app.prepare_screenshot_scene(0) {
+                            self.fail(&err);
+                        }
                         crate::memory::reset_peak_for_screenshot();
                         app.memory.seed_presentation_samples();
                         app.memory_open = true;
@@ -289,6 +297,7 @@ impl PerseidApp {
         self.repeater_active = 0;
         self.intruder = IntruderState::new();
         self.decoder = DecoderState::new();
+        self.comparer = ComparerState::new();
 
         match index {
             // Proxy > HTTP history (the README scene).
@@ -375,6 +384,17 @@ impl PerseidApp {
             8 => {
                 self.main_tab = MainTab::Decoder;
                 self.decoder.seed_screenshot();
+            }
+            // Comparer with a request and response selected.
+            9 => {
+                self.main_tab = MainTab::Comparer;
+                self.comparer.seed_screenshot();
+            }
+            // Comparer result window for the same pair.
+            10 => {
+                self.main_tab = MainTab::Comparer;
+                self.comparer.seed_screenshot();
+                self.comparer.open_screenshot_result();
             }
             _ => return Err(format!("unknown screenshot scene {index}")),
         }

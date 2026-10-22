@@ -191,7 +191,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Decoder / encoder | 6 | 9 | **Partial**: local transforms work with stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms. No Send to Decoder, SKEIN/TupleHash/OID aliases, or persisted chains; 8 MiB input / 16 MiB output caps. | Maintain; fill hash gaps in M3 |
 | Authentication and session handling | 7 | 7 | **Partial**: an external browser keeps its own cookies while proxying; Perseid has no cookie jar, login macro, token refresh, per-user context, or session rules. | **P1 — add to M3/M4** |
 | Match/replace rewriting | 8 | Replacer add-on | **Working**: request/response head and buffered UTF-8 body rules, literal or regex, applied after interception. Runtime-only and not persisted. | Maintain |
-| Comparer / diff | 9 | 12 | **Missing**: no two-message diff view. | **P0 — M3** |
+| Comparer / diff | 9 | 12 | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. In-memory only. | Maintain |
 | WebSocket testing | 10 | 11 | **Missing**: WebSocket-specific handling is still planned. | **P1 — M4** |
 | Evidence capture and reporting | 11 | 8 | **Partial**: clipboard copy of a request, response, or selection; no save, export, HAR, curl, or report generation. | **P2 — after parity** |
 | Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: bounded in-memory history plus a metadata substring filter; no SQLite store, body search, annotations, or saved settings. | **P0 — M3** |
@@ -206,10 +206,10 @@ Perseid's current support is documented in the
 
 ### 1. Intruder, Repeater, and Decoder have landed; finish the loop around them
 
-Milestone 3 already lists persistent history, search, Repeater, Decoder, and
-Comparer. The rankings put Repeater first, and editable HTTP/HTTPS replay now
-exists: a request can be seeded from history, edited in its own tab, sent
-directly to the target, and inspected in Pretty/Raw/Hex. Intruder extends that
+Milestone 3 lists persistent history, search, Repeater, Decoder, and Comparer.
+The rankings put Repeater first, and editable HTTP/HTTPS replay now exists: a
+request can be seeded from history, edited in its own tab, sent directly to the
+target, and inspected in Pretty/Raw/Hex. Intruder extends that
 workflow with marked positions and payload attacks, including all four attack
 types and bounded concurrency. Decoder provides the matching local
 transformation surface: stacked panels for URL, HTML, Base64, ASCII hex,
@@ -219,9 +219,10 @@ product stopped after capture or forced payload edits into an external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
 persistent, searchable history keeps replay material across launches; a Send to
-Decoder action would connect transformation directly to the edit step;
-Comparer closes the "change one thing and compare" loop. WebSocket Repeater and
-saved tabs belong with the M4 protocol and persistence work.
+Decoder action would connect transformation directly to the edit step. Comparer
+now closes the "change one thing and compare" loop with a shared item list and
+paired diff views. WebSocket Repeater and saved tabs belong with the M4 protocol
+and persistence work.
 
 ### 2. Add a small session-handling slice
 
@@ -281,8 +282,8 @@ signals would be:
 - **User interviews or opt-in local telemetry** showing whether Perseid users
   spend most of their time browsing, replaying, fuzzing, or exporting.
 - **Authentication blockers** reported during Repeater testing. If auth is the
-  first thing users hit, the session slice moves ahead of Comparer and the
-  remaining Decoder gaps.
+  first thing users hit, the session slice moves ahead of further Comparer
+  polish and the remaining Decoder gaps.
 - **Target mix.** WebSocket-heavy applications would move WebSocket testing up;
   API-heavy work would move import/export and automation up.
 - **Audience mix.** If Perseid attracts CI/AppSec engineers rather than manual

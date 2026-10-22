@@ -1,17 +1,19 @@
 //! The egui application: a Burp-style workspace over the captured traffic.
 //!
 //! The navigation intentionally mirrors the tools Burp users already know:
-//! Target, Proxy, Intruder, Repeater, and Decoder. Proxy history, editable
-//! interception, the Target site map, scope enforcement, match/replace rules,
-//! the direct Repeater, Intruder's payload attacks, and Decoder's
-//! encode/decode/hash chain are live.
+//! Target, Proxy, Intruder, Repeater, Decoder, and Comparer. Proxy history,
+//! editable interception, the Target site map, scope enforcement,
+//! match/replace rules, the direct Repeater, Intruder's payload attacks,
+//! Decoder's encode/decode/hash chain, and Comparer's word/byte diffs are
+//! live.
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
-//! [`decoder`], [`intercept`], [`intruder`], [`proxy`], [`repeater`], [`rules`],
-//! [`target`], [`windows`], [`widgets`], [`message_view`], [`util`], and
-//! [`scale`].
+//! [`comparer`], [`decoder`], [`intercept`], [`intruder`], [`proxy`],
+//! [`repeater`], [`rules`], [`target`], [`windows`], [`widgets`],
+//! [`message_view`], [`util`], and [`scale`].
 
+mod comparer;
 mod decoder;
 mod intercept;
 mod intruder;
@@ -96,6 +98,10 @@ const TAB_DECODER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::D,
 );
+const TAB_COMPARER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    Key::C,
+);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum MainTab {
@@ -105,16 +111,18 @@ enum MainTab {
     Intruder,
     Repeater,
     Decoder,
+    Comparer,
 }
 
 impl MainTab {
     /// Burp's tool order, so muscle memory carries over.
-    const ALL: [(Self, &'static str); 5] = [
+    const ALL: [(Self, &'static str); 6] = [
         (Self::Target, "Target"),
         (Self::Proxy, "Proxy"),
         (Self::Intruder, "Intruder"),
         (Self::Repeater, "Repeater"),
         (Self::Decoder, "Decoder"),
+        (Self::Comparer, "Comparer"),
     ];
 }
 
@@ -199,6 +207,7 @@ pub struct PerseidApp {
     intruder_engine: Option<Intruder>,
     intruder: intruder::IntruderState,
     decoder: decoder::DecoderState,
+    comparer: comparer::ComparerState,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
     scope_enabled: bool,
@@ -420,6 +429,7 @@ impl PerseidApp {
             intruder_engine: None,
             intruder: intruder::IntruderState::new(),
             decoder: decoder::DecoderState::new(),
+            comparer: comparer::ComparerState::new(),
             site_map: None,
             scope: BTreeSet::new(),
             scope_enabled: false,
@@ -721,13 +731,14 @@ impl PerseidApp {
     fn keyboard(&mut self, ctx: &egui::Context) {
         self.zoom_shortcuts(ctx);
 
-        let (target, proxy, intruder, repeater, decoder) = ctx.input_mut(|input| {
+        let (target, proxy, intruder, repeater, decoder, comparer) = ctx.input_mut(|input| {
             (
                 input.consume_shortcut(&TAB_TARGET_SHORTCUT),
                 input.consume_shortcut(&TAB_PROXY_SHORTCUT),
                 input.consume_shortcut(&TAB_INTRUDER_SHORTCUT),
                 input.consume_shortcut(&TAB_REPEATER_SHORTCUT),
                 input.consume_shortcut(&TAB_DECODER_SHORTCUT),
+                input.consume_shortcut(&TAB_COMPARER_SHORTCUT),
             )
         });
         if target {
@@ -744,6 +755,9 @@ impl PerseidApp {
         }
         if decoder {
             self.main_tab = MainTab::Decoder;
+        }
+        if comparer {
+            self.main_tab = MainTab::Comparer;
         }
 
         // Ctrl+Enter is the Burp-style send gesture. Consume it before
@@ -956,6 +970,7 @@ impl PerseidApp {
             ui.ctx().format_shortcut(&TAB_INTRUDER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_REPEATER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_DECODER_SHORTCUT),
+            ui.ctx().format_shortcut(&TAB_COMPARER_SHORTCUT),
         ];
         ui.horizontal(|ui| {
             for (index, (tab, label)) in MainTab::ALL.iter().enumerate() {
@@ -1186,6 +1201,7 @@ impl PerseidApp {
             MainTab::Intruder => self.intruder_view(ui),
             MainTab::Repeater => self.repeater_view(ui),
             MainTab::Decoder => self.decoder_view(ui),
+            MainTab::Comparer => self.comparer_view(ui),
         }
     }
 }
@@ -1195,6 +1211,7 @@ impl eframe::App for PerseidApp {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
         self.drain_events(&ctx);
+        self.comparer.handle_input(&ctx);
         self.keyboard(&ctx);
         self.rebuild_visible();
 
@@ -1234,6 +1251,7 @@ impl eframe::App for PerseidApp {
         self.memory_window(&ctx);
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
+        self.comparer_windows(&ctx);
         self.resize_handles(ui);
 
         #[cfg(feature = "screenshots")]
@@ -1265,7 +1283,8 @@ mod tests {
                 MainTab::Proxy,
                 MainTab::Intruder,
                 MainTab::Repeater,
-                MainTab::Decoder
+                MainTab::Decoder,
+                MainTab::Comparer
             ]
         );
     }

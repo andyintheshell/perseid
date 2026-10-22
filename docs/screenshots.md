@@ -13,6 +13,7 @@ illustrate the UI, not platform support or performance guarantees.
 
 [History](#proxy--http-history) · [Intercept](#proxy--intercept) ·
 [Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
+[Comparer](#comparer) · [Comparer result](#comparer-result) ·
 [Memory](#memory-usage)
 
 ## Proxy > HTTP history
@@ -59,6 +60,21 @@ Replay edited requests directly to a target, independently of the proxy listener
 Build a local encode/decode/hash chain with one panel per transformation.
 
 ![Decoder Base64 and SHA-256 chain](images/perseid-decoder.png)
+
+## Comparer
+
+Both item tables show one shared collection. Select a different row in each
+table, then compare the pair word by word or byte by byte.
+
+![Comparer with a request and response selected](images/perseid-comparer.png)
+
+## Comparer result
+
+The result window shows paired Text or Hex views with modified, deleted, and
+added data highlighted. Use the arrows to move between differences and
+**Sync views** to keep both panes aligned.
+
+![Comparer result with highlighted word differences](images/perseid-comparer-result.png)
 
 ## Memory usage
 

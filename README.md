@@ -22,7 +22,7 @@ a Java runtime. Captured bodies and in-memory history have configurable limits.
 
 > [!IMPORTANT]
 > **Early prototype, not a finished Burp replacement.** HTTP/HTTPS interception,
-> Intruder, Repeater, and Decoder work today. WebSockets, Comparer, Sequencer,
+> Intruder, Repeater, Decoder, and Comparer work today. WebSockets, Sequencer,
 > and persistent projects are not implemented. See the
 > [capability matrix](docs/burp-parity.md) for the precise status.
 
@@ -38,11 +38,12 @@ a Java runtime. Captured bodies and in-memory history have configurable limits.
 | **Replay a request** | Editable HTTP/HTTPS Repeater tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
 | **Fuzz a request** | Intruder positions marked with `$$`, editable payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, bounded concurrency, and request/response results. |
 | **Transform payloads** | Stacked Decoder panels, selection-aware encoding/decoding, 31 common hashes, and Smart decode for layered data. |
+| **Compare messages** | A shared item list seeded from history, files, or the clipboard; word- and byte-level diffs with paired Text/Hex views, navigation, and synchronized scrolling. |
 | **Control the session** | Opt-in proxy scope enforcement, literal/regex match-and-replace rules, capture/history limits, and a live heap-memory indicator. |
 
 The workspace follows the familiar **Target → Proxy → Intruder → Repeater →
-Decoder** order. The [user guide](docs/workbench.md) explains each tool and its
-limits; the [gallery](docs/screenshots.md) shows every tab.
+Decoder → Comparer** order. The [user guide](docs/workbench.md) explains each
+tool and its limits; the [gallery](docs/screenshots.md) shows every tab.
 
 ## Quick start
 
@@ -77,8 +78,9 @@ cargo run -p perseid --locked
 
 ## Know the limits
 
-- History, Intruder and Repeater results, Decoder chains, scope, and rewrite
-  settings are **in memory only**. The local TLS CA is persisted across launches.
+- History, Intruder and Repeater results, Decoder chains, Comparer items and
+  results, scope, and rewrite settings are **in memory only**. The local TLS CA
+  is persisted across launches.
 - Large, streaming, and binary intercepted bodies are **header-editable only**.
   Message previews and direct-send seeds may be truncated or lossy.
 - There is **no automated scanner, crawler, bundled browser, or WebSocket
@@ -93,7 +95,7 @@ cargo run -p perseid --locked
 | I want to… | Start here |
 | --- | --- |
 | Build, run, or configure the app | [Getting started](docs/getting-started.md) |
-| Capture, intercept, replay, or decode | [Workbench guide](docs/workbench.md) |
+| Capture, intercept, replay, decode, or compare | [Workbench guide](docs/workbench.md) |
 | Trust, exclude, or remove the local CA | [HTTPS interception](docs/tls.md) |
 | Fix a setup or traffic problem | [Troubleshooting](docs/troubleshooting.md) |
 | Understand the architecture or contribute | [Design](docs/design.md) · [Contributing](CONTRIBUTING.md) |

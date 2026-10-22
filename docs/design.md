@@ -150,16 +150,18 @@ lets users keep their normal browser, extensions, and devtools.
 
 The workspace follows Burp's tool organization so existing users can find
 familiar surfaces immediately: **Target**, **Proxy**, **Intruder**,
-**Repeater**, and **Decoder**, in that order. **Proxy > HTTP history** is the
-default landing view because it is the live capture surface.
+**Repeater**, **Decoder**, and **Comparer**, in that order. **Proxy > HTTP
+history** is the default landing view because it is the live capture surface.
 
 The visual language is a warm, low-contrast light theme: near-white surfaces,
 pale orange selection states, and a burnt-orange accent. The palette lives in
 one theme module so future views stay consistent. HiDPI text and controls are
 first-class requirements, not an afterthought.
 
-Planned tools such as Comparer and Sequencer are not presented as working
-controls before their engines exist. **Intruder** is a real fuzzing workspace:
+Planned tools such as Sequencer are not presented as working controls before
+their engines exist. **Comparer** is a real two-item diff workspace: one shared
+item collection, word/byte comparison, and paired Text/Hex result panes.
+**Intruder** is a real fuzzing workspace:
 an editable raw request with `$$` position highlighting, Add/Clear/Auto marker
 actions, one payload set per relevant position, all four Burp attack types, a
 target bar with optional `Host` synchronization, bounded concurrency, and a
