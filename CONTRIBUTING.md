@@ -23,12 +23,14 @@ but may produce different compiler or Clippy diagnostics. Include the toolchain
 version when reporting a failure.
 
 Follow [platform setup](docs/getting-started.md#requirements) for native
-dependencies. A graphical run needs a desktop session and OpenGL. CI runs
-format, Clippy, tests, and packaging in three parallel jobs: Linux, macOS on
-Apple Silicon, and Windows. Linux installs its desktop build dependencies; the
-other runners use their hosted platform toolchains. This verifies cross-platform
+dependencies. A graphical run needs a desktop session and OpenGL. CI pins Ubuntu
+26.04, macOS 26 on Apple Silicon, and Windows 2025, and runs format, Clippy,
+tests, and packaging in three parallel jobs. Linux installs its desktop build
+dependencies. After installing the pinned toolchain, each job removes the runner
+image's unrelated floating `stable` Rust toolchain before caching; this keeps
+cache keys stable as hosted images are refreshed. This verifies cross-platform
 builds and tests, not release installers or every graphics configuration. The
-screenshot workflow remains a separate Linux/Xvfb check.
+screenshot workflow remains a separate Ubuntu 26.04/Xvfb check.
 
 From the repository root:
 

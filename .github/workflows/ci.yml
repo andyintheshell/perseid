@@ -23,12 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             name: Linux
-          # GitHub's standard macos-15 hosted runner is Apple Silicon (arm64).
-          - os: macos-15
+          # GitHub's standard macos-26 hosted runner is Apple Silicon (arm64).
+          - os: macos-26
             name: macOS (Apple Silicon)
-          - os: windows-latest
+          - os: windows-2025
             name: Windows
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +53,32 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # rust-cache fingerprints every installed rustup toolchain. Hosted images
+      # include a floating `stable` in addition to our pinned 1.95.0; remove it
+      # so image refreshes do not invalidate the Cargo cache.
+      - name: Remove unused floating Rust toolchain (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          rustup default 1.95.0
+          stable_toolchain="$(rustup toolchain list --quiet | grep -E '^stable($|-)' | head -n 1 || true)"
+          if [[ -n "$stable_toolchain" ]]; then
+            rustup toolchain uninstall "$stable_toolchain"
+          fi
+          rustup toolchain list --quiet
+
+      - name: Remove unused floating Rust toolchain (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup default 1.95.0
+          $stable = rustup toolchain list --quiet | Where-Object { $_ -match '^stable(-|$)' } | Select-Object -First 1
+          if ($stable) {
+            rustup toolchain uninstall $stable
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          rustup toolchain list --quiet
+
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check formatting
@@ -73,7 +99,7 @@ jobs:
     name: Format, lint, test
     if: always()
     needs: checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require all platform checks
