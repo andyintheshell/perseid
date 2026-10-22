@@ -1,5 +1,8 @@
 # Design
 
+[Documentation](README.md) · [Workbench](workbench.md) ·
+[Contributing](../CONTRIBUTING.md) · [Roadmap](roadmap.md)
+
 Perseid is a Rust-native web security tool for people who like to understand
 what happens on the wire. It is designed around the everyday workflow of
 intercepting a request, inspecting it, changing it, sending it again, and
@@ -32,8 +35,10 @@ Perseid aims to be:
 
 ## Architecture
 
-Perseid is a set of small Rust components, with the user interface
-independent from the proxy and analysis code:
+Perseid currently ships as one Cargo package. The proxy and byte-transform
+engines have module boundaries so their behavior can be tested without opening
+the UI; they are not separate, GUI-free build targets. The following diagram
+shows current responsibilities, with planned work labelled explicitly:
 
 ```text
 External browser
@@ -47,7 +52,7 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
       |
       +----> Bounded capture and in-memory history
       |                |
-      |                +----> Search, filtering, comparison
+      |                +----> Metadata filtering (search/diff planned)
       |
       +----> Optional passive and guided checks (planned)
                        |
@@ -83,6 +88,12 @@ browser, never by Perseid. Interception is on by default, and pass-through hosts
 remain opaque. The proxy also serves the certificate as a local download page,
 so installing trust does not require finding the file on disk.
 
+The app persists each new CA as a complete certificate/key generation and
+atomically replaces a pointer to select it. Store operations are serialized
+across processes, and loaded pairs are checked for matching keys. Existing
+top-level PEM pairs remain usable without migration until explicit regeneration.
+See [CA storage and lifecycle](tls.md#where-the-ca-lives).
+
 Repeater deliberately sits beside the proxy rather than behind it: the
 `perseid::proxy` module exposes a direct HTTP/HTTPS client with its own runtime
 and connection pool, and the UI sends edited messages to that engine. Replay
@@ -103,11 +114,19 @@ chain cannot describe transformations that no longer produced the visible
 bytes.
 
 Planned additions include a disk-backed history store, fuzzing workers, and a
-native extension point. Network operations run on their own runtime and
-communicate with the UI through a bounded channel so a slow interface cannot
-grow memory without limit. Held messages use a separate bounded interception
-channel with a one-shot decision per message, so capture-event overflow cannot
-strand an exchange that is waiting for the user.
+native extension point. Proxy and Repeater network operations run off the UI
+thread. Proxy capture events use a bounded, lossy channel with a drop counter;
+Repeater jobs and results use separate bounded queues. Admission reserves both
+an operation slot and bytes through result consumption, not just through network
+completion. Held messages use a separate bounded
+interception channel with a one-shot decision per message, so capture-event
+overflow does not discard the user's interception decision channel.
+
+Capture/history limits constrain retained body data, not total resident memory.
+Repeater additionally has an aggregate pending-work budget, and Pretty body
+formatting has independent input/output and depth limits. Editor state,
+connection pools, other caches, and graphics resources also consume memory;
+these controls are not a shared process-wide allocation or RSS ceiling.
 
 The desktop application does not start or embed a Chromium instance. An
 external browser points at the loopback proxy; this keeps the binary small and
@@ -183,22 +202,27 @@ Important implementation principles:
 - Hard limits on captured body size, with bounded text and hex previews.
 - A total retained-body budget for history, independent of the exchange count
   (half of physical memory by default, with a 256 MiB fallback).
-- Bounded worker queues, concurrent connections and tunnels, and a bounded UI
-  event channel with drop counters. Repeater responses share the capture limit,
-  and simultaneous Repeater sends are capped independently of tab count.
+- Concurrent proxy connection/tunnel limits and a bounded capture-event channel
+  with drop counters. Loss recovery applies queued events before resolving
+  in-flight rows; late or duplicate completions do not decrement unrelated
+  exchanges' in-flight counts.
 - A bounded interception queue: held bodies are capped by `--intercept-limit`,
   larger or streaming bodies stay header-only, and unresolved messages apply
   backpressure rather than being silently discarded.
-- Repeater admission covers queued jobs, active sends, and unread results, with
-  both operation-count and retained-data budgets. It reserves response capacity
-  up front and reports backpressure instead of growing an unbounded queue.
-- Virtualized request lists and message rows, plus bounded text previews. Pretty
-  formats JSON, HTML/XML, and URL-encoded forms; Pretty and Raw are rendered
-  line-by-line with numbers and a small purpose-built highlighter, so only the
-  visible page is laid out. All views decode gzip, deflate, and Brotli bodies
-  with a hard output cap, and Hex previews are bounded byte-offset dumps.
-- Pretty formatting has its own output and nesting budgets, independently of
-  the captured/decoded input limit; excessive expansion falls back to Raw text.
+- Repeater admission covers queued jobs, active sends, and unread results: at
+  most 32 operations and 64 MiB of retained-data reservations, with at most eight
+  active sends. Response capacity is reserved before work starts; backpressure
+  is reported without stopping already admitted sends. Requests have an 8 MiB
+  retained-buffer limit and heads have a 64 KiB limit.
+- Virtualized history tables and Hex rows, plus bounded body previews. Pretty
+  and Raw use a multiline text editor with syntax highlighting and a painted
+  line-number gutter; unlike Hex, their text layout is not row-virtualized.
+  History/Repeater views decode gzip, deflate, and Brotli bodies with a decoded
+  preview cap.
+- Pretty body formatting independently caps input and output at 256 KiB and
+  nesting at 128 levels. A document that would exceed a budget falls back to
+  bounded Raw text instead of expanding indentation without limit. Editor
+  caches remain a separate memory cost from captured/decoded input.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply
