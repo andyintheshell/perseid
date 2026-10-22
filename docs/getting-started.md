@@ -65,6 +65,10 @@ Pretty, Raw, and Hex tabs, following Burp's default horizontal message-editor
 layout. Drag the divider between the panes to give either side more room. Click
 a history row or use the keyboard to select it.
 
+Pretty formatting has independent 256 KiB input/output and 128-level nesting
+budgets. Documents that exceed a formatting budget fall back to the bounded raw
+text representation instead of expanding indentation without limit.
+
 The status bar shows a live **Memory** figure: the bytes currently held by
 Perseid's allocator, the closest equivalent to the memory figure in Burp
 Suite's status bar. Click it for the current and peak values and a rolling
@@ -164,6 +168,15 @@ request has a 60-second end-to-end timeout, and up to eight tab sends run
 concurrently. Requests seeded from history use the same decoded, bounded
 representation as the Proxy detail pane, so compressed or very large captured
 bodies can be lossy. A seed warning asks you to review the body before sending.
+Admission is also bounded across queued requests, active sends, and unread
+responses together: at most 32 pending operations and 64 MiB of retained-data
+reservations. Each operation reserves space for its response before starting;
+the reservation is released when the UI consumes the result. Requests are
+limited to 8 MiB of retained request buffers and 64 KiB heads. When the budget is
+full, Send reports a retryable error without stopping other sends. Response
+heads are capped at 64 KiB by the HTTP client.
+An oversized configured capture limit is rejected at Repeater startup if a
+maximum-sized request and its reserved response cannot fit the byte budget.
 WebSocket messages, saved Repeater tabs, and project persistence are not
 implemented yet.
 

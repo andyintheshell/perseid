@@ -514,7 +514,7 @@ fn ascii_hex_decode(input: &[u8]) -> Result<Vec<u8>> {
         ));
     }
     let mut output = Vec::with_capacity(compact.len() / 2);
-    for pair in compact.chunks_exact(2) {
+    for pair in compact.as_chunks::<2>().0 {
         let (Some(high), Some(low)) = (hex_value(pair[0]), hex_value(pair[1])) else {
             return Err(TransformError::new(
                 "ASCII hex contains a character that is not a hexadecimal digit",

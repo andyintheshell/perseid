@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,7 +21,7 @@ use hyper_rustls::{DefaultServerNameResolver, HttpsConnector};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use tokio::sync::{Semaphore, mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::proxy::events::{CapturedBody, HeaderList};
 use crate::proxy::message::parse_request_head;
@@ -39,6 +39,11 @@ pub const DEFAULT_REPEATER_TIMEOUT: Duration = Duration::from_secs(60);
 /// Upper bound on simultaneous tab sends. The UI only prevents duplicate
 /// sends from one tab, so this keeps a burst across many tabs bounded.
 const MAX_CONCURRENT_REQUESTS: usize = 8;
+/// Admission covers queued jobs, active requests, and unread results together.
+const MAX_PENDING_REQUESTS: usize = 32;
+const MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
+const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+const MAX_HEAD_BYTES: usize = 64 * 1024;
 
 /// Runtime settings for the direct replay engine.
 #[derive(Clone)]
@@ -94,6 +99,15 @@ impl RepeaterRequest {
         default_scheme: &str,
         default_host: &str,
     ) -> Result<Self, RepeaterError> {
+        if head
+            .len()
+            .saturating_add(default_host.len())
+            .saturating_add(default_scheme.len())
+            > MAX_HEAD_BYTES
+            || head.len().saturating_add(body.len()) > MAX_REQUEST_BYTES
+        {
+            return Err(RepeaterError::RequestTooLarge);
+        }
         let parsed = parse_request_head(head).map_err(RepeaterError::InvalidRequest)?;
         let (scheme, authority, path) =
             resolve_target(&parsed.uri, default_scheme, default_host, &parsed.headers)?;
@@ -266,6 +280,10 @@ fn default_target(scheme: &str, host: &str) -> Result<(String, String), Repeater
 pub enum RepeaterError {
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    #[error("the Repeater request exceeds the 8 MiB request or 64 KiB head limit")]
+    RequestTooLarge,
+    #[error("the Repeater pending-work budget is full; collect responses before retrying")]
+    Busy,
     #[error("the Repeater engine is not running")]
     Closed,
 }
@@ -273,6 +291,8 @@ pub enum RepeaterError {
 /// Failure to start the direct replay engine.
 #[derive(Debug, thiserror::Error)]
 pub enum RepeaterStartError {
+    #[error("the Repeater capture limit exceeds the {limit}-byte pending-budget maximum")]
+    CaptureLimit { limit: usize },
     #[error("could not start the Repeater runtime: {0}")]
     Runtime(#[source] std::io::Error),
     #[error("could not spawn the Repeater thread: {0}")]
@@ -313,8 +333,9 @@ pub enum RepeaterResult {
 /// The handle is cheap to keep alive and can be dropped independently of the
 /// proxy. Results are polled with [`Repeater::try_recv`].
 pub struct Repeater {
-    jobs: mpsc::UnboundedSender<Job>,
-    results: Receiver<RepeaterResponse>,
+    jobs: mpsc::Sender<Job>,
+    results: Receiver<QueuedResponse>,
+    budget: PendingBudget,
     shutdown: Option<oneshot::Sender<()>>,
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -322,18 +343,104 @@ pub struct Repeater {
 struct Job {
     id: u64,
     request: RepeaterRequest,
+    reservation: Reservation,
+}
+
+struct QueuedResponse {
+    response: RepeaterResponse,
+    _reservation: Reservation,
+}
+
+/// A reservation stays alive until the consumer takes the result, not merely
+/// until network work finishes. Thus unread responses cannot bypass admission.
+struct Reservation {
+    _slot: OwnedSemaphorePermit,
+    _bytes: OwnedSemaphorePermit,
+}
+
+struct PendingBudget {
+    slots: Arc<Semaphore>,
+    bytes: Arc<Semaphore>,
+    response_bytes: usize,
+}
+
+impl PendingBudget {
+    fn new(capture_limit: usize) -> Self {
+        Self {
+            slots: Arc::new(Semaphore::new(MAX_PENDING_REQUESTS)),
+            bytes: Arc::new(Semaphore::new(MAX_PENDING_BYTES)),
+            // Lossy UTF-8 conversion can triple header bytes. Reserve before
+            // starting work; the HTTP parser independently caps the wire head.
+            response_bytes: capture_limit.saturating_add(3 * MAX_HEAD_BYTES),
+        }
+    }
+
+    fn reserve(&self, request: &RepeaterRequest) -> Result<Reservation, RepeaterError> {
+        let mut request_bytes = request
+            .method
+            .capacity()
+            .saturating_add(request.uri.capacity())
+            .saturating_add(request.version.capacity())
+            .saturating_add(request.body.capacity())
+            .saturating_add(
+                request
+                    .headers
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(String, String)>()),
+            );
+        let mut head_bytes = request
+            .method
+            .len()
+            .saturating_add(request.uri.len())
+            .saturating_add(request.version.len());
+        for (name, value) in &request.headers {
+            request_bytes = request_bytes
+                .saturating_add(name.capacity())
+                .saturating_add(value.capacity());
+            head_bytes = head_bytes
+                .saturating_add(name.len())
+                .saturating_add(value.len())
+                .saturating_add(4);
+        }
+        if request_bytes > MAX_REQUEST_BYTES || head_bytes > MAX_HEAD_BYTES {
+            return Err(RepeaterError::RequestTooLarge);
+        }
+        let retained = request_bytes.saturating_add(self.response_bytes);
+        if retained > MAX_PENDING_BYTES {
+            return Err(RepeaterError::Busy);
+        }
+        let slot = self
+            .slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| RepeaterError::Busy)?;
+        let bytes = self
+            .bytes
+            .clone()
+            .try_acquire_many_owned(retained as u32)
+            .map_err(|_| RepeaterError::Busy)?;
+        Ok(Reservation {
+            _slot: slot,
+            _bytes: bytes,
+        })
+    }
 }
 
 impl Repeater {
     /// Start the replay runtime.
     pub fn start(config: RepeaterConfig) -> Result<Self, RepeaterStartError> {
         let capture_limit = config.capture_limit.max(1);
+        let max_capture = MAX_PENDING_BYTES - MAX_REQUEST_BYTES - 3 * MAX_HEAD_BYTES;
+        if capture_limit > max_capture {
+            return Err(RepeaterStartError::CaptureLimit { limit: max_capture });
+        }
         let timeout = config.timeout.max(Duration::from_millis(1));
         let notify = config.notify.clone();
         let upstream_tls = tls::upstream_client_config(&config.extra_roots_pem)?;
 
-        let (jobs, job_rx) = mpsc::unbounded_channel();
-        let (result_tx, results) = std::sync::mpsc::channel();
+        let budget = PendingBudget::new(capture_limit);
+        let (jobs, job_rx) = mpsc::channel(MAX_PENDING_REQUESTS);
+        let (result_tx, results) = std::sync::mpsc::sync_channel(MAX_PENDING_REQUESTS);
         let (shutdown, shutdown_rx) = oneshot::channel();
         let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
 
@@ -363,6 +470,8 @@ impl Repeater {
                 let client: Client<HttpsConnector<HttpConnector>, ProxyBody> =
                     Client::builder(TokioExecutor::new())
                         .http1_preserve_header_case(true)
+                        .http1_max_buf_size(MAX_HEAD_BYTES)
+                        .http2_max_header_list_size(MAX_HEAD_BYTES as u32)
                         .build(connector);
 
                 runtime.spawn(async move {
@@ -391,24 +500,39 @@ impl Repeater {
         Ok(Self {
             jobs,
             results,
+            budget,
             shutdown: Some(shutdown),
             thread: Some(thread),
         })
     }
 
-    /// Queue one request. The returned id is echoed in [`RepeaterResponse`].
+    /// Queue one request without blocking. The returned id is echoed in
+    /// [`RepeaterResponse`]. At most 32 jobs/results and 64 MiB of retained
+    /// payload reservations may be pending, including unread responses. Requests
+    /// larger than 8 MiB are rejected. Collect results before retrying `Busy`.
     pub fn send(&self, request: RepeaterRequest) -> Result<u64, RepeaterError> {
+        if self.jobs.is_closed() {
+            return Err(RepeaterError::Closed);
+        }
+        let reservation = self.budget.reserve(&request)?;
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         self.jobs
-            .send(Job { id, request })
-            .map_err(|_| RepeaterError::Closed)?;
+            .try_send(Job {
+                id,
+                request,
+                reservation,
+            })
+            .map_err(|err| match err {
+                mpsc::error::TrySendError::Full(_) => RepeaterError::Busy,
+                mpsc::error::TrySendError::Closed(_) => RepeaterError::Closed,
+            })?;
         Ok(id)
     }
 
     /// Take the next completed response, if any.
     pub fn try_recv(&self) -> Option<RepeaterResponse> {
-        self.results.try_recv().ok()
+        self.results.try_recv().ok().map(|queued| queued.response)
     }
 
     /// Whether the replay runtime thread is still alive.
@@ -434,8 +558,8 @@ impl Drop for Repeater {
 
 async fn worker(
     client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
-    mut jobs: mpsc::UnboundedReceiver<Job>,
-    results: Sender<RepeaterResponse>,
+    mut jobs: mpsc::Receiver<Job>,
+    results: SyncSender<QueuedResponse>,
     capture_limit: usize,
     timeout: Duration,
     notify: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -449,14 +573,26 @@ async fn worker(
         let results = results.clone();
         let notify = notify.clone();
         tokio::spawn(async move {
+            let Job {
+                id,
+                request,
+                reservation,
+            } = job;
             let started = Instant::now();
-            let result = execute(&client, job.request, capture_limit, timeout).await;
+            let result = execute(&client, request, capture_limit, timeout).await;
             let response = RepeaterResponse {
-                id: job.id,
+                id,
                 duration: started.elapsed(),
                 result,
             };
-            if results.send(response).is_ok()
+            // This cannot block: every result holds an admission slot, and
+            // the result channel has capacity for every admitted job together.
+            if results
+                .send(QueuedResponse {
+                    response,
+                    _reservation: reservation,
+                })
+                .is_ok()
                 && let Some(notify) = &notify
             {
                 notify();
@@ -579,6 +715,96 @@ async fn read_body(mut body: Incoming, limit: usize) -> (CapturedBody, Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn small_request() -> RepeaterRequest {
+        RepeaterRequest::parse("GET / HTTP/1.1\n\n", Vec::new(), "http", "127.0.0.1:1").unwrap()
+    }
+
+    #[test]
+    fn pending_budget_bounds_slots_until_the_result_is_consumed() {
+        let budget = PendingBudget::new(1);
+        let request = small_request();
+        let mut reservations = Vec::new();
+        for _ in 0..MAX_PENDING_REQUESTS {
+            reservations.push(budget.reserve(&request).unwrap());
+        }
+        assert!(matches!(budget.reserve(&request), Err(RepeaterError::Busy)));
+        drop(reservations.pop());
+        assert!(budget.reserve(&request).is_ok());
+        drop(reservations);
+        assert_eq!(budget.bytes.available_permits(), MAX_PENDING_BYTES);
+    }
+
+    #[test]
+    fn pending_budget_reserves_response_bytes_before_starting_work() {
+        let budget = PendingBudget::new(MAX_PENDING_BYTES / 2);
+        let request = small_request();
+        let first = budget.reserve(&request).unwrap();
+        assert!(matches!(budget.reserve(&request), Err(RepeaterError::Busy)));
+        // A rejected byte reservation must release its count reservation.
+        assert_eq!(budget.slots.available_permits(), MAX_PENDING_REQUESTS - 1);
+        drop(first);
+        assert_eq!(budget.bytes.available_permits(), MAX_PENDING_BYTES);
+    }
+
+    #[test]
+    fn oversized_request_buffers_and_heads_are_rejected() {
+        let budget = PendingBudget::new(1);
+        let mut request = small_request();
+        request.body = Vec::with_capacity(MAX_REQUEST_BYTES + 1);
+        assert!(matches!(
+            budget.reserve(&request),
+            Err(RepeaterError::RequestTooLarge)
+        ));
+        assert!(matches!(
+            RepeaterRequest::parse(
+                &"x".repeat(MAX_HEAD_BYTES + 1),
+                Vec::new(),
+                "http",
+                "localhost"
+            ),
+            Err(RepeaterError::RequestTooLarge)
+        ));
+        assert_eq!(budget.slots.available_permits(), MAX_PENDING_REQUESTS);
+    }
+
+    #[test]
+    fn capture_limits_that_can_never_fit_are_rejected_at_startup() {
+        assert!(matches!(
+            Repeater::start(RepeaterConfig {
+                capture_limit: usize::MAX,
+                ..RepeaterConfig::default()
+            }),
+            Err(RepeaterStartError::CaptureLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn unread_results_apply_backpressure_without_blocking_shutdown() {
+        let repeater = Repeater::start(RepeaterConfig::default()).unwrap();
+        for _ in 0..MAX_PENDING_REQUESTS {
+            let mut request = small_request();
+            // A local validation failure gives a result without depending on
+            // any particular port being unused on the test machine.
+            request.method = "invalid method".to_string();
+            repeater.send(request).unwrap();
+        }
+        assert!(matches!(
+            repeater.send(small_request()),
+            Err(RepeaterError::Busy)
+        ));
+        let queued = repeater
+            .results
+            .recv_timeout(Duration::from_secs(5))
+            .expect("Repeater should report a validation failure");
+        assert!(matches!(
+            repeater.send(small_request()),
+            Err(RepeaterError::Busy)
+        ));
+        drop(queued);
+        assert!(repeater.send(small_request()).is_ok());
+        drop(repeater);
+    }
 
     #[test]
     fn origin_form_uses_the_target_and_keeps_a_virtual_host() {
