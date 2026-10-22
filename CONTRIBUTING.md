@@ -1,5 +1,8 @@
 # Contributing
 
+[Project home](README.md) · [Documentation](docs/README.md) ·
+[Design](docs/design.md) · [Security policy](SECURITY.md)
+
 Contributions, testing feedback, and design discussions are welcome as the
 prototype takes shape. Small, focused changes with tests and documentation are
 the easiest to review.
@@ -13,17 +16,19 @@ the easiest to review.
 
 ## Development setup
 
-Requirements:
+The manifest minimum is Rust 1.95 (edition 2024). `rust-toolchain.toml` and CI
+select **1.95.0**. With rustup, that selection is automatic. Homebrew's `rust`
+formula supplies its current toolchain instead; it is suitable for local builds
+but may produce different compiler or Clippy diagnostics. Include the toolchain
+version when reporting a failure.
 
-- Rust 1.95.0 or newer (edition 2024), matching `rust-toolchain.toml` and CI.
-- A graphical desktop with OpenGL support to run the UI. CI tests do not open
-  the app window; the screenshot workflow is a separate Linux/Xvfb check.
-
-The required CI workflow runs format, Clippy, tests, and packaging in three
-parallel jobs: Linux, macOS on Apple Silicon, and Windows. Linux installs its
-native UI build dependencies; the other runners use their hosted platform
-toolchains. This is build/test coverage, not a claim that release packaging or
-every desktop environment is supported equally on all platforms.
+Follow [platform setup](docs/getting-started.md#requirements) for native
+dependencies. A graphical run needs a desktop session and OpenGL. CI runs
+format, Clippy, tests, and packaging in three parallel jobs: Linux, macOS on
+Apple Silicon, and Windows. Linux installs its desktop build dependencies; the
+other runners use their hosted platform toolchains. This verifies cross-platform
+builds and tests, not release installers or every graphics configuration. The
+screenshot workflow remains a separate Linux/Xvfb check.
 
 From the repository root:
 
@@ -60,19 +65,43 @@ CARGO_BUILD_JOBS=1 cargo test --workspace --locked
 CI sets `CARGO_BUILD_JOBS=4` on all three runners to keep the same check shape;
 reduce the local job count if your machine has less memory.
 
-The `perseid` crate includes a headless proxy example for manual smoke tests:
-
-```sh
-cargo run -p perseid --example headless
-```
-
 Perseid creates its TLS certificate authority on first launch and reuses the
 same per-user CA for debug and release runs. That is deliberate: a development
 run keeps the certificate your browser already trusts. For experiments that
 should not touch your trusted CA, point the app at a scratch directory:
 
 ```sh
-PERSEID_CA_DIR="$(mktemp -d)" cargo run -p perseid
+PERSEID_CA_DIR="$(mktemp -d)" cargo run -p perseid --locked
+```
+
+Do not run Cargo or Perseid as root. Do not use a developer run to experiment
+with a CA your everyday browser trusts.
+
+## Headless proxy and library API
+
+The single `perseid` package contains both the desktop app and the
+`perseid::proxy` library. A terminal-only example is available:
+
+```sh
+cargo run -p perseid --example headless --locked
+```
+
+It listens on `127.0.0.1:8080` and prints capture events without opening a
+window. It still builds the same crate and native/GUI dependencies. Use the
+[local target](docs/getting-started.md#try-it-with-a-local-target) for traffic;
+do not run the desktop listener on the same port at the same time.
+
+**Library defaults differ from the desktop app.** `ProxyConfig::default()` does
+not create a CA or enable TLS decryption. Rust callers explicitly supply an
+authority and policy when needed; the desktop app owns CA filesystem policy and
+enables HTTPS interception at startup. See the
+[crate README](crates/perseid/README.md) and
+[headless example source](crates/perseid/examples/headless.rs).
+
+Generate local API documentation with:
+
+```sh
+cargo doc -p perseid --no-deps --locked --open
 ```
 
 ## Required checks
@@ -88,6 +117,14 @@ cargo test --workspace --locked
 Install the tools with `rustup component add rustfmt clippy`. On Kali/Debian
 systems using the distribution's Rust packages, install `rustfmt` and
 `rust-clippy` through apt instead, keeping them in step with `rustc`.
+Homebrew's Rust formula includes the tools used here. For changes touching
+screenshot-mode code, also run `cargo test --workspace --all-features --locked`.
+
+[CodeQL](.github/workflows/codeql.yml) runs separately from these local Cargo
+checks. Actions and Python scans run on every pull request. Rust analysis runs
+on PRs that touch `crates/`, Rust build inputs, or the CodeQL workflow itself;
+it also runs on pushes to `main`, the weekly schedule, and manual dispatches.
+The path filter includes crate README changes, not just `.rs` files.
 
 ## Dependencies
 
@@ -106,7 +143,8 @@ lockfiles from other toolchains.
 
 ## Screenshots
 
-The README screenshots are generated headlessly, without a desktop session:
+The README screenshots are generated on Linux/Xvfb, without an interactive
+desktop session:
 
 ```sh
 scripts/screenshots.sh
@@ -116,7 +154,9 @@ This builds `perseid` with the `screenshots` feature, runs it under Xvfb,
 seeds a deterministic demo history, captures every documented UI tab from the
 egui framebuffer, and writes the PNGs to `docs/images/`. It requires `xvfb`,
 `xauth`, and Python 3 (for the PNG check). Use `--out DIR` to write elsewhere,
-or `--no-build` to reuse an existing `target/debug/perseid`.
+or `--no-build` to reuse an existing `target/debug/perseid` built with the
+`screenshots` feature. The script also uses the Linux `timeout` utility. It is
+not a macOS screenshot command; macOS contributors can use the workflow artifacts.
 
 The screenshots contain synthetic demo traffic, never captured traffic. The
 separate [Screenshots workflow](.github/workflows/screenshots.yml) runs the
@@ -134,12 +174,30 @@ changed. That keeps a skipped run from leaving a required check pending.
 | `crates/perseid/src/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
 | `crates/perseid/tests/` | End-to-end proxy and Repeater tests. |
 | `crates/perseid/examples/` | Headless proxy smoke-test example. |
-| `docs/` | User and design documentation. |
+| `docs/` | [User guides and technical references](docs/README.md). |
 | `branding/` | Logo and icon source assets. |
 
 Proxy behavior belongs behind the `perseid::proxy` API so it can be tested
 without the UI. UI code should not block on network or disk work; events flow
 through the bounded channel.
+
+## Documentation changes
+
+- Keep the [README](README.md) a short entry point; put workflow detail in the
+  [workbench guide](docs/workbench.md), setup in
+  [Getting started](docs/getting-started.md), and fixes in
+  [Troubleshooting](docs/troubleshooting.md).
+- Add a new guide to the [documentation index](docs/README.md) and link back to
+  related pages. Use relative links so navigation stays on the reader's branch.
+- Verify local file links, heading anchors, screenshots, and commands from the
+  repository root. Check CLI examples against `cargo run -p perseid --locked -- --help`.
+- Describe what the current code does. Keep planned capabilities labelled,
+  distinguish desktop from library defaults, and do not advertise untested
+  platforms or historical benchmarks as current release guarantees.
+- Use synthetic examples. Preserve warnings about CA trust, sensitive traffic,
+  in-memory state, and Repeater bypassing proxy scope.
+- Keep `Cargo.lock` in use with `--locked` in reproducible build/run examples.
+  Do not change dependency versions just to update documentation.
 
 ## Pull requests
 

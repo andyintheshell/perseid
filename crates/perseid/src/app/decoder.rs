@@ -104,7 +104,7 @@ impl DecoderState {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(8, 2)),
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -541,21 +541,13 @@ fn set_editor_selection(ctx: &egui::Context, editor_id: egui::Id, range: Option<
 
 fn draw_controls(ui: &mut egui::Ui, panel: &mut Panel, index: usize) -> Option<Action> {
     let mut action = None;
-    ui.spacing_mut().item_spacing = egui::vec2(6.0, 3.0);
-    ui.spacing_mut().button_padding = egui::vec2(4.0, 2.0);
-    ui.spacing_mut().interact_size.y = 22.0;
+    ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+    ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
+    ui.spacing_mut().interact_size.y = 24.0;
 
     let mut view_changed = false;
     ui.horizontal(|ui| {
         operation_chip(ui, panel.operation);
-        ui.add_space(4.0);
-        view_changed |= ui
-            .radio_value(&mut panel.view, ViewMode::Text, "Text")
-            .changed();
-        view_changed |= ui
-            .radio_value(&mut panel.view, ViewMode::Hex, "Hex")
-            .on_hover_text("Hex view is read-only; to enter bytes, decode ASCII hex in Text view")
-            .changed();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui
                 .small_button("Copy")
@@ -565,6 +557,15 @@ fn draw_controls(ui: &mut egui::Ui, panel: &mut Panel, index: usize) -> Option<A
                 ui.ctx().copy_text(panel.copy_value());
             }
         });
+    });
+    ui.horizontal(|ui| {
+        view_changed |= ui
+            .radio_value(&mut panel.view, ViewMode::Text, "Text")
+            .changed();
+        view_changed |= ui
+            .radio_value(&mut panel.view, ViewMode::Hex, "Hex")
+            .on_hover_text("Hex view is read-only; to enter bytes, decode ASCII hex in Text view")
+            .changed();
     });
     if view_changed {
         panel.selection = None;
@@ -672,7 +673,7 @@ fn codec_combo(
         .selected_text(title)
         .show_ui(ui, |ui| {
             ui.set_min_width(190.0);
-            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.spacing_mut().item_spacing.y = 3.0;
             ui.spacing_mut().interact_size.y = 24.0;
             let menu_height = (ui.ctx().viewport_rect().height() * 0.5).clamp(180.0, 360.0);
             egui::ScrollArea::vertical()
@@ -707,7 +708,7 @@ fn hash_combo(
         .selected_text("Hash…")
         .show_ui(ui, |ui| {
             ui.set_min_width(210.0);
-            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.spacing_mut().item_spacing.y = 3.0;
             ui.spacing_mut().interact_size.y = 24.0;
             let menu_height = (ui.ctx().viewport_rect().height() * 0.5).clamp(180.0, 360.0);
             egui::ScrollArea::vertical()
@@ -739,7 +740,7 @@ fn operation_chip(ui: &mut egui::Ui, operation: Option<engine::Transform>) {
         .fill(color.gamma_multiply(0.10))
         .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
         .corner_radius(8.0)
-        .inner_margin(egui::Margin::symmetric(6, 1))
+        .inner_margin(egui::Margin::symmetric(8, 2))
         .show(ui, |ui| {
             ui.label(RichText::new(label).size(10.5).strong().color(color));
         });

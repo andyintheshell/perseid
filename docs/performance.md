@@ -1,13 +1,20 @@
 # Performance and memory
 
+[Documentation](README.md) · [Design](design.md) ·
+[Runtime limits](workbench.md#limits-and-persistence)
+
 Perseid aims to stay comfortable on modest hardware. This page records the
 Milestone 0 proof-of-concept measurements: idle memory, a full 2,000-entry
 history, and viewing large responses.
 
 ![Perseid memory window showing current and peak memory with a rolling graph](images/perseid-memory.png)
 
-These are development measurements from one Linux VM, not universal
-guarantees. Treat them as a sanity check and a reproducible baseline.
+> [!NOTE]
+> **Historical M0 measurements, not a benchmark of the current UI.** Fonts,
+> message viewers, and other features have changed since this run. The image
+> above shows the current memory window, not the exact interface measured.
+> These figures come from one Linux VM; they are not macOS results, a current
+> release threshold, or a guarantee for arbitrary traffic.
 
 ## Milestone 0 results
 
@@ -40,6 +47,11 @@ so a worst case of 2,000 exchanges with two full 1 MiB bodies each still cannot
 retain the full 4 GiB. The oldest exchanges are evicted when either the exchange
 count or the byte budget is reached. The M0 workload retained only 125 KiB, so
 this budget did not bind in the measurements above.
+
+This budget counts retained request/response bodies, not headers, formatting
+caches, editor state, queued work, graphics resources, or the entire process.
+One exchange may remain even when it alone exceeds the configured history byte
+budget. Treat the controls as retention limits, not a hard RSS ceiling.
 
 ### Heap in use and resident memory
 
@@ -124,14 +136,20 @@ graphics drivers, desktop settings, and captured content.
 | Toolchain | rustc 1.95.0, release build |
 | Perseid limits | 1 MiB capture limit, 2,000 exchange history, 256 MiB history budget (M0) |
 
-## Method
+## Repeat the workload
+
+These Linux commands let you repeat representative scenarios with your own
+checkout. Results from current code need not match the historical table. Record
+the commit, toolchain, graphics stack, display scale, limits, and payload sizes
+alongside every new result.
 
 Build and start a release binary:
 
 ```sh
-cargo build --release -p perseid
+cargo build --release -p perseid --locked
 GDK_SCALE=2 QT_SCALE_FACTOR=2 ./target/release/perseid \
   --listen 127.0.0.1:8080 \
+  --ca-dir "$(mktemp -d)" \
   --capture-limit 1048576 \
   --history-limit 2000 \
   --history-bytes 268435456
@@ -140,7 +158,7 @@ GDK_SCALE=2 QT_SCALE_FACTOR=2 ./target/release/perseid \
 For an external reading, locate the process and read its resident memory:
 
 ```sh
-PID=$(pgrep -n -f './target/release/perseid')
+PID=$(pgrep -n -x perseid)
 grep -E 'VmRSS|VmHWM|RssAnon|RssFile|RssShmem' "/proc/$PID/status"
 ```
 
@@ -151,17 +169,42 @@ current and peak heap in use and a rolling graph. The resident figures in this
 document came from `/proc`, not the window. The mapping breakdown above was
 read from `/proc/<pid>/smaps` and `/proc/<pid>/smaps_rollup`.
 
-History was filled with 2,000 sequential loopback requests:
+For a self-contained synthetic target, prepare a scratch directory in a second
+terminal and serve it on loopback:
 
 ```sh
-curl -sS -x http://127.0.0.1:8080 -o /dev/null \
+fixtures="$(mktemp -d)"
+python3 - "$fixtures" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+(root / "api.json").write_text('{"ok":true,"message":"synthetic test data"}\n')
+(root / "large.txt").write_bytes(b"x" * (8 * 1024 * 1024))
+(root / "large.bin").write_bytes(os.urandom(8 * 1024 * 1024))
+PY
+python3 -m http.server 8090 --bind 127.0.0.1 --directory "$fixtures"
+```
+
+Fill history with 2,000 sequential loopback requests from another terminal:
+
+```sh
+curl --noproxy "" -sS -x http://127.0.0.1:8080 -o /dev/null \
   'http://127.0.0.1:8090/api.json?i=[1-2000]'
 ```
 
-Large-response tests used two 8 MiB files served by a loopback Python server:
-a repeated-text file for the Raw text view and random bytes for the binary
-preview and Hex view. Each was requested through Perseid with the default
-capture limit, then opened in the response pane.
+Request the large text and binary files, then open each response in Raw and Hex:
+
+```sh
+curl --noproxy "" -sS -x http://127.0.0.1:8080 -o /dev/null http://127.0.0.1:8090/large.txt
+curl --noproxy "" -sS -x http://127.0.0.1:8080 -o /dev/null http://127.0.0.1:8090/large.bin
+```
+
+The example fixtures above are synthetic reproduction inputs, not an assertion
+that they are byte-identical to the original M0 workload. Keep Capture on and
+request/response holding off while loading history. Stop the local server with
+`Ctrl+C` afterward.
 
 No external hosts were contacted for these measurements. See
 [Getting started](getting-started.md) for the normal workspace workflow and

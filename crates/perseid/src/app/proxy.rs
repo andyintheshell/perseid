@@ -81,7 +81,7 @@ impl PerseidApp {
     fn http_history_view(&mut self, ui: &mut egui::Ui) {
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(8, 3))
+            .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| self.history_toolbar(ui));
         self.rebuild_visible();
         // The filter or scope can hide the selected exchange. Do not leave its
@@ -99,7 +99,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(4)),
+                    .inner_margin(egui::Margin::same(6)),
             )
             .show(ui, |ui| self.detail_panel(ui));
 
@@ -111,6 +111,7 @@ impl PerseidApp {
     fn history_toolbar(&mut self, ui: &mut egui::Ui) {
         let mut clear = false;
         let mut send_to_repeater = false;
+        let mut send_to_intruder = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Filter").color(theme::TEXT));
             let filter_id = egui::Id::unique(FILTER_ID);
@@ -152,6 +153,14 @@ impl PerseidApp {
                     .and_then(|id| self.history.get(id))
                     .is_some_and(|item| !item.is_tunnel());
                 if ui
+                    .add_enabled(can_send, egui::Button::new("Send to Intruder"))
+                    .on_hover_text("Open the selected request in the Intruder workspace")
+                    .on_disabled_hover_text("Select an HTTP exchange first")
+                    .clicked()
+                {
+                    send_to_intruder = true;
+                }
+                if ui
                     .add_enabled(can_send, egui::Button::new("Send to Repeater"))
                     .on_hover_text("Replay the selected request in an editable Repeater tab")
                     .on_disabled_hover_text("Select an HTTP exchange first")
@@ -177,6 +186,9 @@ impl PerseidApp {
                 );
             });
         });
+        if send_to_intruder {
+            self.send_selected_to_intruder();
+        }
         if send_to_repeater {
             self.send_selected_to_repeater();
         }
@@ -222,7 +234,7 @@ impl PerseidApp {
             }
 
             table
-                .header(18.0, |mut header| {
+                .header(20.0, |mut header| {
                     for title in [
                         "#",
                         "Method",
@@ -238,7 +250,7 @@ impl PerseidApp {
                     }
                 })
                 .body(|body| {
-                    body.rows(16.0, rows, |mut row| {
+                    body.rows(18.0, rows, |mut row| {
                         let index = row.index();
                         let id = self.visible[index];
                         let Some(item) = self.history.get(id) else {

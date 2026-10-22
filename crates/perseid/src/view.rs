@@ -318,20 +318,11 @@ pub fn canonicalize_editor_head(head: &str) -> String {
 ///
 /// The body is inspected as-is rather than decoded: an interception editor
 /// must never make it look safe to forward a formatted or decompressed body.
-/// Pretty and Hex are bounded previews, while the interception editor's Raw
-/// tab keeps the complete editable body.
+/// These are bounded previews; the interception editor builds complete,
+/// editable Pretty and Raw buffers separately.
 pub fn editor_views(head: &str, body: &[u8]) -> MessageViews {
     let head = canonicalize_editor_head(head);
-    let content_type = head
-        .lines()
-        .skip(1)
-        .take_while(|line| !line.is_empty())
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.trim()
-                .eq_ignore_ascii_case("content-type")
-                .then(|| value.trim())
-        });
+    let content_type = editor_content_type(&head);
 
     let mut pretty = head.clone();
     let mut raw = head.clone();
@@ -348,6 +339,32 @@ pub fn editor_views(head: &str, body: &[u8]) -> MessageViews {
         raw,
         hex: hex_preview(&bytes),
     }
+}
+
+/// Build the complete Pretty buffer used while editing an intercepted message.
+///
+/// [`editor_views`] bounds all previews so rendering a large capture stays
+/// cheap. An editable Pretty tab cannot use that preview: forwarding it would
+/// silently truncate the body. This variant formats the whole buffered body.
+pub fn editor_pretty(head: &str, body: &[u8]) -> String {
+    let head = canonicalize_editor_head(head);
+    let mut pretty = head.clone();
+    if !body.is_empty() {
+        pretty.push_str(&format_pretty_body_full(editor_content_type(&head), body));
+    }
+    pretty
+}
+
+fn editor_content_type(head: &str) -> Option<&str> {
+    head.lines()
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("content-type")
+                .then(|| value.trim())
+        })
 }
 
 fn decode_for(body: &CapturedBody, content_encoding: Option<&str>) -> DecodeResult {
@@ -493,7 +510,25 @@ fn format_raw_body_with_decoded(body: &CapturedBody, decoded: &DecodeResult) -> 
 /// Format a body for the Pretty view. Structured text is laid out by
 /// [`pretty`]; everything else keeps the plain raw representation.
 fn format_pretty_body(content_type: Option<&str>, bytes: &[u8]) -> String {
-    let shown = &bytes[..bytes.len().min(TEXT_PREVIEW_LIMIT)];
+    format_pretty_body_with_limit(content_type, bytes, TEXT_PREVIEW_LIMIT)
+}
+
+/// Format a complete edit buffer, including bodies larger than the preview
+/// limit.
+fn format_pretty_body_full(content_type: Option<&str>, bytes: &[u8]) -> String {
+    // The preview sanitizes control bytes so they are visible in a read-only
+    // dump. An edit buffer must preserve them byte-for-byte instead.
+    if bytes
+        .iter()
+        .any(|byte| matches!(*byte, 0..=8 | 11 | 12 | 14..=31 | 127))
+    {
+        return normalize_body_text(String::from_utf8_lossy(bytes).into_owned());
+    }
+    format_pretty_body_with_limit(content_type, bytes, bytes.len())
+}
+
+fn format_pretty_body_with_limit(content_type: Option<&str>, bytes: &[u8], limit: usize) -> String {
+    let shown = &bytes[..bytes.len().min(limit)];
     if shown.is_empty() {
         return String::new();
     }
@@ -778,6 +813,28 @@ mod tests {
         assert!(views.raw.contains("{\"a\":1,\"b\":[2,3]}"));
         assert!(views.pretty.contains("\"a\": 1"));
         assert!(views.hex.contains("50 4f 53 54"));
+    }
+
+    #[test]
+    fn editable_pretty_keeps_bodies_past_the_preview_limit() {
+        let head = "POST /items HTTP/1.1\r\ncontent-type: text/plain\r\n\r\n";
+        let mut body = "start\n".to_string();
+        body.push_str(&"x".repeat(TEXT_PREVIEW_LIMIT));
+        body.push_str("\nend");
+        let pretty = editor_pretty(head, body.as_bytes());
+
+        assert!(pretty.starts_with("POST /items HTTP/1.1\nContent-Type: text/plain\n\n"));
+        assert!(pretty.contains("\nend\n"), "the tail must stay editable");
+    }
+
+    #[test]
+    fn editable_pretty_preserves_control_bytes() {
+        let pretty = editor_pretty("POST / HTTP/1.1\r\n\r\n", b"a\0b\x01c");
+
+        assert!(
+            pretty.ends_with("a\0b\x01c\n"),
+            "Pretty editing must not replace control bytes: {pretty:?}"
+        );
     }
 
     #[test]

@@ -1,10 +1,14 @@
 # Burp Suite Community parity
 
+[Documentation](README.md) · [Workbench](workbench.md) · [Roadmap](roadmap.md)
+
 **Goal:** Perseid aims to be a practical alternative to Burp Suite Community
 Edition (CE) for manual web security testing: the same capabilities, adapted
 to a Rust-native, memory-bounded, keyboard-first tool.
 
 This is a direction, not a claim. Several capabilities below are still planned.
+For instructions on the implemented tools, use the [workbench guide](workbench.md);
+this page is a capability reference, not a setup tutorial.
 
 ## What parity means
 
@@ -26,20 +30,19 @@ Source: [Burp Suite Community Edition](https://portswigger.net/burp/communitydow
 (checked October 2026).
 
 The workspace deliberately follows Burp's tool order: **Target**, **Proxy**,
-**Intruder**, **Repeater**, and **Decoder**. Tools that are not implemented yet
-are labelled as previews rather than presented as working features; Intruder is
-the remaining preview. Familiar navigation is part of the goal; reproducing
-every control before its engine exists is not.
+**Intruder**, **Repeater**, and **Decoder**. Familiar navigation is part of the
+goal; reproducing every control before its engine exists is not. Comparer and
+Sequencer remain planned and are not presented as working tools.
 
 Parity here means capability, not artificial restrictions. Burp CE rate-limits
-Intruder to encourage upgrades; Perseid's fuzzer will not reproduce that
-limit. Scope and concurrency remain explicit, user-controlled safety settings.
+Intruder to encourage upgrades; Perseid does not reproduce that limit. Scope and
+concurrency remain explicit, user-controlled safety settings.
 
 ## Capability matrix
 
 Status values: **Working** (usable today), **Partial** (foundation exists),
 **Planned** (assigned to a milestone), **Deviation** (intentional difference),
-**Non-goal** (explicitly outside parity).
+**Beyond CE** (a planned Perseid extra), **Non-goal** (explicitly outside parity).
 
 | Capability | Burp CE | Perseid | Status | Milestone |
 | --- | --- | --- | --- | --- |
@@ -59,7 +62,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Decoder | Yes | Stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms | Partial | M3 |
 | Comparer | Yes | No | Planned | M3 |
 | Sequencer | Yes | No | Planned | M4 |
-| Intruder-style request fuzzing | Yes (rate-limited demo) | No | Planned (unthrottled) | M4 |
+| Intruder-style request fuzzing | Yes (rate-limited demo) | Editable `$$` positions, payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests, and Pretty/Raw/Hex results; one attack at a time, no payload processing or saved attacks | Working | M4 (landed early) |
 | Extension support | BApps | No | Deviation | Post-parity |
 | Bundled Chromium browser | Yes | External browser | Deviation | — |
 | Project files | No (Pro feature) | SQLite persistence planned | Beyond CE | M3 |
@@ -88,6 +91,21 @@ side-by-side layout. Like Burp, the proxy removes unsupported `Accept-Encoding`
 codings before forwarding. Interception and body rules still operate on the wire
 representation, and forwarding keeps the original response encoding. Scope
 enforcement is opt-in, and an empty scope allows every host.
+
+Intruder follows Burp's marker-and-payload model. A raw request can be seeded
+from history or edited in place, values are wrapped in `$$`, and one payload
+list is edited per position where the attack type needs them. Sniper tests each
+position in turn while leaving the others at their marked base value; Battering
+ram inserts one payload into every position; Pitchfork advances one set per
+position; Cluster bomb tests every combination. Up to 32 requests run
+concurrently, and one attack runs at a time. Results are listed by sequence with
+their payloads, status, length, and duration, and each request/response opens in
+Pretty/Raw/Hex. The direct client deliberately bypasses interception,
+match/replace, and Proxy history. When scope enforcement is on, starting an
+attack checks the effective first target and refuses an out-of-scope host; every
+generated request is checked again before sending, because payloads can change
+an absolute-form request line. Payload processing rules, saved attacks, and an
+automatic scan of findings are not implemented.
 
 Repeater follows the same manual-first shape as Burp: seed an editable request
 from history with **Send to Repeater**, keep several request tabs, set the
@@ -134,8 +152,8 @@ comparison; they include mapped libraries and graphics-driver code.
   core parity rather than reproducing Burp's extension ABI. Features that are
   only reachable through BApps are not part of the parity claim.
 - **No artificial Intruder throttling.** Burp CE deliberately rate-limits
-  Intruder. Perseid will run fuzzing at the rate the user configures, bounded
-  by scope and resource settings rather than an upgrade restriction.
+  Intruder. Perseid runs attacks at the concurrency the user configures, bounded
+  by scope checks and resource limits rather than an upgrade restriction.
 - **Keyboard-first ergonomics.** Parity is about capabilities and outcomes,
   not reproducing Burp's mouse-driven workflow.
 - **Persistence is a Perseid extra.** Burp CE cannot save project files;
@@ -161,7 +179,7 @@ or are explicitly authorized to test.
 | **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete.)* |
 | **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. *(Complete.)* |
 | **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. |
-| **M4 — Protocols and testing tools** | WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. HTTP/2 landed ahead of this milestone. |
+| **M4 — Protocols and testing tools** | WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. HTTP/2 and Intruder landed ahead of this milestone. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |
 
 After M5, Perseid can claim CE manual-toolkit parity subject to the
