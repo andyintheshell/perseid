@@ -90,6 +90,12 @@ bodies are decoded, and previews may be truncated. Copying a view copies its
 displayed representation. Viewing a message does not itself rewrite the body
 being forwarded.
 
+Pretty body formatting has independent **256 KiB input and output limits** and
+a **128-level nesting limit**. If formatting would exceed a budget, the view
+falls back to bounded Raw text rather than expanding indentation without limit.
+These body-formatting limits are separate from capture and decoded-preview
+limits and do not make the whole editor or process a fixed-size allocation.
+
 ## Intercept and edit
 
 1. Open **Proxy > Intercept** and click **Intercept is off** to arm request
@@ -162,6 +168,25 @@ sending. Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
 with up to eight concurrent sends. Saved tabs and WebSocket replay are absent.
 
+Admission is bounded across **queued requests, active sends, and unread results
+together**: at most **32 pending operations** and **64 MiB of retained-data
+reservations**. A send reserves space for its response before network work
+starts; the reservation is released when the UI consumes the result. These are
+fixed engine limits, not additional CLI flags, and do not cap all retained
+editor or tab state.
+
+Requests are limited to **8 MiB of retained request buffers**, including header
+and string storage, with **64 KiB request and response heads**. A larger
+`--capture-limit` does not raise those request/head limits. Repeater rejects a
+configured response capture limit at startup if it cannot fit a maximum-sized
+request and its reserved response within the pending-byte budget.
+
+When admission is full, **Send reports a retryable budget error without stopping
+other sends**. The UI normally drains responses automatically; retry after
+responses have been processed. Library consumers must drain `Repeater::try_recv`
+to release admission for unread results. See
+[budget troubleshooting](troubleshooting.md#repeater-reports-a-budget-or-size-error).
+
 ## Decoder
 
 Paste or type into the first panel, then choose **Decode as**, **Encode as**,
@@ -232,6 +257,9 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
 | History | 2,000 exchanges and half of physical RAM in retained body bytes by default; 256 MiB fallback, with a 64 MiB floor when RAM is reported. |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
+| Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
+| Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
+| Repeater request/head size | 8 MiB of retained request buffers; 64 KiB heads. The response capture limit must also fit the pending-work budget. |
 | Saved state | No persisted history, Repeater tabs, Decoder chains, scope, or rewrite rules. The local CA is persisted. |
 | Missing tools/protocols | No working Intruder engine, Comparer, Sequencer, WebSocket tooling, or HTTP/3/QUIC support. |
 

@@ -1529,6 +1529,21 @@ async fn spawn_tls_origin(
                     if tls.write_all(response.as_bytes()).await.is_err() {
                         break;
                     }
+                    // Honor the fixture's advertised close. Waiting for another
+                    // request instead races its idle timeout against the client
+                    // read timeout and can produce a TCP reset on macOS.
+                    if response
+                        .lines()
+                        .take_while(|line| !line.is_empty())
+                        .any(|line| {
+                            line.split_once(':').is_some_and(|(name, value)| {
+                                name.eq_ignore_ascii_case("connection")
+                                    && value.trim().eq_ignore_ascii_case("close")
+                            })
+                        })
+                    {
+                        break;
+                    }
                 }
                 let _ = tls.shutdown().await;
             });

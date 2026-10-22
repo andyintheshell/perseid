@@ -5,11 +5,61 @@
 //! laid out with indentation or one field per line; anything we do not
 //! recognise falls back to the raw text representation.
 
+/// Input and formatted-output budgets are independent: indentation can amplify
+/// a small, deeply nested document by orders of magnitude.
+const MAX_FORMATTED_BYTES: usize = 256 * 1024;
+const MAX_NESTING_DEPTH: usize = 128;
+
+struct Output(String);
+
+impl Output {
+    fn new(input_len: usize) -> Self {
+        Self(String::with_capacity(input_len.min(MAX_FORMATTED_BYTES)))
+    }
+
+    fn push_str(&mut self, text: &str) -> Option<()> {
+        let required = self.0.len().checked_add(text.len())?;
+        if required > MAX_FORMATTED_BYTES {
+            return None;
+        }
+        if required > self.0.capacity() {
+            let capacity = self
+                .0
+                .capacity()
+                .max(64)
+                .saturating_mul(2)
+                .max(required)
+                .min(MAX_FORMATTED_BYTES);
+            self.0.try_reserve_exact(capacity - self.0.len()).ok()?;
+        }
+        self.0.push_str(text);
+        Some(())
+    }
+
+    fn push(&mut self, ch: char) -> Option<()> {
+        self.push_str(ch.encode_utf8(&mut [0; 4]))
+    }
+
+    fn indent(&mut self, depth: usize) -> Option<()> {
+        if depth > MAX_NESTING_DEPTH {
+            return None;
+        }
+        for _ in 0..depth {
+            self.push_str("  ")?;
+        }
+        Some(())
+    }
+}
+
 /// Format a body for the Pretty tab.
 ///
 /// Returns `None` when the body is not text or does not match a format we know
-/// how to lay out, so the caller can show the raw representation instead.
+/// how to lay out, or when formatting would exceed the output/depth budgets.
+/// The caller can show the bounded raw representation instead.
 pub fn format_body(content_type: Option<&str>, body: &[u8]) -> Option<String> {
+    if body.len() > MAX_FORMATTED_BYTES {
+        return None;
+    }
     let text = std::str::from_utf8(body).ok()?;
     if text.trim().is_empty() {
         return None;
@@ -85,42 +135,45 @@ fn is_form(media: &str) -> bool {
 /// member order.
 fn format_json(text: &str) -> Option<String> {
     let tokens = json_tokens(text)?;
-    let mut out = String::with_capacity(text.len().saturating_add(text.len() / 2));
+    let mut out = Output::new(text.len());
     let mut expected_closers: Vec<char> = Vec::new();
     let mut index = 0usize;
 
     while index < tokens.len() {
         match &tokens[index] {
             JsonToken::Punct(open @ ('{' | '[')) => {
+                if expected_closers.len() == MAX_NESTING_DEPTH {
+                    return None;
+                }
                 let closer = if *open == '{' { '}' } else { ']' };
-                out.push(*open);
+                out.push(*open)?;
                 if tokens.get(index + 1) == Some(&JsonToken::Punct(closer)) {
-                    out.push(closer);
+                    out.push(closer)?;
                     index += 2;
                     continue;
                 }
                 expected_closers.push(closer);
-                newline_indent(&mut out, expected_closers.len());
+                newline_indent(&mut out, expected_closers.len())?;
             }
             JsonToken::Punct(closer @ ('}' | ']')) => {
                 if expected_closers.pop() != Some(*closer) {
                     return None;
                 }
-                newline_indent(&mut out, expected_closers.len());
-                out.push(*closer);
+                newline_indent(&mut out, expected_closers.len())?;
+                out.push(*closer)?;
             }
             JsonToken::Punct(',') => {
-                out.push(',');
-                newline_indent(&mut out, expected_closers.len());
+                out.push(',')?;
+                newline_indent(&mut out, expected_closers.len())?;
             }
-            JsonToken::Punct(':') => out.push_str(": "),
+            JsonToken::Punct(':') => out.push_str(": ")?,
             JsonToken::Punct(_) => return None,
-            JsonToken::Value(value) => out.push_str(value),
+            JsonToken::Value(value) => out.push_str(value)?,
         }
         index += 1;
     }
 
-    expected_closers.is_empty().then_some(out)
+    expected_closers.is_empty().then_some(out.0)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -185,11 +238,9 @@ fn json_tokens(text: &str) -> Option<Vec<JsonToken<'_>>> {
     }
 }
 
-fn newline_indent(out: &mut String, depth: usize) {
-    out.push('\n');
-    for _ in 0..depth {
-        out.push_str("  ");
-    }
+fn newline_indent(out: &mut Output, depth: usize) -> Option<()> {
+    out.push('\n')?;
+    out.indent(depth)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -216,7 +267,7 @@ fn format_markup(text: &str, html: bool) -> Option<String> {
         return None;
     }
 
-    let mut out = String::with_capacity(text.len().saturating_add(text.len() / 4));
+    let mut out = Output::new(text.len());
     let mut stack: Vec<String> = Vec::new();
     let mut wrote = false;
 
@@ -225,7 +276,7 @@ fn format_markup(text: &str, html: bool) -> Option<String> {
             MarkupToken::Text(text) => {
                 let collapsed = collapse_whitespace(text);
                 if !collapsed.is_empty() {
-                    push_line(&mut out, stack.len(), &collapsed);
+                    push_line(&mut out, stack.len(), &collapsed)?;
                     wrote = true;
                 }
             }
@@ -237,7 +288,7 @@ fn format_markup(text: &str, html: bool) -> Option<String> {
                 special,
             } => {
                 if special || name.is_empty() {
-                    push_line(&mut out, stack.len(), raw);
+                    push_line(&mut out, stack.len(), raw)?;
                     wrote = true;
                     continue;
                 }
@@ -248,44 +299,46 @@ fn format_markup(text: &str, html: bool) -> Option<String> {
                     } else if !stack.is_empty() {
                         stack.pop();
                     }
-                    push_line(&mut out, stack.len(), raw);
+                    push_line(&mut out, stack.len(), raw)?;
                 } else {
-                    push_line(&mut out, stack.len(), raw);
+                    push_line(&mut out, stack.len(), raw)?;
                     if !(self_closing || html && is_void_element(&name)) {
+                        if stack.len() == MAX_NESTING_DEPTH {
+                            return None;
+                        }
                         stack.push(name);
                     }
                 }
                 wrote = true;
             }
             MarkupToken::RawText(text) => {
-                push_raw_text(&mut out, stack.len(), text);
+                push_raw_text(&mut out, stack.len(), text)?;
                 wrote = true;
             }
         }
     }
 
-    wrote.then_some(out)
+    wrote.then_some(out.0)
 }
 
-fn push_line(out: &mut String, depth: usize, line: &str) {
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+fn push_line(out: &mut Output, depth: usize, line: &str) -> Option<()> {
+    if !out.0.is_empty() && !out.0.ends_with('\n') {
+        out.push('\n')?;
     }
-    for _ in 0..depth {
-        out.push_str("  ");
-    }
-    out.push_str(line);
-    out.push('\n');
+    out.indent(depth)?;
+    out.push_str(line)?;
+    out.push('\n')
 }
 
-fn push_raw_text(out: &mut String, depth: usize, text: &str) {
+fn push_raw_text(out: &mut Output, depth: usize, text: &str) -> Option<()> {
     for line in text.trim_matches('\n').lines() {
         if line.trim().is_empty() {
-            out.push('\n');
+            out.push('\n')?;
         } else {
-            push_line(out, depth, line.trim_end());
+            push_line(out, depth, line.trim_end())?;
         }
     }
+    Some(())
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -460,21 +513,58 @@ fn format_form(text: &str) -> Option<String> {
         return None;
     }
 
-    let mut out = String::new();
+    let mut out = Output::new(text.len());
     let mut wrote = false;
     for (name, value) in form_urlencoded::parse(text.as_bytes()) {
-        out.push_str(name.as_ref());
-        out.push_str(" = ");
-        out.push_str(value.as_ref());
-        out.push('\n');
+        out.push_str(name.as_ref())?;
+        out.push_str(" = ")?;
+        out.push_str(value.as_ref())?;
+        out.push('\n')?;
         wrote = true;
     }
-    wrote.then_some(out)
+    wrote.then_some(out.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_deeply_nested_documents_without_amplifying_them() {
+        let json = format!("{}0{}", "[".repeat(2_000), "]".repeat(2_000));
+        assert!(format_body(Some("application/json"), json.as_bytes()).is_none());
+        let xml = format!("{}text{}", "<a>".repeat(2_000), "</a>".repeat(2_000));
+        assert!(format_body(Some("application/xml"), xml.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn output_budget_applies_to_json_markup_and_forms() {
+        let json = format!("[{}0]", "0,".repeat(MAX_FORMATTED_BYTES / 3));
+        let xml = format!("<a>{}</a>", "<b>x</b>".repeat(MAX_FORMATTED_BYTES / 9));
+        let form = "a=1&".repeat(MAX_FORMATTED_BYTES / 5);
+        for (media, body) in [
+            ("application/json", json),
+            ("application/xml", xml),
+            ("application/x-www-form-urlencoded", form),
+        ] {
+            assert!(body.len() < MAX_FORMATTED_BYTES);
+            assert!(
+                format_body(Some(media), body.as_bytes()).is_none(),
+                "{media}"
+            );
+        }
+    }
+
+    #[test]
+    fn output_budget_checks_utf8_bytes_before_appending() {
+        let mut out = Output::new(0);
+        out.push_str(&"x".repeat(MAX_FORMATTED_BYTES - 1)).unwrap();
+        assert!(out.push('é').is_none());
+        assert_eq!(out.0.len(), MAX_FORMATTED_BYTES - 1);
+        out.push('x').unwrap();
+        assert!(out.push('x').is_none());
+        assert!(out.0.capacity() <= MAX_FORMATTED_BYTES);
+    }
 
     #[test]
     fn formats_json_without_rewriting_values() {

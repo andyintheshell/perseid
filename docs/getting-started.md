@@ -75,6 +75,9 @@ cargo run -p perseid --locked
 The app opens on **Proxy > HTTP history** and starts its proxy on
 `127.0.0.1:8080`. On first launch it creates a local certificate authority and
 opens a setup window. This does **not** install trust in a browser or OS store.
+Existing CAs are reused; updating the app does not itself rotate the CA. See
+[CA storage and lifecycle](tls.md#where-the-ca-lives) for the generation layout
+and compatibility with older installations.
 
 For an optimized binary:
 
@@ -155,7 +158,7 @@ cargo run -p perseid --locked -- --listen 127.0.0.1:8081 --ui-scale 1.5
 | `--history-limit <N>` | `2000` | Maximum number of retained exchanges. |
 | `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Retained history-body budget, not a process-memory limit. |
 | `--no-proxy` | Off | Open the UI without starting the proxy. |
-| `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA certificate and key live. |
+| `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA store lives; use the active certificate/key paths shown in the UI. |
 | `--no-tls-intercept` | Off | Keep HTTPS tunnels opaque; the CA is still prepared. |
 | `--tls-passthrough <HOST>` | Empty | Never decrypt this host or its subdomains; repeat for more hosts. |
 | `--ui-scale <FACTOR>` | System/desktop scale | Override the UI scale, for example `1.5` or `2`. |
@@ -168,6 +171,13 @@ default in the desktop app.
 
 Continue with the [workbench guide](workbench.md) for Target scope, history,
 message views, interception, match/replace, Repeater, Decoder, and shortcuts.
+
+Pretty body formatting has independent 256 KiB input/output and 128-level
+nesting budgets; exceeding one falls back to bounded Raw text. Repeater also
+limits queued requests, active sends, and unread results together. These are
+separate from the capture/history flags above; see
+[workbench limits](workbench.md#limits-and-persistence) and
+[Repeater backpressure](troubleshooting.md#repeater-reports-a-budget-or-size-error).
 
 ## Current limitations
 

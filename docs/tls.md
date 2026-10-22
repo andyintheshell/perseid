@@ -105,29 +105,55 @@ controls whether messages wait for your Forward/Drop decision.
 
 ## Where the CA lives
 
-| Platform | Default directory |
+| Platform | Default CA data directory |
 | --- | --- |
 | Linux and other Unix-like systems | `$XDG_DATA_HOME/perseid`, or `~/.local/share/perseid` |
 | macOS | `~/Library/Application Support/perseid` |
 | Windows | `%LOCALAPPDATA%\perseid`, falling back to `%APPDATA%\perseid` |
 
 `PERSEID_CA_DIR` overrides the platform location; `--ca-dir <DIR>` overrides
-both. **Proxy > Proxy settings** shows the paths to the two PEM documents
-beneath the CA data directory:
+both. **Proxy > Proxy settings** shows the active certificate and key paths.
+Newly created or explicitly regenerated CAs use this layout:
+
+```text
+perseid/
+├── .perseid-ca-current
+├── .perseid-ca.lock
+└── .perseid-ca-<generation>/
+    ├── perseid-ca.pem
+    └── perseid-ca-key.pem
+```
 
 | File | Purpose |
 | --- | --- |
-| `perseid-ca.pem` | Public certificate; safe to import into a testing client. |
-| `perseid-ca-key.pem` | Private key; never share, upload, or copy off the machine. |
+| `perseid-ca.pem` | Public certificate inside the active generation; safe to import into a testing client. |
+| `perseid-ca-key.pem` | Private key inside that generation; never share, upload, or copy off the machine. |
+| `.perseid-ca-current` | A small pointer selecting the complete active generation atomically. |
+| `.perseid-ca.lock` | Cross-process coordination for loading, generation, and deletion; contains no key material. |
 
-The app creates the directory with mode `0700`, the key with `0600`, and the
-certificate with `0644` on Unix. Windows uses its platform ACL behavior instead.
-Use the paths shown in **Proxy > Proxy settings** rather than guessing from an
-example command or another machine's home directory.
+The data and generation directories use mode `0700`, keys use `0600`, and public
+certificates use `0644` on Unix. The pointer and lock use `0600`. Windows uses
+its platform ACL behavior instead. Use the paths in the UI or download the
+public certificate; do not assume the PEM files are directly in the data root.
+Do not edit the pointer or unlink the lock file to repair a trust problem.
 
-The CA is reused across restarts, debug/release builds, and updates. A rebuild
-does not normally require new browser trust. A half-present pair is not silently
-replaced. If loading fails, the app reports the error and HTTPS stays in
+Both PEM documents are staged, synced, and checked for a matching key before
+the active pointer is replaced. A failure before commit leaves the previous CA
+active. Store operations are serialized across processes so a loader does not
+read half of a replacement pair. Successful commits normally remove old
+generations and legacy PEM files; cleanup warnings can leave superseded files
+for a later cleanup. The lock file may remain after deletion and is not a CA.
+
+### Existing installations and upgrades
+
+Existing CAs with both PEM files directly in the data directory are **reused
+unchanged**. Merely updating, rebuilding, or restarting the app does not rotate
+them or move them into a new generation. An explicit **Regenerate** creates a
+new CA using the generation layout and requires importing the new certificate.
+
+The CA is otherwise reused across debug/release builds and restarts. An
+incomplete store, invalid generation pointer, or mismatched certificate/key pair
+is reported rather than silently replaced. If loading fails, HTTPS stays in
 pass-through until a CA is available. Use an isolated `--ca-dir` for development
 experiments.
 
@@ -182,10 +208,13 @@ To remove the CA safely:
 
    - macOS: remove the certificate you imported in Keychain Access.
    - Other clients: use the same certificate manager used for import.
-3. Use **Proxy > Proxy settings > Delete files** to remove the local CA files.
+3. Use **Proxy > Proxy settings > Delete files**. It removes the active and
+   abandoned generations, the generation pointer, and legacy PEM files. Deleting
+   only the two old top-level PEM paths is **not sufficient** for the generation
+   layout. The coordination lock may remain; it contains no key material.
 
 Deleting files does not remove browser/OS trust. Turning interception off does
-neither. On the next launch, Perseid creates a new CA if the files are absent;
+neither. On the next launch, Perseid creates a new CA if the store is empty;
 that new authority is not trusted until you explicitly import it.
 
 ## Troubleshooting
@@ -196,7 +225,8 @@ that new authority is not trusted until you explicitly import it.
 | Certificate page does not open | Check the listener and actual port. Open its loopback URL directly before configuring the browser proxy. |
 | No decrypted history rows | Check **Intercept HTTPS**, CA readiness, client proxy settings, and the pass-through list. |
 | Only some hosts fail | Certificate pinning, private upstream CAs, or non-HTTP TLS may be involved; consider intentional pass-through. |
-| CA creation fails | Check the error and directory permissions, or retry with a dedicated writable `--ca-dir`. Do not run the app as root. |
+| CA creation or loading fails | Check the error, store path, and permissions. Do not mix PEMs from different generations. A dedicated writable `--ca-dir` isolates experiments without altering the usual CA. |
+| PEM files seem missing | New stores use a hidden generation subdirectory. Use the active paths in **Proxy > Proxy settings** or the certificate download page. |
 | `NET::ERR_CERT_AUTHORITY_INVALID` on Linux | Check the certificate manager or `certutil -d sql:"$HOME/.pki/nssdb" -L`, and restart the browser. |
 | HTTP/3 behaves differently | QUIC is not proxied; use a client/target that can fall back to HTTP/1.1 or HTTP/2. |
 

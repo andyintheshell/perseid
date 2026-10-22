@@ -55,6 +55,16 @@ policy, bounded body capture, capture-drop counters, and a separate direct
 HTTP/HTTPS `Repeater` client. Repeater bypasses proxy interception, rewriting,
 and scope enforcement.
 
+Repeater admission includes queued requests, active work, and unread results.
+`send` can return `RepeaterError::Busy` without stopping other requests; drain
+`try_recv` to release reservations before retrying. Oversized requests and
+capture configurations are rejected separately. See the
+[workbench limits](../../docs/workbench.md#repeater) for the count/byte budgets.
+
+Loaded CA certificate/key pairs are checked for a match. The desktop app owns
+the [generation-based CA store](../../docs/tls.md#where-the-ca-lives); the proxy
+API itself still has no filesystem policy or automatic trust installation.
+
 For a runnable event-consumer example, see [headless.rs](examples/headless.rs):
 
 ```sh

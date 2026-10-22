@@ -116,6 +116,12 @@ systems using the distribution's Rust packages, install `rustfmt` and
 Homebrew's Rust formula includes the tools used here. For changes touching
 screenshot-mode code, also run `cargo test --workspace --all-features --locked`.
 
+[CodeQL](.github/workflows/codeql.yml) runs separately from these local Cargo
+checks. Actions and Python scans run on every pull request. Rust analysis runs
+on PRs that touch `crates/`, Rust build inputs, or the CodeQL workflow itself;
+it also runs on pushes to `main`, the weekly schedule, and manual dispatches.
+The path filter includes crate README changes, not just `.rs` files.
+
 ## Dependencies
 
 `Cargo.lock` is tracked. It is the exact, reproducible resolution used by

@@ -41,6 +41,11 @@ aids, not permission to test an arbitrary host.
   Scope filtering and blocking, interception, and match/replace rules do not
   apply to Repeater sends, and Repeater exchanges are not added to Proxy
   history. Confirm the target and request before clicking **Send**.
+- Repeater separately bounds queued, active, and unread work to 32 operations
+  and 64 MiB of retained-data reservations, with at most eight active sends.
+  Requests have an 8 MiB retained-buffer limit and heads a 64 KiB limit. Full
+  admission returns a retryable error, not an unlimited queue; these budgets
+  are not a cap on all editor/tab state or process memory.
 - The prototype has no telemetry. Apart from proxied and explicit Repeater
   traffic, the application does not make network requests; opening the project
   link in the About window is an explicit user action.
@@ -52,8 +57,8 @@ and Decoder panels live in memory only and are not restored after exit. Dropping
 the proxy handle or closing the application releases held messages and aborts
 their exchanges. There is no traffic database, file export, or background
 upload. Clipboard copying is an explicit user action. In a normal desktop run,
-the app's persisted data is the TLS certificate authority and its private key
-described below; the developer screenshot feature also writes synthetic PNGs.
+the app persists the TLS CA store—certificate, private key, and generation/lock
+metadata—described below; the developer screenshot feature also writes synthetic PNGs.
 
 In-memory storage is not secure erasure: OS swap, crash reports, clipboard
 history, terminal logs, and screenshots can retain copies. Capture only what
@@ -76,6 +81,10 @@ HTTPS interception uses a certificate authority generated and stored locally.
   restarts and updates. The private key stays on the user's machine in the CA
   directory (`--ca-dir`, `PERSEID_CA_DIR`, or the platform data directory). The
   directory is created owner-only and the key is written owner-readable only.
+- New/replacement CAs are validated and committed as complete generations;
+  the selected certificate and private key must match. Existing top-level PEM
+  pairs are reused until explicit regeneration. Use the active paths shown in
+  the UI rather than assuming the old top-level filenames are current.
 - Trust must be installed deliberately by the user in each browser. Perseid
   serves a local certificate download page, but never writes to system or
   browser trust stores and never installs the CA silently.
@@ -83,7 +92,8 @@ HTTPS interception uses a certificate authority generated and stored locally.
   adding a host to the pass-through list, keeps that traffic opaque. The CA and
   its private key remain available unless the user deletes the files.
 - Removal is deliberate and documented in [HTTPS interception](tls.md): remove
-  the browser trust entry, then delete the CA files.
+  the browser/OS trust entries, then use **Delete files** to remove generations,
+  the pointer, and legacy PEM files. A key-free coordination lock may remain.
 - Pass-through hosts are an exclude list matched like scope (exact host,
   subdomains, and any port). An empty list excludes nothing.
 

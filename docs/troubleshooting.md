@@ -101,6 +101,46 @@ For HTTP/3/QUIC-only behavior, use a lab/client configuration that can fall back
 to HTTP/1.1 or HTTP/2; QUIC is not proxied. More CA-specific advice is in
 [HTTPS troubleshooting](tls.md#troubleshooting).
 
+### The CA files are missing or loading fails after an update
+
+Newly created/regenerated CAs live in a hidden generation subdirectory, selected
+by `.perseid-ca-current`. Check the active paths in **Proxy > Proxy settings**,
+or download the public certificate from the listener. Existing top-level PEM
+pairs are still reused unchanged; upgrading alone does not rotate them.
+
+An invalid pointer, missing generation, or mismatched certificate/key pair is
+reported rather than silently replaced. Do not combine PEM files from different
+generations, edit the pointer, or remove the coordination lock. Check the error,
+selected `--ca-dir`, and permissions first. An isolated scratch `--ca-dir` can
+test a clean store without altering your usual CA.
+
+If you intentionally regenerate the CA, remove the old client trust entry and
+import the replacement. To remove CA material, use the app's **Delete files**
+action: deleting only the old top-level PEM paths does not remove generation
+stores. The empty coordination lock can remain afterward; it is not a key.
+
+## Repeater reports a budget or size error
+
+These limits are independent of proxy history limits:
+
+- **Pending-work budget is full:** queued requests, active sends, and unread
+  results share 32 operation slots and 64 MiB of retained-data reservations.
+  Wait for responses to be processed, then retry Send. The UI drains results
+  automatically; the rejected send does not stop other sends. Library callers
+  must consume `Repeater::try_recv` results to release admission.
+- **Request exceeds the limit:** reduce the request/header size. Repeater allows
+  up to 8 MiB of retained request buffers and 64 KiB heads, not an 8 MiB body
+  plus unlimited headers. Increasing `--capture-limit` does not raise these
+  limits or the HTTP client's 64 KiB response-head limit.
+- **Capture limit exceeds the pending-budget maximum:** reduce the configured
+  `--capture-limit` and restart. Repeater reserves response capacity up front;
+  a maximum-sized request and its response/head reservation must fit the byte
+  budget. The startup error reports the accepted maximum in bytes.
+
+There are no CLI flags to raise the fixed pending-work budgets. Increasing
+`--history-bytes` changes history retention, not Repeater admission. See
+[Repeater](workbench.md#repeater) for the complete behavior.
+
 ## A body is read-only, truncated, or different from the wire
 
 Interception only buffers known-size bodies within `--intercept-limit`, and
@@ -111,6 +151,11 @@ History and Repeater previews decode supported compression, reconstruct headers,
 and limit display size. Raw and Hex do not promise the exact original wire
 representation. Review [message views](workbench.md#inspect-messages) and any
 Repeater seed warning before replaying a captured body.
+
+Pretty body formatting also has separate 256 KiB input/output and 128-level
+nesting limits. If a document exceeds them, Pretty falls back to bounded Raw
+text. Raising the capture limit does not raise the formatter's budgets, and the
+fallback does not itself alter the message being forwarded.
 
 ## The interface is too small or too large
 
