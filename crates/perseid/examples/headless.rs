@@ -57,6 +57,9 @@ fn main() -> Result<(), perseid::proxy::StartError> {
                         "{id:>4} == TLS-intercepted tunnel closed after {} ms ({requests} requests)",
                         end.duration.as_millis(),
                     ),
+                    ExchangeResult::Dropped => {
+                        println!("{id:>4} == dropped in the interceptor")
+                    }
                     ExchangeResult::Failed { error } => {
                         println!("{id:>4} !! {error}")
                     }

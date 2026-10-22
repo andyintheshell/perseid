@@ -983,7 +983,7 @@ async fn one_interception_policy_can_hold_both_directions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn dropping_an_intercepted_request_fails_the_exchange() {
+async fn dropping_an_intercepted_request_records_it_as_dropped() {
     let (origin, origin_request) =
         spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
     let mut proxy = test_proxy_with(
@@ -1012,15 +1012,15 @@ async fn dropping_an_intercepted_request_fails_the_exchange() {
     );
 
     let events = drain_until_finished(&proxy);
-    match &finished_of(&events).result {
-        ExchangeResult::Failed { error } => assert!(error.contains("dropped")),
-        other => panic!("expected a failed result, got {other:?}"),
-    }
+    assert!(matches!(
+        finished_of(&events).result,
+        ExchangeResult::Dropped
+    ));
     assert_eq!(finished_of(&events).request_body.data(), b"old!");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn dropping_an_intercepted_response_fails_the_exchange() {
+async fn dropping_an_intercepted_response_records_it_as_dropped() {
     let origin = spawn_origin("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nold".to_string()).await;
     let mut proxy = test_proxy_with(
         ProxySettings {
@@ -1042,10 +1042,10 @@ async fn dropping_an_intercepted_response_fails_the_exchange() {
     assert!(text.starts_with("HTTP/1.1 502"), "raw response was: {text}");
 
     let events = drain_until_finished(&proxy);
-    match &finished_of(&events).result {
-        ExchangeResult::Failed { error } => assert!(error.contains("dropped")),
-        other => panic!("expected a failed result, got {other:?}"),
-    }
+    assert!(matches!(
+        finished_of(&events).result,
+        ExchangeResult::Dropped
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]

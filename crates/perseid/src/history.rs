@@ -74,6 +74,17 @@ impl HistoryItem {
         }
     }
 
+    /// Whether the user dropped this exchange in the interceptor.
+    pub fn is_dropped(&self) -> bool {
+        matches!(
+            &self.phase,
+            Phase::Finished {
+                result: ExchangeResult::Dropped,
+                ..
+            }
+        )
+    }
+
     pub fn tunnel_stats(&self) -> Option<(u64, u64)> {
         match &self.phase {
             Phase::Finished {

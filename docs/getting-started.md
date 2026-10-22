@@ -88,7 +88,8 @@ all** and **Drop all** act on every held message. Forward applies match/replace
 rules and re-checks the scope before sending. Holding a message does not stop
 unrelated connections from progressing. Turning interception off stops new
 messages from being held; anything already waiting still needs **Forward** or
-**Drop**.
+**Drop**. Dropped messages remain in **HTTP history** with no response status,
+matching Burp's behavior.
 
 Only bodies up to `--intercept-limit` (1 MiB by default) are buffered for
 editing. Larger or streaming bodies are still held for header edits, but their

@@ -141,6 +141,9 @@ pub enum ExchangeResult {
     /// decrypted HTTP exchanges carried over the tunnel. Those exchanges also
     /// appear individually in history.
     InterceptedTls { requests: u64 },
+    /// The user dropped the message in the interceptor. Burp still records the
+    /// exchange in HTTP history, but there is no response to show.
+    Dropped,
     /// The exchange failed (upstream connect error, malformed request, ...).
     Failed { error: String },
 }

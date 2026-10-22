@@ -8,6 +8,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::highlight;
 use crate::proxy::{CapturedBody, InterceptError, InterceptItem, InterceptKey, InterceptKind};
 use egui::{Align, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
@@ -703,6 +704,18 @@ impl PerseidApp {
                 );
                 ui.add_space(3.0);
 
+                let font = egui::FontId::monospace(highlight::MESSAGE_FONT_SIZE);
+                let mut head_layouter =
+                    |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+                        let job = highlight::message_job(buffer.as_str(), wrap_width, &font);
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
+                let mut body_layouter =
+                    |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+                        let job = highlight::body_job(buffer.as_str(), wrap_width, &font);
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
+
                 ui.label(RichText::new("Head").strong().color(theme::TEXT));
                 egui::Frame::NONE
                     .fill(Color32::WHITE)
@@ -714,6 +727,8 @@ impl PerseidApp {
                             .add(
                                 TextEdit::multiline(&mut draft.head)
                                     .code_editor()
+                                    .font(egui::FontSelection::FontId(font.clone()))
+                                    .layouter(&mut head_layouter)
                                     .desired_rows(7)
                                     .desired_width(f32::INFINITY),
                             )
@@ -736,6 +751,8 @@ impl PerseidApp {
                                 .add(
                                     TextEdit::multiline(&mut draft.body)
                                         .code_editor()
+                                        .font(egui::FontSelection::FontId(font.clone()))
+                                        .layouter(&mut body_layouter)
                                         .desired_rows(9)
                                         .desired_width(f32::INFINITY),
                                 )

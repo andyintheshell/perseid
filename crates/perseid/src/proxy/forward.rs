@@ -300,7 +300,7 @@ async fn handle_with(
                 parts.headers = parsed.headers;
             }
             InterceptDecision::Drop => {
-                return reject_request(
+                return reject_dropped_request(
                     &ctx,
                     exchange.start,
                     exchange.capture,
@@ -508,6 +508,21 @@ async fn forward(
     }
 }
 
+fn finish(
+    ctx: &Ctx,
+    id: u64,
+    started: Instant,
+    request_body: Option<CapturedBody>,
+    result: ExchangeResult,
+) {
+    let end = ExchangeEnd {
+        duration: started.elapsed(),
+        request_body: request_body.unwrap_or_default(),
+        result,
+    };
+    ctx.emit(ProxyEvent::Finished { id, end });
+}
+
 fn finish_failed(
     ctx: &Ctx,
     id: u64,
@@ -515,12 +530,13 @@ fn finish_failed(
     request_body: Option<CapturedBody>,
     message: String,
 ) {
-    let end = ExchangeEnd {
-        duration: started.elapsed(),
-        request_body: request_body.unwrap_or_default(),
-        result: ExchangeResult::Failed { error: message },
-    };
-    ctx.emit(ProxyEvent::Finished { id, end });
+    finish(
+        ctx,
+        id,
+        started,
+        request_body,
+        ExchangeResult::Failed { error: message },
+    );
 }
 
 fn reject_request(
@@ -544,6 +560,32 @@ fn reject_request(
             start.started,
             Some(request_body),
             message.clone(),
+        );
+    }
+    text_response(status, &message)
+}
+
+fn reject_dropped_request(
+    ctx: &Ctx,
+    start: ExchangeStart,
+    capture: bool,
+    request: RequestInfo,
+    request_body: CapturedBody,
+    status: StatusCode,
+    message: String,
+) -> Response<ProxyBody> {
+    if capture {
+        ctx.emit(ProxyEvent::Started {
+            id: start.id,
+            timestamp: start.timestamp,
+            request,
+        });
+        finish(
+            ctx,
+            start.id,
+            start.started,
+            Some(request_body),
+            ExchangeResult::Dropped,
         );
     }
     text_response(status, &message)
@@ -632,12 +674,12 @@ async fn relay(
             InterceptDecision::Drop => {
                 let message = "response dropped in the interceptor".to_string();
                 if capture {
-                    finish_failed(
+                    finish(
                         &ctx,
                         start.id,
                         start.started,
                         Some(snapshot(&request_buffer)),
-                        message.clone(),
+                        ExchangeResult::Dropped,
                     );
                 }
                 return text_response(StatusCode::BAD_GATEWAY, &message);
