@@ -112,7 +112,7 @@ impl PerseidApp {
         let mut clear = false;
         let mut send_to_repeater = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Filter").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Filter").color(theme::TEXT));
             let filter_id = egui::Id::unique(FILTER_ID);
             let response = ui.add(
                 TextEdit::singleline(&mut self.filter)
@@ -233,12 +233,7 @@ impl PerseidApp {
                         "Time",
                     ] {
                         header.col(|ui| {
-                            ui.label(
-                                RichText::new(title)
-                                    .strong()
-                                    .small()
-                                    .color(theme::TEXT_MUTED),
-                            );
+                            ui.label(RichText::new(title).strong().small().color(theme::TEXT));
                         });
                     }
                 })
@@ -255,7 +250,7 @@ impl PerseidApp {
                             ui.label(
                                 RichText::new(item.number.to_string())
                                     .small()
-                                    .color(theme::TEXT_MUTED),
+                                    .color(theme::TEXT),
                             );
                         });
                         row.col(|ui| {
@@ -276,7 +271,7 @@ impl PerseidApp {
                             ui.label(
                                 RichText::new(view::human_bytes(item.transferred()))
                                     .small()
-                                    .color(theme::TEXT_MUTED),
+                                    .color(theme::TEXT),
                             );
                         });
                         row.col(|ui| {
@@ -284,7 +279,7 @@ impl PerseidApp {
                             let color = if item.is_tunnel() {
                                 theme::AMBER
                             } else {
-                                theme::TEXT_MUTED
+                                theme::TEXT
                             };
                             ui.add(Label::new(RichText::new(mime).small().color(color)).truncate());
                         });

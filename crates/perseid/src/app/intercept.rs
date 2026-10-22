@@ -406,12 +406,7 @@ impl PerseidApp {
                         "Length",
                     ] {
                         header.col(|ui| {
-                            ui.label(
-                                RichText::new(title)
-                                    .strong()
-                                    .small()
-                                    .color(theme::TEXT_MUTED),
-                            );
+                            ui.label(RichText::new(title).strong().small().color(theme::TEXT));
                         });
                     }
                 })
@@ -431,11 +426,11 @@ impl PerseidApp {
                             ui.label(
                                 RichText::new(view::format_time(item.timestamp()))
                                     .small()
-                                    .color(theme::TEXT_MUTED),
+                                    .color(theme::TEXT),
                             );
                         });
                         row.col(|ui| {
-                            ui.label(RichText::new("HTTP").small().color(theme::TEXT_MUTED));
+                            ui.label(RichText::new("HTTP").small().color(theme::TEXT));
                         });
                         row.col(|ui| {
                             let (direction, color) = match item.kind() {
@@ -454,7 +449,7 @@ impl PerseidApp {
                         row.col(|ui| {
                             let status = item.response_status();
                             let text = status.map(|code| code.to_string()).unwrap_or_default();
-                            let color = status.map(status_color).unwrap_or(theme::TEXT_MUTED);
+                            let color = status.map(status_color).unwrap_or(theme::TEXT);
                             ui.label(RichText::new(text).color(color));
                         });
                         row.col(|ui| {
@@ -465,7 +460,7 @@ impl PerseidApp {
                                     .unwrap_or_else(|| "—".to_string()),
                                 InterceptKind::Request => String::new(),
                             };
-                            ui.label(RichText::new(length).small().color(theme::TEXT_MUTED));
+                            ui.label(RichText::new(length).small().color(theme::TEXT));
                         });
 
                         let hover = match item.kind() {

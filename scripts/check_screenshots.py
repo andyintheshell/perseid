@@ -25,7 +25,9 @@ FULL_WINDOW_SCENES = [
     "perseid-repeater.png",
     "perseid-decoder.png",
 ]
-EXPECTED = {name: (1620, 900, 1200) for name in FULL_WINDOW_SCENES}
+# Screenshots are captured at 2x (1280x820 points) and saved at native
+# resolution so they stay sharp when GitHub or a HiDPI browser scales them.
+EXPECTED = {name: (2560, 1600, 1700) for name in FULL_WINDOW_SCENES}
 EXPECTED["perseid-memory.png"] = (970, 400, 900)
 MIN_BYTES = 10_000
 

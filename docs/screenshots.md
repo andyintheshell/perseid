@@ -2,7 +2,8 @@
 
 These full-window scenes are generated deterministically by
 `scripts/screenshots.sh`. The same images are uploaded by CI and posted to
-pull requests so every UI tab is reviewed together.
+pull requests so every UI tab is reviewed together. They are captured at 2×
+and saved at native resolution (2560×1640) so they stay sharp on HiDPI displays.
 
 ## Proxy > HTTP history
 

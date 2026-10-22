@@ -1,35 +1,52 @@
-//! Warm, low-contrast light theme used by the desktop UI.
+//! Warm, high-contrast light theme used by the desktop UI.
 //!
 //! The palette stays close to white, with soft orange-tinted surfaces for
-//! hierarchy and the Perseid coral-orange accent for selection and focus. It
-//! is meant to feel closer to a modern document tool than to a dark terminal
-//! theme.
+//! hierarchy and the Perseid coral-orange accent for selection and focus.
+//! Text is deliberately near-black rather than muted grey: Burp's dense
+//! workspaces remain readable at small sizes because the type is dark and
+//! sharply rendered, not because the font is large.
 
-use egui::{Color32, CornerRadius, FontId, Stroke, TextStyle};
+use std::sync::Arc;
 
-pub const CANVAS: Color32 = Color32::from_rgb(0xfb, 0xf8, 0xf4);
-pub const SURFACE: Color32 = Color32::from_rgb(0xff, 0xfd, 0xfa);
-pub const SURFACE_ALT: Color32 = Color32::from_rgb(0xf8, 0xf1, 0xe9);
-pub const SURFACE_TINT: Color32 = Color32::from_rgb(0xfc, 0xf6, 0xef);
-pub const BORDER: Color32 = Color32::from_rgb(0xe8, 0xdd, 0xd1);
-pub const TEXT: Color32 = Color32::from_rgb(0x2e, 0x2a, 0x26);
-pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x7c, 0x70, 0x65);
+use egui::epaint::text::{HintingTarget, SmoothHinting};
+use egui::{
+    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, FontTweak, Stroke,
+    TextStyle,
+};
+
+/// Segoe UI-compatible regular-weight face. egui's bundled Ubuntu-Light is
+/// too thin for 10-12 pt UI text on a light background. Licensed under the
+/// SIL OFL; see `assets/Selawik-OFL.txt`.
+const UI_FONT: &[u8] = include_bytes!("../assets/Selawik-Regular.ttf");
+
+pub const CANVAS: Color32 = Color32::from_rgb(0xf8, 0xf6, 0xf2);
+pub const SURFACE: Color32 = Color32::from_rgb(0xff, 0xfe, 0xfc);
+pub const SURFACE_ALT: Color32 = Color32::from_rgb(0xf4, 0xef, 0xe9);
+pub const SURFACE_TINT: Color32 = Color32::from_rgb(0xfb, 0xf7, 0xf2);
+pub const BORDER: Color32 = Color32::from_rgb(0xde, 0xd5, 0xcb);
+pub const TEXT: Color32 = Color32::from_rgb(0x1d, 0x1a, 0x17);
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x3b, 0x35, 0x2f);
 pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x4d, 0x2b);
-pub const ACCENT_DARK: Color32 = Color32::from_rgb(0xc9, 0x3a, 0x1c);
+pub const ACCENT_DARK: Color32 = Color32::from_rgb(0xad, 0x2f, 0x15);
 pub const ACCENT_SOFT: Color32 = Color32::from_rgb(0xff, 0xdd, 0xd3);
 pub const ACCENT_WASH: Color32 = Color32::from_rgb(0xff, 0xf3, 0xef);
 pub const SELECTED: Color32 = Color32::from_rgb(0xfb, 0xd9, 0xcd);
-pub const GREEN: Color32 = Color32::from_rgb(0x2f, 0x7d, 0x4f);
-pub const BLUE: Color32 = Color32::from_rgb(0x2f, 0x6f, 0x9f);
-pub const AMBER: Color32 = Color32::from_rgb(0xa9, 0x6a, 0x12);
-pub const RED: Color32 = Color32::from_rgb(0xb3, 0x3a, 0x2e);
-pub const GRAY: Color32 = Color32::from_rgb(0x8a, 0x81, 0x78);
+pub const GREEN: Color32 = Color32::from_rgb(0x1e, 0x6a, 0x3e);
+pub const BLUE: Color32 = Color32::from_rgb(0x1d, 0x5d, 0x90);
+pub const AMBER: Color32 = Color32::from_rgb(0x86, 0x50, 0x00);
+pub const RED: Color32 = Color32::from_rgb(0xa3, 0x28, 0x1d);
+pub const GRAY: Color32 = Color32::from_rgb(0x5b, 0x54, 0x4d);
 
 pub fn apply(ctx: &egui::Context) {
+    install_fonts(ctx);
     ctx.set_theme(egui::Theme::Light);
 
     let mut style = (*ctx.style_of(egui::Theme::Light)).clone();
     style.visuals = visuals();
+    // Sub-pixel glyph binning improves kerning at the cost of blurrier text.
+    // Burp-style dense text benefits more from crisp stems and dark ink.
+    style.visuals.text_options.subpixel_binning = false;
+    style.visuals.text_options.font_hinting = true;
     // Burp keeps its chrome compact so more of the request and response stay
     // visible. These are deliberately smaller than egui's defaults.
     style.spacing.item_spacing = egui::vec2(6.0, 3.0);
@@ -47,11 +64,38 @@ pub fn apply(ctx: &egui::Context) {
         .insert(TextStyle::Button, FontId::proportional(12.5));
     style
         .text_styles
-        .insert(TextStyle::Small, FontId::proportional(10.5));
+        .insert(TextStyle::Small, FontId::proportional(11.0));
     style
         .text_styles
         .insert(TextStyle::Monospace, FontId::monospace(11.5));
     ctx.set_style_of(egui::Theme::Light, style);
+}
+
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+    let tweak = FontTweak {
+        hinting: Some(true),
+        // The default preserves linear metrics and renders symmetrically,
+        // which leaves horizontal stems soft at small sizes. Prefer sharp
+        // grid-fitting for the compact UI.
+        hinting_target: HintingTarget::Smooth(SmoothHinting {
+            light: false,
+            symmetric_rendering: false,
+            preserve_linear_metrics: false,
+        }),
+        subpixel_binning: Some(false),
+        ..Default::default()
+    };
+    fonts.font_data.insert(
+        "perseid-ui".to_owned(),
+        Arc::new(FontData::from_static(UI_FONT).tweak(tweak)),
+    );
+    fonts
+        .families
+        .entry(FontFamily::Proportional)
+        .or_default()
+        .insert(0, "perseid-ui".to_owned());
+    ctx.set_fonts(fonts);
 }
 
 fn visuals() -> egui::Visuals {
@@ -66,7 +110,7 @@ fn visuals() -> egui::Visuals {
     visuals.hyperlink_color = ACCENT_DARK;
     visuals.warn_fg_color = AMBER;
     visuals.error_fg_color = RED;
-    visuals.weak_text_color = Some(TEXT_MUTED);
+    visuals.weak_text_color = Some(GRAY);
     visuals.window_stroke = Stroke::new(1.0, BORDER);
     visuals.window_corner_radius = CornerRadius::same(8);
     visuals.menu_corner_radius = CornerRadius::same(6);
@@ -93,19 +137,19 @@ fn visuals() -> egui::Visuals {
     widgets.hovered.bg_fill = ACCENT_WASH;
     widgets.hovered.weak_bg_fill = ACCENT_WASH;
     widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
-    widgets.hovered.fg_stroke = Stroke::new(1.0, ACCENT_DARK);
+    widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
     widgets.hovered.corner_radius = CornerRadius::same(4);
 
     widgets.active.bg_fill = ACCENT_SOFT;
     widgets.active.weak_bg_fill = ACCENT_SOFT;
     widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-    widgets.active.fg_stroke = Stroke::new(1.0, ACCENT_DARK);
+    widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
     widgets.active.corner_radius = CornerRadius::same(4);
 
     widgets.open.bg_fill = ACCENT_SOFT;
     widgets.open.weak_bg_fill = ACCENT_SOFT;
     widgets.open.bg_stroke = Stroke::new(1.0, ACCENT);
-    widgets.open.fg_stroke = Stroke::new(1.0, ACCENT_DARK);
+    widgets.open.fg_stroke = Stroke::new(1.0, TEXT);
     widgets.open.corner_radius = CornerRadius::same(4);
 
     visuals
