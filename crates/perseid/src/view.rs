@@ -516,6 +516,14 @@ fn format_pretty_body(content_type: Option<&str>, bytes: &[u8]) -> String {
 /// Format a complete edit buffer, including bodies larger than the preview
 /// limit.
 fn format_pretty_body_full(content_type: Option<&str>, bytes: &[u8]) -> String {
+    // The preview sanitizes control bytes so they are visible in a read-only
+    // dump. An edit buffer must preserve them byte-for-byte instead.
+    if bytes
+        .iter()
+        .any(|byte| matches!(*byte, 0..=8 | 11 | 12 | 14..=31 | 127))
+    {
+        return normalize_body_text(String::from_utf8_lossy(bytes).into_owned());
+    }
     format_pretty_body_with_limit(content_type, bytes, bytes.len())
 }
 
@@ -817,6 +825,16 @@ mod tests {
 
         assert!(pretty.starts_with("POST /items HTTP/1.1\nContent-Type: text/plain\n\n"));
         assert!(pretty.contains("\nend\n"), "the tail must stay editable");
+    }
+
+    #[test]
+    fn editable_pretty_preserves_control_bytes() {
+        let pretty = editor_pretty("POST / HTTP/1.1\r\n\r\n", b"a\0b\x01c");
+
+        assert!(
+            pretty.ends_with("a\0b\x01c\n"),
+            "Pretty editing must not replace control bytes: {pretty:?}"
+        );
     }
 
     #[test]
