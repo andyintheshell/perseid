@@ -193,17 +193,20 @@ jobs:
             perseid-memory.png
           )
 
+          # Reruns keep the same run id, so include the attempt in the query to
+          # make browsers and GitHub's image proxy fetch the new preview files.
+          preview_version="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           body_file="$(mktemp)"
           {
             echo "<!-- perseid-screenshots -->"
             echo "### Perseid screenshots"
             echo
-            echo "Generated from \`${GITHUB_SHA}\` by the [Screenshots workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "Generated from \`${GITHUB_SHA}\` by the [Screenshots workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) (attempt ${GITHUB_RUN_ATTEMPT})."
             echo
             for name in "${order[@]}"; do
               echo "#### ${labels[$name]}"
               echo
-              echo "![${labels[$name]}](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/${name}?v=${GITHUB_RUN_ID})"
+              echo "![${labels[$name]}](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/${name}?v=${preview_version})"
               echo
             done
             echo "_This preview branch shows the latest generated run. If an image does not load (for example, in a private repository), download the screenshots artifact from the workflow run._"
