@@ -177,7 +177,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | --- | --- | --- | --- | --- |
 | Proxy capture and HTTP history | 1 | 2 | **Working**, with a bounded in-memory history, metadata filter, and scope filter; no persistence or body search. | Maintain and harden |
 | Repeater / manual request editor | 2 | 4 | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. No WebSocket replay, saved tabs, or persistence; replay bypasses proxy scope and rewriting. | Maintain; WebSocket in M4 |
-| Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: head and buffered UTF-8 body editing, forward/drop, match/replace afterward. Large, streaming, binary, and WebSocket messages are limited or absent. | Maintain |
+| Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, binary, and WebSocket messages are limited or absent. | Maintain |
 | Target scope and site map | 4 | 3 | **Partial**: scope filtering and blocking work; the site map is built from captured history only. No crawl, parameter discovery, annotations, or persisted scope. | Maintain; improve with search |
 | Intruder / fuzzer | 5 | 6 | **Missing**: the Intruder tab is a planned-workspace overview. | **P1 — M4** |
 | Automated scan and alert triage | Pro only | 1 | **Missing**: no scanner, passive checks, or alert management. | **Non-goal** |

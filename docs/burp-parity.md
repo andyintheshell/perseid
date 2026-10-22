@@ -44,7 +44,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Capability | Burp CE | Perseid | Status | Milestone |
 | --- | --- | --- | --- | --- |
 | Loopback HTTP/1.1 and HTTP/2 proxy and forwarding | Yes | Yes | Working | — |
-| Intercept, edit, forward, or drop messages | Yes | HTTP/1.1 and HTTP/2, head and buffered-body editing | Working | — |
+| Intercept, edit, forward, or drop messages | Yes | HTTP/1.1 and HTTP/2 table with multi-selection, head and buffered-body editing, and opt-in response interception | Working | — |
 | Scope / target allowlist | Yes | View filter plus opt-in HTTP/CONNECT blocking | Working | — |
 | Target site map | Yes | Host/path tree from history | Partial | — |
 | Match/replace rules | Yes | Head and buffered UTF-8 body rules, literal or regex | Working | — |

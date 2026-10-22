@@ -3,20 +3,25 @@
 use std::collections::BTreeMap;
 
 use crate::history::{History, HistoryItem};
+use crate::proxy::RequestInfo;
 
 pub(super) fn request_url(item: &HistoryItem) -> String {
     if item.is_tunnel() {
         return format!("https://{}", item.request.host);
     }
-    if item.request.uri.starts_with("http://") || item.request.uri.starts_with("https://") {
-        item.request.uri.clone()
+    request_info_url(&item.request)
+}
+
+pub(super) fn request_info_url(request: &RequestInfo) -> String {
+    if request.uri.starts_with("http://") || request.uri.starts_with("https://") {
+        request.uri.clone()
     } else {
-        let scheme = if item.request.scheme.is_empty() {
+        let scheme = if request.scheme.is_empty() {
             "http"
         } else {
-            item.request.scheme.as_str()
+            request.scheme.as_str()
         };
-        format!("{scheme}://{}{}", item.request.host, item.request.path)
+        format!("{scheme}://{}{}", request.host, request.path)
     }
 }
 

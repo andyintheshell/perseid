@@ -47,7 +47,7 @@ The top-level tabs follow Burp's tool order. Switch with `Ctrl`+`Shift` plus
 | Tab | Available today |
 | --- | --- |
 | **Target** | A host/path site map built from captured exchanges, and an editable scope list. Scope can filter the site map and history, and can optionally block out-of-scope traffic before it is forwarded. |
-| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** holds HTTP and decrypted HTTPS messages for editing and forwarding. **Match/replace** rewrites heads and buffered bodies. **TLS** shows the automatically created CA, opens the certificate page, and manages the HTTPS toggle, regeneration, removal, and pass-through hosts. |
+| **Proxy** | **HTTP history** is the live capture view and the default landing page. **Intercept** lists held HTTP and decrypted HTTPS messages in a multi-select table for editing, forwarding, and dropping; response interception is opt-in. **Match/replace** rewrites heads and buffered bodies. **TLS** shows the automatically created CA, opens the certificate page, and manages the HTTPS toggle, regeneration, removal, and pass-through hosts. |
 | **Intruder** | A planned-workspace overview. Fuzzing and payload configuration arrive in Milestone 4. |
 | **Repeater** | Editable request tabs seeded from HTTP history, a target bar, direct Send, and Pretty/Raw/Hex responses. HTTP/HTTPS only; WebSocket replay is not supported yet. |
 | **Decoder** | Stacked Text/Hex panels with Decode as, Encode as, Hash, and Smart decode; selection-aware transforms and a replaceable downstream chain. Common hashes only; read-only Hex and no Send to Decoder yet. |
@@ -74,16 +74,22 @@ baseline, resident-memory context, and method.
 ## Intercepting traffic
 
 Open **Proxy > Intercept** and click the **Intercept is off** button to turn
-interception on. As in Burp, this is the single on/off control: HTTP requests
-and responses — including decrypted HTTPS when TLS interception is enabled — are
-held before they are forwarded, and the button changes to **Intercept is on**.
-Held messages appear in a queue; the status bar shows how many are waiting.
-Edit the raw head, edit the body when it is buffered UTF-8 text, then choose
-**Forward** or **Drop** in the toolbar. **Forward** applies match/replace rules
-and re-checks the scope before sending. Holding a message does not stop
+interception on. As in Burp, this is the master on/off control. Requests are
+held by default; tick **Responses** to also hold server responses. Decrypted
+HTTPS messages are held in the same way when TLS interception is enabled. Held
+messages stay visible in a table with Time, Type, Direction, Method, URL,
+Status code, and Length columns; the status bar shows how many are waiting.
+
+Click a row to select it. Hold Shift to select a range, or Ctrl/Cmd to toggle
+individual rows. The editor below the table shows the most recently selected
+message, and each held message keeps its own unsent edits while you move
+between rows. **Forward** and **Drop** act on the selection, while **Forward
+all** and **Drop all** act on every held message. Forward applies match/replace
+rules and re-checks the scope before sending. Holding a message does not stop
 unrelated connections from progressing. Turning interception off stops new
 messages from being held; anything already waiting still needs **Forward** or
-**Drop**.
+**Drop**. Dropped messages remain in **HTTP history** with no response status,
+matching Burp's behavior.
 
 Only bodies up to `--intercept-limit` (1 MiB by default) are buffered for
 editing. Larger or streaming bodies are still held for header edits, but their
@@ -350,9 +356,9 @@ scale.
   rows. Clear the history filter, or turn off **Filter views to the scope** in
   **Target > Scope**.
 - **Pages appear to hang with an amber "awaiting intercept" count:** traffic is
-  held in **Proxy > Intercept**. Forward or drop the current message, then turn
-  interception off if you are finished. Pending messages are aborted when the
-  proxy stops.
+  held in **Proxy > Intercept**. Forward or drop the selected message (or use
+  **Forward all**), then turn interception off if you are finished. Pending
+  messages are aborted when the proxy stops.
 - **A request or `CONNECT` gets a `403`:** **Block out-of-scope traffic** is
   enabled and the host is not in the scope list. Add the host or turn the
   guardrail off.

@@ -123,6 +123,30 @@ pub fn line_job(line: &str, role: LineRole, language: Language, font: &FontId) -
 pub fn message_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
     let lines: Vec<&str> = text.lines().collect();
     let syntax = Syntax::from_lines(&lines);
+    layout_text(text, wrap_width, font, |line, index| {
+        line_job(line, syntax.role(index), syntax.language, font)
+    })
+}
+
+/// Build a body-only layout for the editable body buffer.
+///
+/// The interceptor edits the head and body separately, so the body buffer has
+/// no request/status line of its own. Detect the body language from its text
+/// and render every line with the body grammar.
+pub fn body_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
+    let lines: Vec<&str> = text.lines().collect();
+    let language = detect_language(&lines);
+    layout_text(text, wrap_width, font, |line, _| {
+        line_job(line, LineRole::Body, language, font)
+    })
+}
+
+fn layout_text(
+    text: &str,
+    wrap_width: f32,
+    font: &FontId,
+    mut style_line: impl FnMut(&str, usize) -> LayoutJob,
+) -> LayoutJob {
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap_width;
     job.wrap.break_anywhere = true;
@@ -134,7 +158,7 @@ pub fn message_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
         let (line, carriage_return) = segment
             .strip_suffix('\r')
             .map_or((segment, ""), |line| (line, "\r"));
-        let line_job = line_job(line, syntax.role(index), syntax.language, font);
+        let line_job = style_line(line, index);
         append_job(&mut job, line_job);
         if !carriage_return.is_empty() {
             job.append(carriage_return, 0.0, plain_format(font));
@@ -574,6 +598,21 @@ mod tests {
         .drop_without_applying_deltas();
 
         assert!(rows > text.lines().count(), "long lines should wrap");
+    }
+
+    #[test]
+    fn body_jobs_preserve_bytes_and_highlight_the_body_language() {
+        let font = FontId::monospace(MESSAGE_FONT_SIZE);
+        let text = "{\r\n  \"name\": \"Perseid\"\r\n}\r\n";
+        let job = body_job(text, 120.0, &font);
+
+        assert_eq!(job.text, text);
+        assert!(
+            job.sections
+                .iter()
+                .any(|section| section.format.color == theme::ACCENT_DARK),
+            "JSON keys should use the header accent color"
+        );
     }
 
     #[test]

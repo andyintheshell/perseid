@@ -82,7 +82,7 @@ pub use config::{
 pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
 };
-pub use intercept::{InterceptError, InterceptItem, InterceptKind};
+pub use intercept::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
 pub use policy::host_in_scope;
 pub use repeater::{
     DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterError, RepeaterRequest,

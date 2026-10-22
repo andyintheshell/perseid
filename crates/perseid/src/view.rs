@@ -52,6 +52,8 @@ pub fn status_text(item: &HistoryItem) -> String {
         status.to_string()
     } else if item.is_in_flight() {
         "…".to_string()
+    } else if item.is_dropped() {
+        String::new()
     } else {
         "err".to_string()
     }
@@ -59,7 +61,7 @@ pub fn status_text(item: &HistoryItem) -> String {
 
 pub fn status_color(item: &HistoryItem) -> Color32 {
     let Some(status) = item.status() else {
-        return if item.is_in_flight() {
+        return if item.is_in_flight() || item.is_dropped() {
             theme::GRAY
         } else {
             theme::RED
@@ -626,6 +628,20 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn dropped_exchanges_have_no_status_label() {
+        let mut item = item_with_bodies(Vec::new(), Vec::new());
+        item.response = None;
+        item.phase = Phase::Finished {
+            duration: Duration::from_millis(1),
+            result: crate::proxy::ExchangeResult::Dropped,
+        };
+
+        assert!(item.is_dropped());
+        assert_eq!(status_text(&item), "");
+        assert_eq!(status_color(&item), theme::GRAY);
     }
 
     #[test]
