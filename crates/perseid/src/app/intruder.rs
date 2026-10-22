@@ -833,7 +833,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(8, 3)),
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| {
                 let state = &mut self.intruder;
@@ -968,7 +968,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(8, 3)),
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| {
                 let state = &mut self.intruder;
@@ -1346,7 +1346,7 @@ impl PerseidApp {
                     .frame(
                         egui::Frame::NONE
                             .fill(theme::SURFACE_ALT)
-                            .inner_margin(egui::Margin::symmetric(6, 2)),
+                            .inner_margin(egui::Margin::symmetric(8, 3)),
                     )
                     .show(ui, |ui| {
                         let state = &mut self.intruder;
@@ -1447,7 +1447,7 @@ impl PerseidApp {
                 .column(Column::remainder().at_least(64.0));
 
             table
-                .header(18.0, |mut header| {
+                .header(20.0, |mut header| {
                     for title in ["#", "Payloads", "Status", "Length", "Time"] {
                         header.col(|ui| {
                             ui.label(RichText::new(title).strong().small().color(theme::TEXT));
@@ -1455,7 +1455,7 @@ impl PerseidApp {
                     }
                 })
                 .body(|body| {
-                    body.rows(18.0, rows, |mut row| {
+                    body.rows(20.0, rows, |mut row| {
                         let result = &state.results[row.index()];
                         row.set_selected(state.selected == Some(result.sequence));
                         row.col(|ui| {

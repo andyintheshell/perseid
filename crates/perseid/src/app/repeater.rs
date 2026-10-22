@@ -275,7 +275,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(8, 2)),
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -357,7 +357,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(8, 3)),
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| {
                 let tab = &mut self.repeater_tabs[index];
