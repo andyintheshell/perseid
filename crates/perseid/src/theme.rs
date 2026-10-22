@@ -47,12 +47,13 @@ pub fn apply(ctx: &egui::Context) {
     // Burp-style dense text benefits more from crisp stems and dark ink.
     style.visuals.text_options.subpixel_binning = false;
     style.visuals.text_options.font_hinting = true;
-    // Burp keeps its chrome compact so more of the request and response stay
-    // visible. These are deliberately smaller than egui's defaults.
-    style.spacing.item_spacing = egui::vec2(6.0, 3.0);
-    style.spacing.button_padding = egui::vec2(6.0, 2.0);
-    style.spacing.interact_size.y = 20.0;
-    style.spacing.menu_margin = egui::Margin::same(4);
+    // Burp-style chrome stays compact vertically, but controls need enough
+    // padding and separation to scan and click comfortably. These are slightly
+    // roomier than egui's dense defaults without wasting editor space.
+    style.spacing.item_spacing = egui::vec2(8.0, 4.0);
+    style.spacing.button_padding = egui::vec2(8.0, 4.0);
+    style.spacing.interact_size.y = 24.0;
+    style.spacing.menu_margin = egui::Margin::same(5);
     style
         .text_styles
         .insert(TextStyle::Heading, FontId::proportional(16.0));

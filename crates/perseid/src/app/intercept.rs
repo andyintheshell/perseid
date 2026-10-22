@@ -226,7 +226,7 @@ impl PerseidApp {
 
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(8, 3))
+            .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| {
                 // Burp's Intercept tab has one master on/off control. Requests
                 // are held by default; responses are a separate, opt-in rule
@@ -442,7 +442,7 @@ impl PerseidApp {
             }
 
             table
-                .header(18.0, |mut header| {
+                .header(20.0, |mut header| {
                     for title in [
                         "Time",
                         "Type",
@@ -458,7 +458,7 @@ impl PerseidApp {
                     }
                 })
                 .body(|body| {
-                    body.rows(18.0, rows, |mut row| {
+                    body.rows(20.0, rows, |mut row| {
                         let index = row.index();
                         let Some(entry) = queue.get(index) else {
                             return;

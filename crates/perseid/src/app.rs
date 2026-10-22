@@ -239,7 +239,7 @@ struct DetailCache {
 
 /// Draw one custom title-bar window control.
 fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 20.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(26.0, 22.0), egui::Sense::click());
     let hovered = response.hovered();
     let (fill, color) = match control {
         WindowControl::Close if hovered => (theme::RED, Color32::WHITE),
@@ -825,8 +825,8 @@ impl PerseidApp {
             .input(|input| input.viewport().maximized.unwrap_or(false));
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-            ui.spacing_mut().button_padding = egui::vec2(5.0, 1.0);
+            ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
+            ui.spacing_mut().button_padding = egui::vec2(7.0, 2.0);
 
             if let Some(mark) = &self.mark {
                 let response = ui
@@ -910,8 +910,8 @@ impl PerseidApp {
 
             // The empty part of the title bar drags the window, like Burp's
             // menu bar. Reserve room on the right for the window controls.
-            let drag_height = ui.spacing().interact_size.y.max(18.0);
-            let drag_width = (ui.available_width() - 3.0 * 24.0 - 8.0).max(0.0);
+            let drag_height = ui.spacing().interact_size.y.max(20.0);
+            let drag_width = (ui.available_width() - 3.0 * 26.0 - 10.0).max(0.0);
             let (drag_rect, drag_response) = ui.allocate_exact_size(
                 egui::vec2(drag_width, drag_height),
                 egui::Sense::click_and_drag(),
@@ -1203,10 +1203,10 @@ impl eframe::App for PerseidApp {
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
                     .inner_margin(egui::Margin {
-                        left: 8,
+                        left: 10,
                         right: 0,
-                        top: 2,
-                        bottom: 2,
+                        top: 3,
+                        bottom: 3,
                     }),
             )
             .show(ui, |ui| self.title_bar(ui));
@@ -1215,7 +1215,7 @@ impl eframe::App for PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(8, 3)),
+                    .inner_margin(egui::Margin::symmetric(10, 5)),
             )
             .show(ui, |ui| self.main_tabs(ui));
 
@@ -1223,7 +1223,7 @@ impl eframe::App for PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(8, 2)),
+                    .inner_margin(egui::Margin::symmetric(10, 3)),
             )
             .show(ui, |ui| self.status_bar(ui));
 

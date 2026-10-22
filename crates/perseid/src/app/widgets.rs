@@ -15,25 +15,25 @@ struct TabStyle {
 
 const MAIN_TAB_STYLE: TabStyle = TabStyle {
     font_size: 12.5,
-    height: 23.0,
-    min_width: 64.0,
-    padding_x: 9.0,
+    height: 28.0,
+    min_width: 72.0,
+    padding_x: 12.0,
     corner_radius: 3,
 };
 
 const SECTION_TAB_STYLE: TabStyle = TabStyle {
     font_size: 11.5,
-    height: 21.0,
+    height: 25.0,
     min_width: 0.0,
-    padding_x: 7.0,
+    padding_x: 10.0,
     corner_radius: 3,
 };
 
 const MESSAGE_TAB_STYLE: TabStyle = TabStyle {
     font_size: 11.0,
-    height: 18.0,
+    height: 20.0,
     min_width: 0.0,
-    padding_x: 6.0,
+    padding_x: 8.0,
     corner_radius: 3,
 };
 
@@ -63,7 +63,7 @@ pub(super) fn section_bar(ui: &mut egui::Ui, id_salt: &str, add_tabs: impl FnOnc
         .frame(
             egui::Frame::NONE
                 .fill(theme::SURFACE)
-                .inner_margin(egui::Margin::symmetric(8, 2)),
+                .inner_margin(egui::Margin::symmetric(10, 4)),
         )
         .show(ui, |ui| {
             ui.horizontal(add_tabs);
@@ -172,7 +172,7 @@ pub(super) fn table_frame<R>(
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(8, 0))
+        .inner_margin(egui::Margin::symmetric(10, 0))
         .show(ui, add_contents)
         .inner
 }
@@ -180,7 +180,7 @@ pub(super) fn table_frame<R>(
 /// Add the standard padding around card-based page content.
 pub(super) fn page_pad<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(8, 6))
+        .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, add_contents)
         .inner
 }
@@ -190,7 +190,7 @@ pub(super) fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
         .fill(theme::SURFACE)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(4.0)
-        .inner_margin(egui::Margin::same(8))
+        .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             add_contents(ui)

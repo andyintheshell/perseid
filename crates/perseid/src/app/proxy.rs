@@ -81,7 +81,7 @@ impl PerseidApp {
     fn http_history_view(&mut self, ui: &mut egui::Ui) {
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(8, 3))
+            .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| self.history_toolbar(ui));
         self.rebuild_visible();
         // The filter or scope can hide the selected exchange. Do not leave its
@@ -99,7 +99,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(4)),
+                    .inner_margin(egui::Margin::same(6)),
             )
             .show(ui, |ui| self.detail_panel(ui));
 
@@ -234,7 +234,7 @@ impl PerseidApp {
             }
 
             table
-                .header(18.0, |mut header| {
+                .header(20.0, |mut header| {
                     for title in [
                         "#",
                         "Method",
@@ -250,7 +250,7 @@ impl PerseidApp {
                     }
                 })
                 .body(|body| {
-                    body.rows(16.0, rows, |mut row| {
+                    body.rows(18.0, rows, |mut row| {
                         let index = row.index();
                         let id = self.visible[index];
                         let Some(item) = self.history.get(id) else {
