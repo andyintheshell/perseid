@@ -2,7 +2,8 @@
 //!
 //! Pretty and Raw use egui's multiline editor so wrapping, selection, keyboard
 //! navigation, and clipboard behavior come from the widget rather than a
-//! bespoke text layout. Hex uses a virtualized row list because a large dump is
+//! bespoke text layout. Interception makes both editable; history and Hex
+//! remain read-only. Hex uses a virtualized row list because a large dump is
 //! too expensive to lay out as one galley.
 
 use std::sync::Arc;
@@ -110,8 +111,8 @@ pub(super) fn message_text(
 
 /// Render the shared message frame with an editable text buffer.
 ///
-/// Interception uses this for the Raw view; Pretty and Hex remain read-only
-/// representations of the same draft.
+/// Interception uses this for both Pretty and Raw. Hex remains a read-only
+/// representation of the same draft.
 pub(super) fn message_editor(
     ui: &mut egui::Ui,
     id: u64,
