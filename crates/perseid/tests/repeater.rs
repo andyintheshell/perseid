@@ -21,6 +21,46 @@ use tokio_rustls::TlsAcceptor;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+#[tokio::test]
+async fn rejects_oversized_response_heads() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let _ = read_request(&mut stream).await;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nX-Large: {}\r\nContent-Length: 0\r\n\r\n",
+            "x".repeat(128 * 1024)
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+    });
+    let repeater = Repeater::start(RepeaterConfig {
+        timeout: TIMEOUT,
+        ..RepeaterConfig::default()
+    })
+    .unwrap();
+    let request = RepeaterRequest::parse(
+        "GET / HTTP/1.1\r\n\r\n",
+        Vec::new(),
+        "http",
+        &addr.to_string(),
+    )
+    .unwrap();
+    let id = repeater.send(request).unwrap();
+    let response = tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if let Some(response) = repeater.try_recv() {
+                break response;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("oversized heads should be rejected promptly");
+    assert_eq!(response.id, id);
+    assert!(matches!(response.result, RepeaterResult::Failed { .. }));
+}
+
 fn origin_certificate(name: &str) -> (ServerConfig, String) {
     let key = KeyPair::generate().expect("origin key");
     let params = CertificateParams::new(vec![name.to_string()]).expect("origin params");

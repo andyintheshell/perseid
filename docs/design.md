@@ -189,11 +189,16 @@ Important implementation principles:
 - A bounded interception queue: held bodies are capped by `--intercept-limit`,
   larger or streaming bodies stay header-only, and unresolved messages apply
   backpressure rather than being silently discarded.
+- Repeater admission covers queued jobs, active sends, and unread results, with
+  both operation-count and retained-data budgets. It reserves response capacity
+  up front and reports backpressure instead of growing an unbounded queue.
 - Virtualized request lists and message rows, plus bounded text previews. Pretty
   formats JSON, HTML/XML, and URL-encoded forms; Pretty and Raw are rendered
   line-by-line with numbers and a small purpose-built highlighter, so only the
   visible page is laid out. All views decode gzip, deflate, and Brotli bodies
   with a hard output cap, and Hex previews are bounded byte-offset dumps.
+- Pretty formatting has its own output and nesting budgets, independently of
+  the captured/decoded input limit; excessive expansion falls back to Raw text.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply
