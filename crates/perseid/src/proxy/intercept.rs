@@ -4,6 +4,8 @@
 //! request or response stays parked until the consumer forwards it, drops it,
 //! or drops the event itself (which aborts the exchange).
 
+use std::time::SystemTime;
+
 use tokio::sync::oneshot;
 
 use crate::proxy::events::RequestInfo;
@@ -17,10 +19,31 @@ pub(crate) enum InterceptDecision {
 }
 
 /// Which direction an intercepted message is travelling in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InterceptKind {
     Request,
     Response,
+}
+
+/// Stable identity for one held message.
+///
+/// Exchange ids are unique while an item is waiting. The direction is part of
+/// the key because a request and its response can otherwise share an id.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InterceptKey {
+    id: u64,
+    kind: InterceptKind,
+}
+
+impl InterceptKey {
+    /// The exchange id, matching `ProxyEvent` ids.
+    pub fn id(self) -> u64 {
+        self.id
+    }
+
+    pub fn kind(self) -> InterceptKind {
+        self.kind
+    }
 }
 
 /// A message waiting for an interception decision.
@@ -34,6 +57,7 @@ pub enum InterceptKind {
 pub struct InterceptItem {
     kind: InterceptKind,
     id: u64,
+    timestamp: SystemTime,
     request: RequestInfo,
     head: String,
     body: Option<Vec<u8>>,
@@ -76,6 +100,7 @@ impl InterceptItem {
         Self {
             kind,
             id,
+            timestamp: SystemTime::now(),
             request,
             head,
             body,
@@ -91,6 +116,27 @@ impl InterceptItem {
 
     pub fn kind(&self) -> InterceptKind {
         self.kind
+    }
+
+    /// Stable identity for selection state in the intercept list.
+    pub fn key(&self) -> InterceptKey {
+        InterceptKey {
+            id: self.id,
+            kind: self.kind,
+        }
+    }
+
+    /// When the proxy held this message.
+    pub fn timestamp(&self) -> SystemTime {
+        self.timestamp
+    }
+
+    /// Parsed status for a held response. Requests have no status.
+    pub fn response_status(&self) -> Option<u16> {
+        (self.kind == InterceptKind::Response)
+            .then(|| parse_response_head(&self.head).ok())
+            .flatten()
+            .map(|head| head.status.as_u16())
     }
 
     /// The request that started this exchange. For a response item this is the
@@ -276,5 +322,70 @@ mod tests {
             );
         }
         assert!(matches!(rx.try_recv(), Ok(InterceptDecision::Abort)));
+    }
+
+    #[test]
+    fn keys_distinguish_the_two_directions() {
+        let (tx, _rx) = oneshot::channel();
+        let request = InterceptItem::new_request(
+            7,
+            request_info(),
+            "GET / HTTP/1.1\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+        let (tx, _rx) = oneshot::channel();
+        let response = InterceptItem::new_response(
+            7,
+            request_info(),
+            "HTTP/1.1 200 OK\r\n\r\n".to_string(),
+            Some(Vec::new()),
+            tx,
+        );
+
+        assert_eq!(request.key().id(), 7);
+        assert_eq!(request.key().kind(), InterceptKind::Request);
+        assert_eq!(response.key().kind(), InterceptKind::Response);
+        assert_ne!(request.key(), response.key());
+    }
+
+    #[test]
+    fn response_status_is_read_from_the_held_status_line() {
+        let (tx, _rx) = oneshot::channel();
+        let response = InterceptItem::new_response(
+            8,
+            request_info(),
+            "HTTP/1.1 418 I'm a teapot\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+        assert_eq!(response.response_status(), Some(418));
+
+        let (tx, _rx) = oneshot::channel();
+        let request = InterceptItem::new_request(
+            9,
+            request_info(),
+            "GET / HTTP/1.1\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+        assert_eq!(request.response_status(), None);
+    }
+
+    #[test]
+    fn timestamp_is_set_when_the_message_is_held() {
+        let before = SystemTime::now();
+        let (tx, _rx) = oneshot::channel();
+        let item = InterceptItem::new_request(
+            10,
+            request_info(),
+            "GET / HTTP/1.1\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+        let after = SystemTime::now();
+
+        assert!(item.timestamp() >= before);
+        assert!(item.timestamp() <= after);
     }
 }

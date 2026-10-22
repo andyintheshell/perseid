@@ -35,12 +35,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::proxy::{
-    CertificateAuthority, InterceptItem, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings,
+    CertificateAuthority, InterceptKey, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings,
     Repeater, TlsConfig,
 };
 use egui::{Color32, Key, RichText, Stroke};
 
-use self::intercept::InterceptDraft;
+use self::intercept::InterceptEntry;
 
 use crate::Args;
 use crate::branding;
@@ -160,8 +160,14 @@ pub struct PerseidApp {
     dropped_seen: u64,
     paused: bool,
     intercept_enabled: bool,
-    intercept_queue: VecDeque<InterceptItem>,
-    intercept_draft: Option<InterceptDraft>,
+    /// Whether server responses are also held. Burp leaves response
+    /// interception off by default and exposes it as a separate rule set.
+    intercept_responses: bool,
+    intercept_queue: VecDeque<InterceptEntry>,
+    intercept_selected: BTreeSet<InterceptKey>,
+    intercept_active: Option<InterceptKey>,
+    intercept_anchor: Option<InterceptKey>,
+    intercept_scroll_to_active: bool,
     scope_enforce: bool,
     match_replace: Vec<MatchReplaceRule>,
     rules_error: Option<String>,
@@ -305,8 +311,12 @@ impl PerseidApp {
             dropped_seen: 0,
             paused: false,
             intercept_enabled: false,
+            intercept_responses: false,
             intercept_queue: VecDeque::new(),
-            intercept_draft: None,
+            intercept_selected: BTreeSet::new(),
+            intercept_active: None,
+            intercept_anchor: None,
+            intercept_scroll_to_active: false,
             scope_enforce: false,
             match_replace: Vec::new(),
             rules_error: None,
@@ -416,8 +426,7 @@ impl PerseidApp {
                 self.proxy = Some(proxy);
                 self.proxy_error = None;
                 self.dropped_seen = 0;
-                self.intercept_queue.clear();
-                self.intercept_draft = None;
+                self.clear_intercept_queue();
             }
             Err(err) => {
                 log::error!("could not start the proxy: {err}");
@@ -429,11 +438,10 @@ impl PerseidApp {
 
     fn proxy_settings(&self) -> ProxySettings {
         ProxySettings {
-            // The UI exposes Burp's single Intercept on/off control. The proxy
-            // policy still tracks each direction separately so rules can grow
-            // without changing this API.
+            // Burp's master toggle arms interception; requests are held by
+            // default, while responses need the separate response rule set.
             intercept_requests: self.intercept_enabled,
-            intercept_responses: self.intercept_enabled,
+            intercept_responses: self.intercept_enabled && self.intercept_responses,
             scope_enforce: self.scope_enforce,
             scope_rules: self.scope.iter().cloned().collect(),
             tls_intercept: self.tls_intercept,
@@ -507,11 +515,13 @@ impl PerseidApp {
         // Interception has its own bounded, backpressured channel. Draining it
         // here keeps held requests moving even when the history event queue is
         // full or capture is paused.
+        let mut received_intercept = false;
         for _ in 0..MAX_EVENTS_PER_FRAME {
             let Some(item) = proxy.try_recv_intercept() else {
                 break;
             };
-            self.intercept_queue.push_back(item);
+            self.intercept_queue.push_back(InterceptEntry::new(item));
+            received_intercept = true;
         }
         // Drain what the proxy queued before declaring it stopped, then
         // resolve any exchange whose terminal event never made it through.
@@ -521,8 +531,7 @@ impl PerseidApp {
             self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
             self.history
                 .interrupt_in_flight("proxy stopped before the exchange finished");
-            self.intercept_queue.clear();
-            self.intercept_draft = None;
+            self.clear_intercept_queue();
         }
         if selected_changed {
             self.detail = None;
@@ -534,7 +543,12 @@ impl PerseidApp {
             self.selected = None;
             self.detail = None;
         }
-        self.sync_intercept_draft();
+        if received_intercept {
+            self.intercept_scroll_to_active = true;
+        }
+        if received_intercept || !self.intercept_queue.is_empty() {
+            self.sync_intercept_selection();
+        }
         // Keep durations and in-flight rows ticking while anything is open.
         if self.history.in_flight() > 0 {
             ctx.request_repaint_after(Duration::from_millis(100));

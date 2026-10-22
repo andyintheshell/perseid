@@ -28,10 +28,13 @@ The desktop application and its interception proxy are both part of the single
   limit, interception limit, and count/byte history bounds. HTTP/2 is negotiated
   with intercepted clients and HTTPS origins over TLS, while h2c prior knowledge
   is accepted on the plain listener.
-- Editable request and response interception behind one Burp-style **Intercept
-  is on/off** control: hold HTTP and decrypted HTTPS messages, edit the head and
-  buffered body, then forward or drop. Bodies over the intercept limit stay
-  header-only instead of being silently modified.
+- A Burp-style **Intercept** table behind one master on/off control: held HTTP
+  and decrypted HTTPS messages stay visible as a multi-select list with request
+  and response rows, timestamps, URLs, and status. Edit the selected message's
+  head or buffered body, then forward or drop the selection or the whole list.
+  Response interception is a separate, opt-in control and is off by default,
+  matching Burp. Bodies over the intercept limit stay header-only instead of
+  being silently modified.
 - HTTPS interception on by default with a locally generated certificate
   authority, per-host certificates, a built-in certificate download page, a
   pass-through host list, and documented manual browser trust and removal steps.
