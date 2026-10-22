@@ -1,0 +1,143 @@
+# Troubleshooting
+
+[Documentation](README.md) · [Getting started](getting-started.md) ·
+[Workbench](workbench.md) · [HTTPS setup](tls.md)
+
+Start with the [local HTTP walkthrough](getting-started.md#try-it-with-a-local-target).
+If that works, the build, listener, forwarding path, and history are working;
+focus on browser proxy settings or certificate trust next.
+
+## The app will not build or open
+
+### Rust is missing, too old, or selects an unexpected toolchain
+
+Check `rustc --version` and `cargo --version`. The minimum is Rust 1.95;
+rustup uses the repository's 1.95.0 pin. Homebrew supplies its own current
+toolchain and does not use that pin.
+
+On macOS, check which executables are selected:
+
+```sh
+command -v rustc
+command -v cargo
+```
+
+If you intend to use Homebrew and an older rustup shim takes precedence, use
+`export PATH="$(brew --prefix rust)/bin:$PATH"` for the current shell. Keep one
+toolchain's Cargo, rustc, rustfmt, and Clippy together. Newer Clippy releases can
+add warnings absent from the pinned CI toolchain; include the version when
+reporting a check failure.
+
+### Native libraries or a display are missing
+
+Install the [Linux build dependencies](getting-started.md#linux), or Apple's
+Command Line Tools on macOS. A Linux UI run also needs an X11/Wayland session
+and an OpenGL-capable graphics stack. An SSH-only shell without a display is
+not a graphical session.
+
+To exercise only the proxy from a terminal, use the
+[headless example](../CONTRIBUTING.md#headless-proxy-and-library-api). This does
+not remove the crate's GUI build dependencies. The screenshot script is a
+separate Linux/Xvfb developer workflow, not a macOS launch command.
+
+## The proxy is not running
+
+Another process may own port 8080. Choose a different loopback address:
+
+```sh
+cargo run -p perseid --locked -- --listen 127.0.0.1:8081
+```
+
+Update the browser/client proxy settings to match. The toolbar's **Retry**
+button can retry after the conflict is resolved. Do not use sudo or bind a
+public interface just to work around a local port conflict.
+
+## History or the site map is empty
+
+1. Confirm that the toolbar shows the proxy listening and **Capture** is on.
+2. Check the client uses that address for both HTTP and HTTPS.
+3. Check browser bypass rules and the `NO_PROXY`/`no_proxy` environment variables.
+   For curl, `--noproxy "" --proxy http://127.0.0.1:8080` forces the proxy path,
+   including for a loopback target.
+4. Clear the history filter and disable **Filter views to the scope** temporarily.
+5. Check eviction and dropped-event counters in the status bar.
+
+The site map uses retained history, not active crawling. HTTPS pass-through
+tunnels have no visible decrypted requests, and `CONNECT` transport tunnels do
+not get their own history rows. Repeater exchanges are also separate from Proxy
+history by design.
+
+## Pages hang with messages awaiting interception
+
+Open **Proxy > Intercept** and use **Forward**, **Drop**, **Forward all**, or
+**Drop all**. Turning interception off does not release messages already held.
+If response holding is enabled, a request may have reached the target while
+its response is still waiting for your decision.
+
+## A request receives 403
+
+Check **Target > Scope > Block out-of-scope traffic**. Add the explicitly
+authorized host or turn blocking off. Scope includes subdomains and ignores
+ports; an empty list allows everything. Check whether you explicitly dropped
+the request as well. A `403` can also originate from the target—inspect the
+response and app status rather than assuming every rejection is local.
+
+## HTTPS fails or stays opaque
+
+- Open **Proxy > Proxy settings** and check that the CA is ready and
+  **Intercept HTTPS** is selected.
+- Remove the host from the pass-through list only if you intend to decrypt it.
+- Install the public CA in the testing browser using the
+  [trust instructions](tls.md#install-the-certificate). A different profile may
+  have a different trust store.
+- If the CA was regenerated, remove the old trust entry and import the new
+  certificate. Rebuilding the app alone should not require regenerating the CA.
+- Pinned certificates and non-HTTP TLS protocols may require pass-through.
+- An upstream private/self-signed certificate is a separate trust problem from
+  the browser trusting Perseid's CA. There is no documented desktop "ignore TLS
+  errors" switch; do not disable verification as a workaround.
+
+For HTTP/3/QUIC-only behavior, use a lab/client configuration that can fall back
+to HTTP/1.1 or HTTP/2; QUIC is not proxied. More CA-specific advice is in
+[HTTPS troubleshooting](tls.md#troubleshooting).
+
+## A body is read-only, truncated, or different from the wire
+
+Interception only buffers known-size bodies within `--intercept-limit`, and
+only buffered text is body-editable. Chunked/streaming and binary bodies can
+remain header-only even when the visible prefix is small.
+
+History and Repeater previews decode supported compression, reconstruct headers,
+and limit display size. Raw and Hex do not promise the exact original wire
+representation. Review [message views](workbench.md#inspect-messages) and any
+Repeater seed warning before replaying a captured body.
+
+## The interface is too small or too large
+
+Use the **View** zoom menu or `--ui-scale 1.5` / `--ui-scale 2`. Reset zoom
+returns to the startup scale. See [HiDPI displays](getting-started.md#hidpi-displays)
+for native-scale and X11 environment behavior.
+
+## Collect a useful bug report
+
+Include:
+
+- `git rev-parse --short HEAD`, OS/architecture, and Rust/Cargo versions;
+- debug or release build, relevant CLI flags, and exact reproduction steps;
+- expected versus actual behavior, the selected tool, and any status counters;
+- a minimal local target or **synthetic** request/response, where possible;
+- a redacted screenshot or terminal error if it adds information.
+
+To collect more detailed application logs:
+
+```sh
+RUST_LOG=perseid=debug cargo run -p perseid --locked
+```
+
+Logs and screenshots can contain URLs, hostnames, paths, tokens, or other
+sensitive data. Review them before sharing. Never publish a CA private key,
+real credentials, or someone else's traffic.
+
+[Open a normal bug report](https://github.com/andyintheshell/perseid/issues).
+For a vulnerability in Perseid itself, follow the **private**
+[security reporting policy](../SECURITY.md#reporting-a-vulnerability) instead.

@@ -1,5 +1,8 @@
 # Safety and privacy
 
+[Documentation](README.md) · [HTTPS setup](tls.md) ·
+[Workbench](workbench.md) · [Security policy](../SECURITY.md)
+
 Perseid is intended for systems you own or are explicitly authorized to test,
 including purpose-built training labs. Intercepted requests may contain
 passwords, session tokens, cookies, or personal data.
@@ -44,12 +47,18 @@ aids, not permission to test an arbitrary host.
 
 ## Data handling
 
-For now, captured history, held interception messages, and Repeater tabs and
-responses live in memory only and disappear when the process exits. Dropping
+For now, captured history, held interception messages, Repeater tabs/responses,
+and Decoder panels live in memory only and are not restored after exit. Dropping
 the proxy handle or closing the application releases held messages and aborts
-their exchanges. There is no disk persistence, export, or background upload.
-The only files Perseid writes are the TLS certificate authority and its private
-key described below.
+their exchanges. There is no traffic database, file export, or background
+upload. Clipboard copying is an explicit user action. In a normal desktop run,
+the app's persisted data is the TLS certificate authority and its private key
+described below; the developer screenshot feature also writes synthetic PNGs.
+
+In-memory storage is not secure erasure: OS swap, crash reports, clipboard
+history, terminal logs, and screenshots can retain copies. Capture only what
+you are authorized to handle, on a machine you trust, and redact shared output.
+Retention limits are not a hard cap on the whole process's memory use.
 
 When persistent history and exports are added:
 

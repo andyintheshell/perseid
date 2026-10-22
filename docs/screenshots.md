@@ -1,9 +1,18 @@
 # Screenshots
 
+[Documentation](README.md) · [Workbench guide](workbench.md) ·
+[Getting started](getting-started.md)
+
 These full-window scenes are generated deterministically by
 `scripts/screenshots.sh`. The same images are uploaded by CI and posted to
-pull requests so every UI tab is reviewed together. They are captured at 2×
-and saved at native resolution (2560×1640) so they stay sharp on HiDPI displays.
+same-repository pull requests so every UI tab is reviewed together; forks can
+use workflow artifacts. Traffic and credentials in these scenes are synthetic.
+The main scenes are captured at 2× and saved at native resolution (2560×1640)
+for HiDPI displays; the memory panel is a smaller close-up. Screenshots
+illustrate the UI, not platform support or performance guarantees.
+
+[History](#proxy--http-history) · [Intercept](#proxy--intercept) ·
+[Repeater](#repeater) · [Decoder](#decoder) · [Memory](#memory-usage)
 
 ## Proxy > HTTP history
 
@@ -19,6 +28,8 @@ and saved at native resolution (2560×1640) so they stay sharp on HiDPI displays
 
 ## Proxy > Intercept
 
+Hold messages in a table; select a row to inspect or edit its Raw representation.
+
 ![Proxy Intercept with three held requests](images/perseid-proxy-intercept.png)
 
 ## Proxy > Match/replace
@@ -31,16 +42,25 @@ and saved at native resolution (2560×1640) so they stay sharp on HiDPI displays
 
 ## Intruder
 
+This is a planned-workspace preview, not an implemented fuzzing engine.
+
 ![Intruder preview workspace](images/perseid-intruder.png)
 
 ## Repeater
+
+Replay edited requests directly to a target, independently of the proxy listener.
 
 ![Repeater request and response](images/perseid-repeater.png)
 
 ## Decoder
 
+Build a local encode/decode/hash chain with one panel per transformation.
+
 ![Decoder Base64 and SHA-256 chain](images/perseid-decoder.png)
 
 ## Memory usage
+
+Allocator heap in use and peak, not total process RSS. See the
+[measurement guide](performance.md) for the distinction.
 
 ![Memory window with current, peak, and rolling history](images/perseid-memory.png)

@@ -1,10 +1,14 @@
 # Burp Suite Community parity
 
+[Documentation](README.md) · [Workbench](workbench.md) · [Roadmap](roadmap.md)
+
 **Goal:** Perseid aims to be a practical alternative to Burp Suite Community
 Edition (CE) for manual web security testing: the same capabilities, adapted
 to a Rust-native, memory-bounded, keyboard-first tool.
 
 This is a direction, not a claim. Several capabilities below are still planned.
+For instructions on the implemented tools, use the [workbench guide](workbench.md);
+this page is a capability reference, not a setup tutorial.
 
 ## What parity means
 
@@ -39,7 +43,7 @@ limit. Scope and concurrency remain explicit, user-controlled safety settings.
 
 Status values: **Working** (usable today), **Partial** (foundation exists),
 **Planned** (assigned to a milestone), **Deviation** (intentional difference),
-**Non-goal** (explicitly outside parity).
+**Beyond CE** (a planned Perseid extra), **Non-goal** (explicitly outside parity).
 
 | Capability | Burp CE | Perseid | Status | Milestone |
 | --- | --- | --- | --- | --- |

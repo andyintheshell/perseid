@@ -1,5 +1,8 @@
 # Design
 
+[Documentation](README.md) · [Workbench](workbench.md) ·
+[Contributing](../CONTRIBUTING.md) · [Roadmap](roadmap.md)
+
 Perseid is a Rust-native web security tool for people who like to understand
 what happens on the wire. It is designed around the everyday workflow of
 intercepting a request, inspecting it, changing it, sending it again, and
@@ -32,8 +35,10 @@ Perseid aims to be:
 
 ## Architecture
 
-Perseid is a set of small Rust components, with the user interface
-independent from the proxy and analysis code:
+Perseid currently ships as one Cargo package. The proxy and byte-transform
+engines have module boundaries so their behavior can be tested without opening
+the UI; they are not separate, GUI-free build targets. The following diagram
+shows current responsibilities, with planned work labelled explicitly:
 
 ```text
 External browser
@@ -47,7 +52,7 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
       |
       +----> Bounded capture and in-memory history
       |                |
-      |                +----> Search, filtering, comparison
+      |                +----> Metadata filtering (search/diff planned)
       |
       +----> Optional passive and guided checks (planned)
                        |
@@ -103,11 +108,16 @@ chain cannot describe transformations that no longer produced the visible
 bytes.
 
 Planned additions include a disk-backed history store, fuzzing workers, and a
-native extension point. Network operations run on their own runtime and
-communicate with the UI through a bounded channel so a slow interface cannot
-grow memory without limit. Held messages use a separate bounded interception
-channel with a one-shot decision per message, so capture-event overflow cannot
-strand an exchange that is waiting for the user.
+native extension point. Proxy and Repeater network operations run off the UI
+thread. Proxy capture events use a bounded, lossy channel with a drop counter;
+Repeater results use a separate channel. Held messages use a separate bounded
+interception channel with a one-shot decision per message, so capture-event
+overflow does not discard the user's interception decision channel.
+
+Capture/history limits constrain retained body data, not total resident memory.
+Queues, message formatting, editor state, connection pools, and graphics
+resources also consume memory. End-to-end resource bounding remains a hardening
+goal, not a claim that every allocation has a shared process-wide budget.
 
 The desktop application does not start or embed a Chromium instance. An
 external browser points at the loopback proxy; this keeps the binary small and
@@ -183,17 +193,19 @@ Important implementation principles:
 - Hard limits on captured body size, with bounded text and hex previews.
 - A total retained-body budget for history, independent of the exchange count
   (half of physical memory by default, with a 256 MiB fallback).
-- Bounded worker queues, concurrent connections and tunnels, and a bounded UI
-  event channel with drop counters. Repeater responses share the capture limit,
-  and simultaneous Repeater sends are capped independently of tab count.
+- Concurrent proxy connection/tunnel limits and a bounded capture-event channel
+  with drop counters. Repeater responses share the capture limit, and active
+  sends are capped independently of tab count; a concurrency limit alone does
+  not establish an aggregate queued-work or retained-memory budget.
 - A bounded interception queue: held bodies are capped by `--intercept-limit`,
   larger or streaming bodies stay header-only, and unresolved messages apply
   backpressure rather than being silently discarded.
-- Virtualized request lists and message rows, plus bounded text previews. Pretty
-  formats JSON, HTML/XML, and URL-encoded forms; Pretty and Raw are rendered
-  line-by-line with numbers and a small purpose-built highlighter, so only the
-  visible page is laid out. All views decode gzip, deflate, and Brotli bodies
-  with a hard output cap, and Hex previews are bounded byte-offset dumps.
+- Virtualized history tables and Hex rows, plus bounded body previews. Pretty
+  and Raw use a multiline text editor with syntax highlighting and a painted
+  line-number gutter; unlike Hex, their text layout is not row-virtualized.
+  History/Repeater views decode gzip, deflate, and Brotli bodies with a decoded
+  preview cap. Pretty-format expansion and editor caches are separate memory
+  costs from the captured/decoded input.
 - Avoid full document layout for multi-megabyte responses; show raw text and
   hex views instead.
 - A fixed, small malloc-arena limit so proxy and UI threads do not multiply
