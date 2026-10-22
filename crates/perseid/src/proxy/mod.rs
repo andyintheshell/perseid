@@ -23,7 +23,9 @@
 //! [`Repeater`] is a separate direct HTTP/HTTPS client for manual replay. It
 //! has its own Tokio runtime and connection pool, so it continues to work when
 //! the proxy is stopped, and it does not pass traffic through the proxy's
-//! interception, scope, or rewrite policy.
+//! interception, scope, or rewrite policy. [`Intruder`] reuses that direct
+//! client for payload attacks and applies an optional scope list from
+//! [`IntruderPlan`] to each generated request.
 //!
 //! # Current scope
 //!
@@ -47,6 +49,10 @@
 //!   requests can target the connection authority independently of a preserved
 //!   virtual `Host` header, and response bodies are bounded by
 //!   [`RepeaterConfig::capture_limit`]. WebSocket replay is not supported yet.
+//! - Direct Intruder attacks using the same client. [`AttackType`] implements
+//!   Sniper, Battering ram, Pitchfork, and Cluster bomb with `$$` markers,
+//!   lazy request generation, and bounded result queues. The engine clamps
+//!   concurrency to [`MAX_INTRUDER_CONCURRENCY`].
 //!
 //! # Example
 //!
@@ -64,6 +70,7 @@ mod config;
 mod events;
 mod forward;
 mod intercept;
+mod intruder;
 mod message;
 mod policy;
 mod portal;
@@ -83,6 +90,11 @@ pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
 };
 pub use intercept::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
+pub use intruder::{
+    AttackType, Intruder, IntruderConfig, IntruderError, IntruderEvent, IntruderPlan,
+    IntruderResult, IntruderStartError, MARKER, MAX_INTRUDER_CONCURRENCY, auto_mark, clear_markers,
+    marker_ranges, toggle_marker, update_host_header,
+};
 pub use policy::host_in_scope;
 pub use repeater::{
     DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterError, RepeaterRequest,

@@ -121,8 +121,9 @@ You should see the greeting in curl and a `GET` row with status `200` in
 empty `--noproxy` value prevents a local bypass setting from skipping the proxy.
 Stop the demo server with `Ctrl+C` when you are done.
 
-Next, try **Send to Repeater** on that exchange, or use
-[Intercept](workbench.md#intercept-and-edit) to hold the next request.
+Next, try **Send to Repeater** or **Send to Intruder** on that exchange, or use
+[Intercept](workbench.md#intercept-and-edit) to hold the next request. For an
+Intruder walkthrough, see the [workbench guide](workbench.md#intruder).
 
 ## Connect a testing browser
 
@@ -170,7 +171,8 @@ default in the desktop app.
 ## Workspace
 
 Continue with the [workbench guide](workbench.md) for Target scope, history,
-message views, interception, match/replace, Repeater, Decoder, and shortcuts.
+message views, interception, match/replace, Intruder, Repeater, Decoder, and
+shortcuts.
 
 Pretty body formatting has independent 256 KiB input/output and 128-level
 nesting budgets; exceeding one falls back to bounded Raw text. Repeater also
@@ -181,8 +183,8 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-This is a prototype: history and workspace settings are not saved, Intruder is
-only a preview, and WebSockets, HTTP/3/QUIC, Comparer, and Sequencer are absent.
+This is a prototype: history, attack results, and workspace settings are not
+saved, and WebSockets, HTTP/3/QUIC, Comparer, and Sequencer are absent.
 See [limits and persistence](workbench.md#limits-and-persistence) and the
 [capability matrix](burp-parity.md) before relying on a particular workflow.
 

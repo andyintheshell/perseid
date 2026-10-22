@@ -64,8 +64,8 @@ public interface just to work around a local port conflict.
 
 The site map uses retained history, not active crawling. HTTPS pass-through
 tunnels have no visible decrypted requests, and `CONNECT` transport tunnels do
-not get their own history rows. Repeater exchanges are also separate from Proxy
-history by design.
+not get their own history rows. Repeater and Intruder exchanges are also
+separate from Proxy history by design.
 
 ## Pages hang with messages awaiting interception
 
@@ -141,14 +141,39 @@ There are no CLI flags to raise the fixed pending-work budgets. Increasing
 `--history-bytes` changes history retention, not Repeater admission. See
 [Repeater](workbench.md#repeater) for the complete behavior.
 
+## Intruder will not start an attack
+
+The workspace reports the first validation error above the request editor:
+
+- **No positions or an unclosed marker:** wrap each fuzzed value in `$$`.
+  Select text and click **Add $$**, or use **Auto $$** for common parameters.
+- **A payload set is empty or missing:** Pitchfork and Cluster bomb need one
+  non-empty set per position. Sniper and Battering ram use the shared set.
+- **The request count is invalid:** the number of generated requests overflowed
+  a 64-bit count. Shrink a payload set or reduce the number of positions.
+- **The target is outside the enforced scope:** add the effective host in
+  **Target > Scope** or turn off **Block out-of-scope traffic**. An absolute-form
+  request line overrides the target bar. The first request is checked before the
+  attack and every generated request is checked again; out-of-scope rows show a
+  failure instead of a response.
+- **The request is invalid or too large:** generated requests use Repeater's
+  direct client, with 8 MiB request and 64 KiB head limits. Check the request
+  line, `Host`, and target scheme.
+- **An attack is already running:** wait for it to finish or stop it, then start
+  the next one. Stopping does not cancel requests already in flight.
+
+Attacks do not appear in Proxy history, and proxy interception, match/replace,
+and capture controls do not apply. See [Intruder](workbench.md#intruder) for the
+attack types and result limits.
+
 ## A body is read-only, truncated, or different from the wire
 
 Interception only buffers known-size bodies within `--intercept-limit`, and
 only buffered text is body-editable. Chunked/streaming and binary bodies can
 remain header-only even when the visible prefix is small.
 
-History and Repeater previews decode supported compression, reconstruct headers,
-and limit display size. Raw and Hex do not promise the exact original wire
+History, Repeater, and Intruder previews decode supported compression,
+reconstruct headers, and limit display size. Raw and Hex do not promise the exact original wire
 representation. Review [message views](workbench.md#inspect-messages) and any
 Repeater seed warning before replaying a captured body.
 

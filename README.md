@@ -22,8 +22,8 @@ a Java runtime. Captured bodies and in-memory history have configurable limits.
 
 > [!IMPORTANT]
 > **Early prototype, not a finished Burp replacement.** HTTP/HTTPS interception,
-> Repeater, and Decoder work today. Intruder is a preview; WebSockets, Comparer,
-> Sequencer, and persistent projects are not implemented. See the
+> Intruder, Repeater, and Decoder work today. WebSockets, Comparer, Sequencer,
+> and persistent projects are not implemented. See the
 > [capability matrix](docs/burp-parity.md) for the precise status.
 
 [![Perseid HTTP history with side-by-side request and response views](docs/images/perseid-main.png)](docs/screenshots.md)
@@ -36,6 +36,7 @@ a Java runtime. Captured bodies and in-memory history have configurable limits.
 | **Intercept and edit** | Hold requests and optionally responses; edit heads and buffered text bodies; forward or drop selected messages or the whole queue. |
 | **Inspect HTTPS** | Automatically generated local CA, a certificate download page, and per-host TLS pass-through. You install and remove trust manually. |
 | **Replay a request** | Editable HTTP/HTTPS Repeater tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
+| **Fuzz a request** | Intruder positions marked with `$$`, editable payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, bounded concurrency, and request/response results. |
 | **Transform payloads** | Stacked Decoder panels, selection-aware encoding/decoding, 31 common hashes, and Smart decode for layered data. |
 | **Control the session** | Opt-in proxy scope enforcement, literal/regex match-and-replace rules, capture/history limits, and a live heap-memory indicator. |
 
@@ -70,16 +71,19 @@ cargo run -p perseid --locked
 > [!WARNING]
 > Only test systems you own or have explicit permission to test. Use a dedicated
 > browser profile. Proxy scope rules **do not apply to direct Repeater sends**.
-> Read [Safety and privacy](docs/safety.md) before capturing real traffic.
+> Intruder is also direct, but when scope enforcement is on it checks every
+> generated request before sending. Read [Safety and privacy](docs/safety.md)
+> before capturing real traffic.
 
 ## Know the limits
 
-- History, Repeater tabs, Decoder chains, scope, and rewrite settings are
-  **in memory only**. The local TLS CA is persisted across launches.
+- History, Intruder and Repeater results, Decoder chains, scope, and rewrite
+  settings are **in memory only**. The local TLS CA is persisted across launches.
 - Large, streaming, and binary intercepted bodies are **header-editable only**.
-  Message previews and Repeater seeds may be truncated or lossy.
+  Message previews and direct-send seeds may be truncated or lossy.
 - There is **no automated scanner, crawler, bundled browser, or WebSocket
-  tooling**. Intruder is a clearly labelled preview, not a working fuzzer.
+  tooling**. Intruder generates requests from user-supplied payloads; it is not
+  an automated scanner.
 - Burp Suite Community manual-toolkit parity is a
   [goal](docs/burp-parity.md), not a current claim. There are no universal
   memory or performance guarantees; see the [measured baseline](docs/performance.md).

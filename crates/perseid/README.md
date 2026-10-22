@@ -6,7 +6,8 @@
 The single `perseid` package contains the native egui desktop workbench and
 its embedded HTTP/1.1/HTTP/2 interception proxy. Rust callers use
 `perseid::proxy`; the application binary adds history, message viewers,
-interception controls, Repeater tabs, Decoder, and local CA storage.
+interception controls, Intruder and Repeater workspaces, Decoder, and local CA
+storage.
 
 ## Run the desktop app
 
@@ -51,14 +52,18 @@ does not generate or persist a CA. To decrypt HTTPS, a caller supplies a
 The desktop app makes those decisions and manages the filesystem separately.
 
 The API also exposes editable interception decisions, scope and match/replace
-policy, bounded body capture, capture-drop counters, and a separate direct
-HTTP/HTTPS `Repeater` client. Repeater bypasses proxy interception, rewriting,
-and scope enforcement.
+policy, bounded body capture, capture-drop counters, and separate direct
+HTTP/HTTPS `Repeater` and `Intruder` clients. Both bypass proxy interception,
+rewriting, and proxy scope enforcement. The desktop Intruder workspace supplies
+the enforced scope with each plan, and the engine checks every generated
+request.
 
 Repeater admission includes queued requests, active work, and unread results.
 `send` can return `RepeaterError::Busy` without stopping other requests; drain
-`try_recv` to release reservations before retrying. Oversized requests and
-capture configurations are rejected separately. See the
+`try_recv` to release reservations before retrying. Intruder attacks use `$$`
+positions and four attack types, run up to 32 requests concurrently, and deliver
+bounded result events. Oversized requests and capture configurations are
+rejected separately. See the
 [workbench limits](../../docs/workbench.md#repeater) for the count/byte budgets.
 
 Loaded CA certificate/key pairs are checked for a match. The desktop app owns

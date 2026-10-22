@@ -198,22 +198,6 @@ pub(super) fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
         .inner
 }
 
-pub(super) fn badge(ui: &mut egui::Ui, text: &str) {
-    egui::Frame::NONE
-        .fill(theme::ACCENT_WASH)
-        .stroke(Stroke::new(1.0, theme::ACCENT_SOFT))
-        .corner_radius(9.0)
-        .inner_margin(egui::Margin::symmetric(6, 1))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(text)
-                    .size(9.5)
-                    .strong()
-                    .color(theme::ACCENT_DARK),
-            );
-        });
-}
-
 pub(super) fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
     ui.add_space(22.0);
     ui.vertical_centered(|ui| {

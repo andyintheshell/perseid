@@ -13,7 +13,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | --- | --- |
 | **Target** | A site map derived from history and a shared scope list. |
 | **Proxy** | HTTP history, held interception messages, match/replace rules, and proxy/TLS settings. |
-| **Intruder** | A preview of planned fuzzing work; there is no working engine yet. |
+| **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
 
@@ -43,8 +43,10 @@ Opaque HTTPS tunnels can be checked only by their `CONNECT` target; decrypted
 requests can be checked individually.
 
 > [!WARNING]
-> Scope enforcement applies to the proxy, **not Repeater**. Always review the
-> target before a direct replay. Scope is a guardrail, not authorization to test.
+> Scope enforcement applies to the proxy, **not Repeater**. Intruder also checks
+> enforced scope for every generated request, but does not use the proxy's
+> interception or match/replace pipeline. Always review the target before a
+> direct send. Scope is a guardrail, not authorization to test.
 
 ## Capture and history
 
@@ -136,6 +138,61 @@ apply only to buffered UTF-8 bodies, not streaming, oversized, or binary data.
 Empty patterns and disabled rules are ignored. Invalid regexes stay visible
 with an error and are excluded from the live policy; valid rules and toggles
 remain active. Rules are not saved between launches.
+
+## Intruder
+
+Intruder automates variations of one request. It uses the same direct
+HTTP/HTTPS client as Repeater, so an attack works with the proxy stopped or in
+`--no-proxy` mode. It does **not** pass through interception, match/replace, or
+Proxy history.
+
+1. Select a history exchange and choose **Send to Intruder**, or open Intruder
+   and paste or edit a raw request. Review the **Target** scheme and host.
+2. Wrap each value to fuzz in `$$`, for example
+   `GET /product?id=$$1$$ HTTP/1.1`. Select text and click **Add $$** to wrap it,
+   or place the cursor and use **Add $$** for an empty position (`$$$$`).
+   **Clear $$** removes every marker. **Auto $$** marks query values,
+   `application/x-www-form-urlencoded` body values, and cookie values.
+3. Edit the payload list on the right, one value per line. Blank lines are
+   ignored. **Deduplicate** keeps the first occurrence. Sniper and Battering ram
+   use one shared set; Pitchfork and Cluster bomb use one set per position.
+4. Choose an attack and click **Start attack** or press `Ctrl`+`Enter`:
+
+   | Attack | Positions per request | Request count |
+   | --- | --- | --- |
+   | **Sniper** | Each position in turn; other positions keep their base values | positions × payloads |
+   | **Battering ram** | Every position receives the same payload | payloads |
+   | **Pitchfork** | One payload from each set, advancing together | shortest set |
+   | **Cluster bomb** | Every combination of one payload per position | product of set sizes |
+
+5. Watch the result table. Select a row to inspect the generated request and
+   response in Pretty/Raw/Hex. The header shows received/total counts and, for
+   a finished attack, elapsed time.
+
+Markers are literal delimiters, not part of the request: they are removed when
+the request is generated. An unclosed `$$` is an error. Sniper uses the text
+inside each marker as that position's base value. The other attack types replace
+every marked position.
+
+`$$` can appear anywhere in the request, including headers and bodies. Keep the
+**Update Host header** option on when the target bar changes so the request stays
+consistent; turning it off allows virtual-host testing.
+
+**Scope:** when **Block out-of-scope traffic** is enabled, **Start attack** first
+checks the effective target (an absolute-form request line overrides the target
+bar) against the scope. Every generated request is checked again before it is
+sent, because a payload can change an absolute-form target. Out-of-scope
+requests produce failed result rows and do not reach the target. Intruder still
+does not use proxy interception or match/replace rules, so confirm the target
+and template before starting.
+
+**Limits:** concurrency is 1–32 and one attack runs at a time. **Stop attack**
+stops scheduling new requests; requests already in flight finish. The UI retains
+up to 1,000 result rows and 64 MiB of result data, evicting the oldest rows. The
+engine queues at most 64 unread results (and 64 MiB) before applying
+backpressure. Generated requests are limited to 8 MiB with 64 KiB heads, each
+request has a 60-second timeout, and response bodies use the same capture limit
+as the rest of the app. Results are not saved between launches.
 
 ## Repeater
 
@@ -246,6 +303,7 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Leave the filter | `Esc` |
 | Move through history, when not editing text | `j` / `k` or up/down arrows |
 | First / last visible history row | `Home` / `End` |
+| Start or stop an Intruder attack | `Ctrl`+`Enter` |
 | Send the active Repeater request | `Ctrl`+`Enter` |
 | Zoom in / out / reset | `Ctrl`+`+` / `Ctrl`+`-` / `Ctrl`+`0` |
 
@@ -260,8 +318,10 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
 | Repeater request/head size | 8 MiB of retained request buffers; 64 KiB heads. The response capture limit must also fit the pending-work budget. |
-| Saved state | No persisted history, Repeater tabs, Decoder chains, scope, or rewrite rules. The local CA is persisted. |
-| Missing tools/protocols | No working Intruder engine, Comparer, Sequencer, WebSocket tooling, or HTTP/3/QUIC support. |
+| Intruder work | Up to 32 simultaneous requests and one attack at a time; the engine queues up to 64 unread results or 64 MiB. |
+| Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
+| Saved state | No persisted history, Intruder results, Repeater tabs, Decoder chains, scope, or rewrite rules. The local CA is persisted. |
+| Missing tools/protocols | No Comparer, Sequencer, WebSocket tooling, or HTTP/3/QUIC support. |
 
 See [CLI options](getting-started.md#options) to change retention limits and
 [Safety and privacy](safety.md) for the data-handling implications. Larger
