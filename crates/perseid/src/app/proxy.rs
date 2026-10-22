@@ -9,6 +9,14 @@ use super::util::{mime_type, request_url};
 use super::widgets::{empty_state, section_bar, section_tab, section_tab_gear, table_frame};
 use super::*;
 
+#[derive(Clone, Copy)]
+enum HistoryRowAction {
+    Repeater,
+    Intruder,
+    ComparerRequest,
+    ComparerResponse,
+}
+
 impl PerseidApp {
     pub(super) fn proxy_tab(&mut self, ui: &mut egui::Ui) {
         section_bar(ui, "perseid.proxy.sections", |ui| {
@@ -110,8 +118,6 @@ impl PerseidApp {
 
     fn history_toolbar(&mut self, ui: &mut egui::Ui) {
         let mut clear = false;
-        let mut send_to_repeater = false;
-        let mut send_to_intruder = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Filter").color(theme::TEXT));
             let filter_id = egui::Id::unique(FILTER_ID);
@@ -148,26 +154,6 @@ impl PerseidApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let can_send = self
-                    .selected
-                    .and_then(|id| self.history.get(id))
-                    .is_some_and(|item| !item.is_tunnel());
-                if ui
-                    .add_enabled(can_send, egui::Button::new("Send to Intruder"))
-                    .on_hover_text("Open the selected request in the Intruder workspace")
-                    .on_disabled_hover_text("Select an HTTP exchange first")
-                    .clicked()
-                {
-                    send_to_intruder = true;
-                }
-                if ui
-                    .add_enabled(can_send, egui::Button::new("Send to Repeater"))
-                    .on_hover_text("Replay the selected request in an editable Repeater tab")
-                    .on_disabled_hover_text("Select an HTTP exchange first")
-                    .clicked()
-                {
-                    send_to_repeater = true;
-                }
                 if ui
                     .button("Clear history")
                     .on_hover_text("Discard all captured exchanges")
@@ -175,6 +161,12 @@ impl PerseidApp {
                 {
                     clear = true;
                 }
+                ui.label(
+                    RichText::new("Right-click a row to send")
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+                ui.separator();
                 ui.label(
                     RichText::new(format!(
                         "{} shown / {} captured",
@@ -186,12 +178,6 @@ impl PerseidApp {
                 );
             });
         });
-        if send_to_intruder {
-            self.send_selected_to_intruder();
-        }
-        if send_to_repeater {
-            self.send_selected_to_repeater();
-        }
         if clear {
             self.clear_history();
         }
@@ -212,6 +198,7 @@ impl PerseidApp {
         }
 
         let mut clicked = None;
+        let mut action = None;
         table_frame(ui, |ui| {
             let mut table = TableBuilder::new(ui)
                 .striped(true)
@@ -308,15 +295,84 @@ impl PerseidApp {
                         } else {
                             url
                         };
-                        if row.response().on_hover_text(hover).clicked() {
+                        let can_send = !item.is_tunnel();
+                        let has_response = item.response.is_some();
+                        let response = row.response().on_hover_text(hover);
+                        if response.clicked() || response.secondary_clicked() {
                             clicked = Some(id);
                         }
+                        response.context_menu(|ui| {
+                            if ui
+                                .add_enabled(can_send, egui::Button::new("Send to Repeater"))
+                                .on_hover_text(
+                                    "Replay the highlighted request in an editable Repeater tab",
+                                )
+                                .on_disabled_hover_text(
+                                    "CONNECT tunnels do not contain an HTTP request",
+                                )
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::Repeater);
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(can_send, egui::Button::new("Send to Intruder"))
+                                .on_hover_text(
+                                    "Open the highlighted request in the Intruder workspace",
+                                )
+                                .on_disabled_hover_text(
+                                    "CONNECT tunnels do not contain an HTTP request",
+                                )
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::Intruder);
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui
+                                .add_enabled(
+                                    can_send,
+                                    egui::Button::new("Send request to Comparer"),
+                                )
+                                .on_hover_text("Add the highlighted request to Comparer item 1")
+                                .on_disabled_hover_text(
+                                    "CONNECT tunnels do not contain an HTTP request",
+                                )
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::ComparerRequest);
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_response,
+                                    egui::Button::new("Send response to Comparer"),
+                                )
+                                .on_hover_text("Add the highlighted response to Comparer item 2")
+                                .on_disabled_hover_text("The highlighted exchange has no response")
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::ComparerResponse);
+                                ui.close();
+                            }
+                        });
                     });
                 });
         });
 
         if let Some(id) = clicked {
             self.select_id(id);
+        }
+        match action {
+            Some(HistoryRowAction::Repeater) => self.send_selected_to_repeater(),
+            Some(HistoryRowAction::Intruder) => self.send_selected_to_intruder(),
+            Some(HistoryRowAction::ComparerRequest) => {
+                self.send_selected_to_comparer(MessagePane::Request);
+            }
+            Some(HistoryRowAction::ComparerResponse) => {
+                self.send_selected_to_comparer(MessagePane::Response);
+            }
+            None => {}
         }
     }
 

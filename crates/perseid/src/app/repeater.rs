@@ -331,8 +331,8 @@ impl PerseidApp {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
-                    "Select an exchange in Proxy > HTTP history and choose Send to Repeater, \
-                     or start with a blank tab.",
+                    "Right-click an exchange in Proxy > HTTP history and choose Send to \
+                     Repeater, or start with a blank tab.",
                 )
                 .color(theme::TEXT_MUTED),
             );
