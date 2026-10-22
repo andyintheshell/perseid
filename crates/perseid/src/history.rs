@@ -166,6 +166,7 @@ pub struct History {
     revision: u64,
 }
 
+#[cfg(test)]
 pub struct EventDrain {
     pub queue_drained: bool,
     pub interrupted: bool,
@@ -273,6 +274,7 @@ impl History {
     /// queue. Do not acknowledge the loss until all events preceding that
     /// sample have been applied, even if draining spans several UI frames.
     /// Losses occurring during this batch are handled by the next sample.
+    #[cfg(test)]
     pub fn drain_events(
         &mut self,
         mut next: impl FnMut() -> Option<ProxyEvent>,
@@ -359,6 +361,10 @@ impl History {
                     self.evict_to_limits();
                 }
             }
+            // WebSocket messages are folded into the separate
+            // `WebSocketHistory`; they must not create HTTP rows or bump the
+            // HTTP revision.
+            ProxyEvent::WebSocketMessage { .. } => return id,
         }
         self.revision += 1;
         id

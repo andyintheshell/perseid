@@ -6,7 +6,8 @@ use egui::Color32;
 
 use crate::decode::{self, DecodeError};
 use crate::history::HistoryItem;
-use crate::proxy::CapturedBody;
+use crate::proxy::{CapturedBody, WebSocketDirection, WebSocketOpcode};
+use crate::websocket_history::WebSocketMessageItem;
 use crate::{pretty, theme};
 
 /// Maximum body bytes rendered as text.
@@ -41,6 +42,41 @@ pub fn format_duration(duration: Duration) -> String {
         format!("{millis:.0} ms")
     } else {
         format!("{:.2} s", duration.as_secs_f64())
+    }
+}
+
+pub fn websocket_direction_text(direction: WebSocketDirection) -> &'static str {
+    match direction {
+        WebSocketDirection::ToServer => "To server",
+        WebSocketDirection::ToClient => "To client",
+    }
+}
+
+pub fn websocket_opcode_text(opcode: WebSocketOpcode) -> &'static str {
+    match opcode {
+        WebSocketOpcode::Text => "Text",
+        WebSocketOpcode::Binary => "Binary",
+    }
+}
+
+/// Build Pretty/Raw/Hex views for a captured WebSocket message.
+///
+/// Text messages are JSON/HTML/formatted when possible; binary messages use a
+/// hex dump in Pretty because there is no meaningful text rendering. All views
+/// are bounded by the capture limit already applied to the payload.
+pub fn websocket_message_views(item: &WebSocketMessageItem) -> MessageViews {
+    let bytes = item.payload.data();
+    let raw = normalize_body_text(visible_raw_text(bytes));
+    let pretty = match item.opcode {
+        WebSocketOpcode::Text => pretty::format_body(None, bytes)
+            .map(normalize_body_text)
+            .unwrap_or_else(|| raw.clone()),
+        WebSocketOpcode::Binary => hexdump(bytes),
+    };
+    MessageViews {
+        pretty,
+        raw,
+        hex: hexdump(bytes),
     }
 }
 
@@ -1075,5 +1111,42 @@ mod tests {
         let mut data = vec![b'a'; 4095];
         data.extend_from_slice("é".as_bytes());
         assert!(!looks_binary(&data));
+    }
+
+    fn websocket_item(opcode: WebSocketOpcode, payload: &[u8]) -> WebSocketMessageItem {
+        WebSocketMessageItem {
+            id: 1,
+            number: 1,
+            timestamp: SystemTime::now(),
+            connection: crate::proxy::WebSocketConnectionInfo {
+                id: 7,
+                url: "wss://example.com/socket".to_string(),
+                host: "example.com".to_string(),
+                tls: true,
+                listener_port: 8080,
+                protocol: Some("chat".to_string()),
+            },
+            direction: WebSocketDirection::ToClient,
+            opcode,
+            payload: CapturedBody::from_bytes(payload.to_vec()),
+        }
+    }
+
+    #[test]
+    fn websocket_views_pretty_print_text_and_hexdump_binary() {
+        let text = websocket_item(WebSocketOpcode::Text, br#"{"type":"order","id":1}"#);
+        let views = websocket_message_views(&text);
+        assert!(
+            views.pretty.contains("{\n  \"type\": \"order\","),
+            "text messages should be pretty-printed:\n{}",
+            views.pretty
+        );
+        assert_eq!(views.raw.trim_end(), "{\"type\":\"order\",\"id\":1}");
+        assert!(views.hex.starts_with("00000000  7b 22 74 79 70 65 22"));
+
+        let binary = websocket_item(WebSocketOpcode::Binary, &[0x89, 0x50, 0x4e, 0x47]);
+        let views = websocket_message_views(&binary);
+        assert!(views.pretty.starts_with("00000000  89 50 4e 47"));
+        assert_eq!(views.pretty, views.hex);
     }
 }

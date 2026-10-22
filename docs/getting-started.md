@@ -195,8 +195,9 @@ separate from the capture/history flags above; see
 ## Current limitations
 
 This is a prototype: history, attack results, Comparer items, and workspace
-settings are not saved, and WebSockets, HTTP/3/QUIC, and Sequencer are absent.
-See [limits and persistence](workbench.md#limits-and-persistence) and the
+settings are not saved. WebSocket messages can be captured and inspected, but
+not edited or replayed; HTTP/3/QUIC and Sequencer are absent. See
+[limits and persistence](workbench.md#limits-and-persistence) and the
 [capability matrix](burp-parity.md) before relying on a particular workflow.
 
 ## HiDPI displays

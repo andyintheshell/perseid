@@ -4,10 +4,10 @@
 [Contributing](../../CONTRIBUTING.md)
 
 The single `perseid` package contains the native egui desktop workbench and
-its embedded HTTP/1.1/HTTP/2 interception proxy. Rust callers use
-`perseid::proxy`; the application binary adds history, message viewers,
-interception controls, Intruder and Repeater workspaces, Decoder, and local CA
-storage.
+its embedded HTTP/1.1/HTTP/2 interception proxy with WebSocket capture. Rust
+callers use `perseid::proxy`; the application binary adds HTTP and WebSocket
+history, message viewers, interception controls, Intruder and Repeater
+workspaces, Decoder, and local CA storage.
 
 ## Run the desktop app
 
@@ -52,7 +52,8 @@ does not generate or persist a CA. To decrypt HTTPS, a caller supplies a
 The desktop app makes those decisions and manages the filesystem separately.
 
 The API also exposes editable interception decisions, scope and match/replace
-policy, bounded body capture, capture-drop counters, and separate direct
+policy, bounded body capture, capture-drop counters, complete WebSocket
+messages through `ProxyEvent::WebSocketMessage`, and separate direct
 HTTP/HTTPS `Repeater` and `Intruder` clients. Both bypass proxy interception,
 rewriting, and proxy scope enforcement. The desktop Intruder workspace supplies
 the enforced scope with each plan, and the engine checks every generated

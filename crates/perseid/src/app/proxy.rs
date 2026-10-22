@@ -4,7 +4,9 @@
 use egui::{Align, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
-use super::message_view::{message_text, message_toolbar, message_view_text};
+use super::message_view::{
+    message_tabs, message_text, message_text_labeled, message_toolbar, message_view_text,
+};
 use super::util::{mime_type, request_url};
 use super::widgets::{empty_state, section_bar, section_tab, section_tab_gear, table_frame};
 use super::*;
@@ -38,6 +40,15 @@ impl PerseidApp {
             .clicked()
             {
                 self.proxy_section = ProxySection::HttpHistory;
+            }
+            if section_tab(
+                ui,
+                self.proxy_section == ProxySection::WebSocketsHistory,
+                "WebSockets history",
+            )
+            .clicked()
+            {
+                self.proxy_section = ProxySection::WebSocketsHistory;
             }
             let rules_label = if self.rules_error.is_some() {
                 "Match/replace !"
@@ -81,6 +92,7 @@ impl PerseidApp {
         match self.proxy_section {
             ProxySection::Intercept => self.intercept_view(ui),
             ProxySection::HttpHistory => self.http_history_view(ui),
+            ProxySection::WebSocketsHistory => self.websocket_history_view(ui),
             ProxySection::MatchReplace => self.match_replace_view(ui),
             ProxySection::Tls => self.tls_settings_view(ui),
         }
@@ -114,6 +126,390 @@ impl PerseidApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::SURFACE))
             .show(ui, |ui| self.history_table(ui));
+    }
+
+    fn websocket_history_view(&mut self, ui: &mut egui::Ui) {
+        egui::Frame::NONE
+            .fill(theme::SURFACE)
+            .inner_margin(egui::Margin::symmetric(10, 4))
+            .show(ui, |ui| self.websocket_history_toolbar(ui));
+        self.rebuild_websocket_visible();
+        if self
+            .websocket_selected
+            .is_some_and(|id| !self.websocket_visible.contains(&id))
+        {
+            self.websocket_selected = None;
+            self.websocket_detail = None;
+            self.websocket_scroll_to_selected = false;
+        }
+
+        egui::Panel::bottom(PROXY_WEBSOCKET_DETAIL_ID)
+            .resizable(true)
+            .default_size(300.0)
+            .min_size(220.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::same(6)),
+            )
+            .show(ui, |ui| self.websocket_detail_panel(ui));
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(theme::SURFACE))
+            .show(ui, |ui| self.websocket_history_table(ui));
+    }
+
+    fn websocket_history_toolbar(&mut self, ui: &mut egui::Ui) {
+        let mut clear = false;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Filter").color(theme::TEXT));
+            let filter_id = egui::Id::unique(WEBSOCKET_FILTER_ID);
+            let response = ui.add(
+                TextEdit::singleline(&mut self.websocket_filter)
+                    .id(filter_id)
+                    .hint_text("URL, direction, WebSocket ID, protocol")
+                    .desired_width(300.0),
+            );
+            if response.changed() {
+                self.websocket_visible_key = None;
+            }
+            let clear_filter = ui
+                .add_enabled(!self.websocket_filter.is_empty(), egui::Button::new("x"))
+                .on_hover_text("Clear the filter (Ctrl+F to focus)")
+                .on_disabled_hover_text("No filter is active");
+            if clear_filter.clicked() {
+                self.websocket_filter.clear();
+                self.websocket_visible_key = None;
+            }
+
+            if self.scope_enabled {
+                ui.separator();
+                if ui
+                    .link("scope filter")
+                    .on_hover_text(
+                        "Only in-scope hosts are shown. Click to edit the scope in Target.",
+                    )
+                    .clicked()
+                {
+                    self.main_tab = MainTab::Target;
+                    self.target_section = TargetSection::Scope;
+                }
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("Clear history")
+                    .on_hover_text("Discard all captured WebSocket messages")
+                    .clicked()
+                {
+                    clear = true;
+                }
+                ui.label(
+                    RichText::new(format!(
+                        "{} shown / {} captured",
+                        self.websocket_visible.len(),
+                        self.websocket_history.len()
+                    ))
+                    .small()
+                    .color(theme::TEXT_MUTED),
+                )
+                .on_hover_text(format!(
+                    "{} retained of {} budget; {} evicted",
+                    view::human_bytes(self.websocket_history.retained_bytes() as u64),
+                    view::human_bytes(self.websocket_history.byte_limit() as u64),
+                    self.websocket_history.evicted()
+                ));
+                ui.separator();
+                ui.label(
+                    RichText::new("Captured even when Intercept is off")
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+            });
+        });
+        if clear {
+            self.clear_websocket_history();
+        }
+    }
+
+    fn websocket_history_table(&mut self, ui: &mut egui::Ui) {
+        ui.style_mut().interaction.selectable_labels = false;
+        let rows = self.websocket_visible.len();
+        if rows == 0 {
+            empty_state(
+                ui,
+                "No WebSocket messages to show",
+                "WebSocket text and binary messages appear here as they are captured, including decrypted wss:// traffic. Control frames and incomplete fragments are not listed.",
+            );
+            return;
+        }
+
+        let mut clicked = None;
+        table_frame(ui, |ui| {
+            let mut table = TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .sense(egui::Sense::click())
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::exact(40.0))
+                .column(Column::initial(430.0).at_least(180.0))
+                .column(Column::exact(78.0))
+                .column(Column::exact(76.0))
+                .column(Column::exact(42.0))
+                .column(Column::initial(88.0).at_least(70.0))
+                .column(Column::exact(80.0))
+                .column(Column::remainder().at_least(84.0));
+
+            if self.websocket_scroll_to_selected {
+                if let Some(row) = self.selected_websocket_row_index() {
+                    table = table.scroll_to_row(row, Some(Align::Center));
+                }
+                self.websocket_scroll_to_selected = false;
+            }
+
+            table
+                .header(20.0, |mut header| {
+                    for title in [
+                        "#",
+                        "URL",
+                        "Direction",
+                        "Length",
+                        "TLS",
+                        "Time",
+                        "Listener port",
+                        "WebSocket ID",
+                    ] {
+                        header.col(|ui| {
+                            ui.label(RichText::new(title).strong().small().color(theme::TEXT));
+                        });
+                    }
+                })
+                .body(|body| {
+                    body.rows(18.0, rows, |mut row| {
+                        let index = row.index();
+                        let id = self.websocket_visible[index];
+                        let Some(item) = self.websocket_history.get(id) else {
+                            return;
+                        };
+
+                        row.set_selected(self.websocket_selected == Some(id));
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(item.number.to_string())
+                                    .small()
+                                    .color(theme::TEXT),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.add(
+                                Label::new(RichText::new(&item.connection.url).color(theme::TEXT))
+                                    .truncate(),
+                            )
+                            .on_hover_text(format!(
+                                "{}\n{} message{}",
+                                item.connection.url,
+                                view::websocket_opcode_text(item.opcode),
+                                item.connection
+                                    .protocol
+                                    .as_deref()
+                                    .map(|protocol| format!("\nsubprotocol: {protocol}"))
+                                    .unwrap_or_default()
+                            ));
+                        });
+                        row.col(|ui| {
+                            let color = match item.direction {
+                                crate::proxy::WebSocketDirection::ToServer => theme::AMBER,
+                                crate::proxy::WebSocketDirection::ToClient => theme::BLUE,
+                            };
+                            ui.label(
+                                RichText::new(view::websocket_direction_text(item.direction))
+                                    .small()
+                                    .color(color),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(view::human_bytes(item.payload.total_len()))
+                                    .small()
+                                    .color(theme::TEXT),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(if item.connection.tls { "TLS" } else { "-" })
+                                    .small()
+                                    .color(if item.connection.tls {
+                                        theme::GREEN
+                                    } else {
+                                        theme::TEXT_MUTED
+                                    }),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(view::format_time(item.timestamp))
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(item.connection.listener_port.to_string())
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(item.connection.id.to_string())
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+
+                        let response = row.response();
+                        if response.clicked() {
+                            clicked = Some(id);
+                        }
+                    });
+                });
+        });
+
+        if let Some(id) = clicked {
+            self.select_websocket_id(id);
+        }
+    }
+
+    fn ensure_websocket_detail(&mut self, id: u64) {
+        if self
+            .websocket_detail
+            .as_ref()
+            .is_some_and(|cache| cache.id == id)
+            && self.websocket_history.get(id).is_some()
+        {
+            return;
+        }
+        self.websocket_detail = self
+            .websocket_history
+            .get(id)
+            .map(|item| WebSocketDetailCache {
+                id,
+                views: view::websocket_message_views(item),
+            });
+    }
+
+    fn websocket_detail_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.websocket_selected else {
+            empty_state(
+                ui,
+                "Select a WebSocket message",
+                "Click a row, or use j/k and the arrow keys, to inspect a complete text or binary message.",
+            );
+            return;
+        };
+        self.ensure_websocket_detail(id);
+
+        let Some(item) = self.websocket_history.get(id) else {
+            empty_state(
+                ui,
+                "Message no longer in history",
+                "The selected message was evicted or cleared.",
+            );
+            return;
+        };
+        let Some(cache) = &self.websocket_detail else {
+            empty_state(
+                ui,
+                "Message no longer in history",
+                "The selected message was evicted or cleared.",
+            );
+            return;
+        };
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("WebSocket message")
+                    .strong()
+                    .color(theme::TEXT),
+            );
+            ui.label(
+                RichText::new(view::websocket_direction_text(item.direction))
+                    .small()
+                    .color(match item.direction {
+                        crate::proxy::WebSocketDirection::ToServer => theme::AMBER,
+                        crate::proxy::WebSocketDirection::ToClient => theme::BLUE,
+                    }),
+            );
+            ui.label(
+                RichText::new(view::websocket_opcode_text(item.opcode))
+                    .small()
+                    .color(theme::TEXT_MUTED),
+            );
+            if let Some(protocol) = &item.connection.protocol {
+                ui.label(
+                    RichText::new(protocol.as_str())
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(format!("WebSocket #{}", item.connection.id))
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+                ui.label(
+                    RichText::new(format!("row {}", item.number))
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{} / {}",
+                        view::format_time(item.timestamp),
+                        view::human_bytes(item.payload.total_len())
+                    ))
+                    .small()
+                    .color(theme::TEXT_MUTED),
+                );
+                if item.payload.is_truncated() {
+                    ui.label(
+                        RichText::new("truncated to capture limit")
+                            .small()
+                            .color(theme::AMBER),
+                    );
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(&item.connection.url)
+                    .small()
+                    .color(theme::TEXT_MUTED),
+            );
+            ui.label(
+                RichText::new(format!(
+                    "listener {} · {}",
+                    item.connection.listener_port,
+                    if item.connection.tls { "TLS" } else { "plain" }
+                ))
+                .small()
+                .color(theme::TEXT_MUTED),
+            );
+        });
+        ui.add_space(2.0);
+
+        let mut message_view = self.websocket_view;
+        message_tabs(ui, &mut message_view);
+        message_text_labeled(
+            ui,
+            id,
+            MessagePane::Request,
+            message_view,
+            message_view_text(&cache.views, message_view),
+            "Copy WebSocket message",
+        );
+        self.websocket_view = message_view;
     }
 
     fn history_toolbar(&mut self, ui: &mut egui::Ui) {

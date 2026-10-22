@@ -29,6 +29,9 @@ use crate::proxy::{forward, portal, tunnel};
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
     pub(crate) client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
+    /// HTTP/1.1-only client for WebSocket handshakes. Normal HTTPS traffic can
+    /// negotiate h2, but WebSocket upgrades are an HTTP/1.1 mechanism.
+    pub(crate) ws_client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
     /// The local CA that mints interception certificates. `None` keeps CONNECT
     /// traffic on the passthrough path even when interception is enabled.
     /// Swapped at runtime by [`crate::proxy::Proxy::set_tls_authority`].

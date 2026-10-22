@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::proxy::{
-    CertificateAuthority, InterceptKey, Intruder, MatchReplaceRule, Proxy, ProxyConfig,
+    CertificateAuthority, InterceptKey, Intruder, MatchReplaceRule, Proxy, ProxyConfig, ProxyEvent,
     ProxySettings, Repeater, TlsConfig,
 };
 use egui::{Color32, Key, RichText, Stroke};
@@ -52,15 +52,18 @@ use crate::memory::MemoryMeter;
 use crate::site_map::{self, SiteMap};
 use crate::theme;
 use crate::view::{self, MessageViews};
+use crate::websocket_history::WebSocketHistory;
 
 use self::scale::{desktop_scale_override, resize_initial_window, resolve_ui_scale, stepped_scale};
-use self::util::matches_filter;
+use self::util::{matches_filter, websocket_matches_filter};
 use self::widgets::main_tab_button;
 
 /// Bound on events applied per frame so a flood cannot stall rendering.
 const MAX_EVENTS_PER_FRAME: usize = 1024;
 const FILTER_ID: &str = "perseid.filter";
+const WEBSOCKET_FILTER_ID: &str = "perseid.websocket.filter";
 const PROXY_DETAIL_ID: &str = "perseid.proxy.detail";
+const PROXY_WEBSOCKET_DETAIL_ID: &str = "perseid.proxy.websocket.detail";
 const PROXY_REQUEST_ID: &str = "perseid.proxy.request";
 const TARGET_TREE_ID: &str = "perseid.target.tree";
 
@@ -131,6 +134,7 @@ enum ProxySection {
     Intercept,
     #[default]
     HttpHistory,
+    WebSocketsHistory,
     MatchReplace,
     Tls,
 }
@@ -192,6 +196,14 @@ pub struct PerseidApp {
     selected: Option<u64>,
     scroll_to_selected: bool,
     detail: Option<DetailCache>,
+    websocket_history: WebSocketHistory,
+    websocket_filter: String,
+    websocket_visible: Vec<u64>,
+    websocket_visible_key: Option<(String, u64)>,
+    websocket_selected: Option<u64>,
+    websocket_scroll_to_selected: bool,
+    websocket_detail: Option<WebSocketDetailCache>,
+    websocket_view: MessageView,
     main_tab: MainTab,
     proxy_section: ProxySection,
     target_section: TargetSection,
@@ -244,6 +256,12 @@ struct DetailCache {
     id: u64,
     request: MessageViews,
     response: MessageViews,
+}
+
+/// Formatted Pretty/Raw/Hex views for one selected WebSocket message.
+struct WebSocketDetailCache {
+    id: u64,
+    views: MessageViews,
 }
 
 /// Draw one custom title-bar window control.
@@ -417,6 +435,14 @@ impl PerseidApp {
             selected: None,
             scroll_to_selected: false,
             detail: None,
+            websocket_history: WebSocketHistory::new(args.history_limit, args.history_bytes),
+            websocket_filter: String::new(),
+            websocket_visible: Vec::new(),
+            websocket_visible_key: None,
+            websocket_selected: None,
+            websocket_scroll_to_selected: false,
+            websocket_detail: None,
+            websocket_view: MessageView::default(),
             main_tab: MainTab::default(),
             proxy_section: ProxySection::default(),
             target_section: TargetSection::default(),
@@ -585,46 +611,63 @@ impl PerseidApp {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
 
-        let Some(proxy) = self.proxy.as_mut() else {
-            return;
-        };
-        // Only discard a stopped runtime after draining a queue sampled after
-        // it stopped. Shutdown itself may enqueue final body-completion events.
-        let was_stopped = !proxy.is_running();
-        let dropped = proxy.dropped_events();
         let mut selected_changed = false;
-        let selected = self.selected;
-        let batch = self.history.drain_events(
-            || {
-                let event = proxy.try_recv()?;
-                selected_changed |= selected == Some(event.id());
-                Some(event)
-            },
-            MAX_EVENTS_PER_FRAME,
-            dropped,
-            &mut self.dropped_seen,
-        );
-        selected_changed |= batch.interrupted;
-        if !batch.queue_drained || proxy.dropped_events() > self.dropped_seen {
-            ctx.request_repaint();
-        }
-        // Interception has its own bounded, backpressured channel. Draining it
-        // here keeps held requests moving even when the history event queue is
-        // full or capture is paused.
         let mut received_intercept = false;
-        for _ in 0..MAX_EVENTS_PER_FRAME {
-            let Some(item) = proxy.try_recv_intercept() else {
-                break;
+        let mut queue_drained = false;
+        let stopped;
+        {
+            let Some(proxy) = self.proxy.as_mut() else {
+                return;
             };
-            self.intercept_queue.push_back(InterceptEntry::new(item));
-            received_intercept = true;
+            // Only discard a stopped runtime after draining a queue sampled
+            // after it stopped. Shutdown itself may enqueue final
+            // body-completion events.
+            let was_stopped = !proxy.is_running();
+            let dropped = proxy.dropped_events();
+            let selected = self.selected;
+            let websocket_selected = self.websocket_selected;
+            for _ in 0..MAX_EVENTS_PER_FRAME {
+                let Some(event) = proxy.try_recv() else {
+                    queue_drained = true;
+                    break;
+                };
+                let id = event.id();
+                selected_changed |= selected == Some(id) || websocket_selected == Some(id);
+                match event {
+                    ProxyEvent::WebSocketMessage { .. } => {
+                        self.websocket_history.apply(event);
+                    }
+                    event => {
+                        self.history.apply(event);
+                    }
+                }
+            }
+            if queue_drained && dropped > self.dropped_seen {
+                self.dropped_seen = dropped;
+                selected_changed |= self.history.interrupt_in_flight(
+                    "capture events were dropped; the exchange result is unavailable",
+                ) > 0;
+            }
+            if !queue_drained || proxy.dropped_events() > self.dropped_seen {
+                ctx.request_repaint();
+            }
+            // Interception has its own bounded, backpressured channel.
+            // Draining it here keeps held requests moving even when the
+            // history event queue is full or capture is paused.
+            for _ in 0..MAX_EVENTS_PER_FRAME {
+                let Some(item) = proxy.try_recv_intercept() else {
+                    break;
+                };
+                self.intercept_queue.push_back(InterceptEntry::new(item));
+                received_intercept = true;
+            }
+            // Drain what the proxy queued before declaring it stopped, then
+            // resolve any exchange whose terminal event never made it through.
+            if !was_stopped && !proxy.is_running() {
+                ctx.request_repaint();
+            }
+            stopped = was_stopped && queue_drained;
         }
-        // Drain what the proxy queued before declaring it stopped, then
-        // resolve any exchange whose terminal event never made it through.
-        if !was_stopped && !proxy.is_running() {
-            ctx.request_repaint();
-        }
-        let stopped = was_stopped && batch.queue_drained;
         if stopped {
             self.proxy = None;
             self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
@@ -635,6 +678,7 @@ impl PerseidApp {
         }
         if selected_changed {
             self.detail = None;
+            self.websocket_detail = None;
         }
         if self
             .selected
@@ -642,6 +686,13 @@ impl PerseidApp {
         {
             self.selected = None;
             self.detail = None;
+        }
+        if self
+            .websocket_selected
+            .is_some_and(|id| self.websocket_history.get(id).is_none())
+        {
+            self.websocket_selected = None;
+            self.websocket_detail = None;
         }
         if received_intercept {
             self.intercept_scroll_to_active = true;
@@ -656,6 +707,11 @@ impl PerseidApp {
     }
 
     fn rebuild_visible(&mut self) {
+        self.rebuild_http_visible();
+        self.rebuild_websocket_visible();
+    }
+
+    fn rebuild_http_visible(&mut self) {
         let key = (self.filter.clone(), self.history.revision());
         if self.visible_key.as_ref() == Some(&key) {
             return;
@@ -675,8 +731,32 @@ impl PerseidApp {
         self.visible_key = Some(key);
     }
 
+    fn rebuild_websocket_visible(&mut self) {
+        let key = (
+            self.websocket_filter.clone(),
+            self.websocket_history.revision(),
+        );
+        if self.websocket_visible_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.websocket_visible.clear();
+
+        let needle = self.websocket_filter.trim().to_lowercase();
+        let scope_active = self.scope_enabled && !self.scope.is_empty();
+        for item in self.websocket_history.iter() {
+            if scope_active && !site_map::host_in_scope(&item.connection.host, &self.scope) {
+                continue;
+            }
+            if needle.is_empty() || websocket_matches_filter(item, &needle) {
+                self.websocket_visible.push(item.id);
+            }
+        }
+        self.websocket_visible_key = Some(key);
+    }
+
     fn invalidate_views(&mut self) {
         self.visible_key = None;
+        self.websocket_visible_key = None;
         self.site_map = None;
     }
 
@@ -701,9 +781,24 @@ impl PerseidApp {
         self.invalidate_views();
     }
 
+    fn clear_websocket_history(&mut self) {
+        self.websocket_history.clear();
+        self.websocket_selected = None;
+        self.websocket_detail = None;
+        self.invalidate_views();
+    }
+
     fn selected_row_index(&self) -> Option<usize> {
         self.selected
             .and_then(|id| self.visible.iter().position(|&visible| visible == id))
+    }
+
+    fn selected_websocket_row_index(&self) -> Option<usize> {
+        self.websocket_selected.and_then(|id| {
+            self.websocket_visible
+                .iter()
+                .position(|&visible| visible == id)
+        })
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -720,12 +815,34 @@ impl PerseidApp {
         self.select_id(self.visible[next]);
     }
 
+    fn move_websocket_selection(&mut self, delta: isize) {
+        if self.websocket_visible.is_empty() {
+            self.websocket_selected = None;
+            return;
+        }
+        let next = match self.selected_websocket_row_index() {
+            Some(position) => (position as isize + delta)
+                .clamp(0, self.websocket_visible.len() as isize - 1)
+                as usize,
+            None => 0,
+        };
+        self.select_websocket_id(self.websocket_visible[next]);
+    }
+
     fn select_id(&mut self, id: u64) {
         if self.selected != Some(id) {
             self.selected = Some(id);
             self.detail = None;
         }
         self.scroll_to_selected = true;
+    }
+
+    fn select_websocket_id(&mut self, id: u64) {
+        if self.websocket_selected != Some(id) {
+            self.websocket_selected = Some(id);
+            self.websocket_detail = None;
+        }
+        self.websocket_scroll_to_selected = true;
     }
 
     fn keyboard(&mut self, ctx: &egui::Context) {
@@ -772,10 +889,17 @@ impl PerseidApp {
             self.send_active_repeater();
         }
 
-        let on_history =
+        let on_http_history =
             self.main_tab == MainTab::Proxy && self.proxy_section == ProxySection::HttpHistory;
+        let on_websocket_history = self.main_tab == MainTab::Proxy
+            && self.proxy_section == ProxySection::WebSocketsHistory;
+        let on_history = on_http_history || on_websocket_history;
         if on_history {
-            let filter_id = egui::Id::unique(FILTER_ID);
+            let filter_id = egui::Id::unique(if on_http_history {
+                FILTER_ID
+            } else {
+                WEBSOCKET_FILTER_ID
+            });
             if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::F)) {
                 ctx.memory_mut(|memory| memory.request_focus(filter_id));
                 return;
@@ -792,18 +916,37 @@ impl PerseidApp {
             return;
         }
 
-        if ctx.input(|input| input.key_pressed(Key::ArrowDown) || input.key_pressed(Key::J)) {
-            self.move_selection(1);
-        }
-        if ctx.input(|input| input.key_pressed(Key::ArrowUp) || input.key_pressed(Key::K)) {
-            self.move_selection(-1);
-        }
-        if ctx.input(|input| input.key_pressed(Key::Home)) && !self.visible.is_empty() {
-            self.select_id(self.visible[0]);
-        }
-        if ctx.input(|input| input.key_pressed(Key::End)) && !self.visible.is_empty() {
-            let last = self.visible[self.visible.len() - 1];
-            self.select_id(last);
+        let down =
+            ctx.input(|input| input.key_pressed(Key::ArrowDown) || input.key_pressed(Key::J));
+        let up = ctx.input(|input| input.key_pressed(Key::ArrowUp) || input.key_pressed(Key::K));
+        let home = ctx.input(|input| input.key_pressed(Key::Home));
+        let end = ctx.input(|input| input.key_pressed(Key::End));
+        if on_http_history {
+            if down {
+                self.move_selection(1);
+            }
+            if up {
+                self.move_selection(-1);
+            }
+            if home && !self.visible.is_empty() {
+                self.select_id(self.visible[0]);
+            }
+            if end && !self.visible.is_empty() {
+                self.select_id(self.visible[self.visible.len() - 1]);
+            }
+        } else {
+            if down {
+                self.move_websocket_selection(1);
+            }
+            if up {
+                self.move_websocket_selection(-1);
+            }
+            if home && !self.websocket_visible.is_empty() {
+                self.select_websocket_id(self.websocket_visible[0]);
+            }
+            if end && !self.websocket_visible.is_empty() {
+                self.select_websocket_id(self.websocket_visible[self.websocket_visible.len() - 1]);
+            }
         }
     }
 

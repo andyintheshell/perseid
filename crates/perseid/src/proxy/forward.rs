@@ -10,18 +10,24 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
-use http::header::{ACCEPT_ENCODING, CONTENT_LENGTH, HOST, TRANSFER_ENCODING};
-use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
+use http::header::{
+    ACCEPT_ENCODING, CONNECTION, CONTENT_LENGTH, HOST, SEC_WEBSOCKET_EXTENSIONS,
+    SEC_WEBSOCKET_PROTOCOL, TRANSFER_ENCODING, UPGRADE,
+};
+use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Incoming};
 use hyper::ext::ReasonPhrase;
+use hyper::upgrade::OnUpgrade;
 use hyper_util::client::legacy::Error as ClientError;
-use log::debug;
+use hyper_util::rt::TokioIo;
+use log::{debug, warn};
 use tokio::sync::oneshot;
 
 use crate::proxy::capture::{BodyBuffer, EndReason, TeeBody, new_buffer, snapshot};
 use crate::proxy::events::{
     CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
+    WebSocketConnectionInfo,
 };
 use crate::proxy::intercept::{InterceptDecision, InterceptItem};
 use crate::proxy::message::{
@@ -31,9 +37,10 @@ use crate::proxy::message::{
 use crate::proxy::policy::PolicySnapshot;
 use crate::proxy::server::Ctx;
 use crate::proxy::util::{
-    IntoProxyBody, ProxyBody, display_host, forwarded_headers, header_list,
+    IntoProxyBody, ProxyBody, display_host, empty_body, forwarded_headers, header_list,
     sanitized_accept_encoding, text_response, version_str,
 };
+use crate::proxy::websocket;
 
 /// Cases where the proxy rejects a request before any upstream traffic happens.
 struct TargetError {
@@ -146,6 +153,10 @@ async fn handle_with(
     let capture = ctx.capture_enabled();
     let policy = ctx.policy();
     let (mut parts, body) = req.into_parts();
+    // Hyper stores the pending upgrade future in the extensions. Pull it out
+    // before request editing so a 101 response can hand the live socket to the
+    // WebSocket relay task.
+    let client_upgrade = parts.extensions.remove::<OnUpgrade>();
     let downstream_version = parts.version;
     let raw_uri = parts.uri.clone();
     // HTTP/2 head editing uses an origin-form request line, so a later
@@ -403,7 +414,8 @@ async fn handle_with(
         );
     }
 
-    if exchange.capture {
+    let websocket = is_websocket_upgrade(&parts);
+    if exchange.capture && !websocket {
         ctx.emit(ProxyEvent::Started {
             id: exchange.start.id,
             timestamp: exchange.start.timestamp,
@@ -411,7 +423,16 @@ async fn handle_with(
         });
     }
 
-    forward(ctx, exchange, target, parts, body_source).await
+    forward(
+        ctx,
+        exchange,
+        target,
+        parts,
+        body_source,
+        websocket,
+        client_upgrade,
+    )
+    .await
 }
 
 async fn forward(
@@ -420,7 +441,13 @@ async fn forward(
     target: Target,
     parts: http::request::Parts,
     body_source: BodySource,
+    websocket: bool,
+    client_upgrade: Option<OnUpgrade>,
 ) -> Response<ProxyBody> {
+    if websocket {
+        return forward_websocket(ctx, exchange, target, parts, body_source, client_upgrade).await;
+    }
+
     let Exchange {
         start,
         capture,
@@ -506,6 +533,223 @@ async fn forward(
             text_response(status, &message)
         }
     }
+}
+
+/// Forward a WebSocket handshake and, on 101, hand both upgraded sockets to
+/// the frame relay. The handshake itself does not create an HTTP history row;
+/// only complete WebSocket messages enter the WebSockets history.
+async fn forward_websocket(
+    ctx: Arc<Ctx>,
+    exchange: Exchange,
+    target: Target,
+    parts: http::request::Parts,
+    body_source: BodySource,
+    client_upgrade: Option<OnUpgrade>,
+) -> Response<ProxyBody> {
+    let Exchange {
+        start,
+        capture,
+        policy,
+        request,
+        downstream_version,
+    } = exchange;
+
+    if client_upgrade.is_none() || downstream_version != Version::HTTP_11 {
+        let message = "WebSocket upgrades require an HTTP/1.1 client connection".to_string();
+        if capture {
+            ctx.emit(ProxyEvent::Started {
+                id: start.id,
+                timestamp: start.timestamp,
+                request,
+            });
+            finish_failed(&ctx, start.id, start.started, None, message.clone());
+        }
+        return text_response(StatusCode::NOT_IMPLEMENTED, &message);
+    }
+
+    let request_buffer = new_buffer();
+    let request_limit = if capture { ctx.capture_limit } else { 0 };
+    let body = if capture {
+        match body_source {
+            BodySource::Incoming(body) => {
+                TeeBody::new(body, request_limit, request_buffer.clone(), None).boxed_response()
+            }
+            BodySource::Buffered(bytes) => TeeBody::new(
+                Full::new(Bytes::from(bytes)),
+                request_limit,
+                request_buffer.clone(),
+                None,
+            )
+            .boxed_response(),
+        }
+    } else {
+        match body_source {
+            BodySource::Incoming(body) => body.boxed_response(),
+            BodySource::Buffered(bytes) => Full::new(Bytes::from(bytes)).boxed_response(),
+        }
+    };
+
+    let mut upstream = Request::new(body);
+    *upstream.method_mut() = parts.method;
+    *upstream.uri_mut() = target.uri;
+    *upstream.version_mut() = Version::HTTP_11;
+    *upstream.headers_mut() = websocket_upstream_headers(&parts.headers);
+
+    let mut response = match ctx.ws_client.request(upstream).await {
+        Ok(response) => response,
+        Err(err) => {
+            let (status, message) = classify(&err);
+            if capture {
+                ctx.emit(ProxyEvent::Started {
+                    id: start.id,
+                    timestamp: start.timestamp,
+                    request,
+                });
+                finish_failed(
+                    &ctx,
+                    start.id,
+                    start.started,
+                    Some(snapshot(&request_buffer)),
+                    message.clone(),
+                );
+            }
+            return text_response(status, &message);
+        }
+    };
+
+    if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+        // A rejected or redirected handshake is ordinary HTTP. Preserve the
+        // normal capture path so failed upgrades remain visible.
+        if capture {
+            ctx.emit(ProxyEvent::Started {
+                id: start.id,
+                timestamp: start.timestamp,
+                request: request.clone(),
+            });
+        }
+        return relay(
+            ctx,
+            Exchange {
+                start,
+                capture,
+                policy,
+                request,
+                downstream_version,
+            },
+            request_buffer,
+            response,
+        )
+        .await;
+    }
+
+    let upstream_upgrade = hyper::upgrade::on(&mut response);
+    let (response_parts, _) = response.into_parts();
+    let client_upgrade = client_upgrade.expect("checked above");
+    let tls = request_is_tls(&request);
+    let connection = Arc::new(WebSocketConnectionInfo {
+        id: start.id,
+        url: websocket_url(&request),
+        host: request.host.clone(),
+        tls,
+        listener_port: ctx.listen.port(),
+        protocol: response_parts
+            .headers
+            .get(SEC_WEBSOCKET_PROTOCOL)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+    });
+
+    let connection_id = connection.id;
+    let relay_ctx = ctx.clone();
+    tokio::spawn(async move {
+        let client = match client_upgrade.await {
+            Ok(upgraded) => TokioIo::new(upgraded),
+            Err(err) => {
+                warn!("WebSocket {connection_id} client upgrade failed: {err}");
+                return;
+            }
+        };
+        let server = match upstream_upgrade.await {
+            Ok(upgraded) => TokioIo::new(upgraded),
+            Err(err) => {
+                warn!("WebSocket {connection_id} upstream upgrade failed: {err}");
+                return;
+            }
+        };
+        match websocket::relay(relay_ctx, connection, client, server).await {
+            Ok((client_to_server, server_to_client)) => debug!(
+                "WebSocket {connection_id} closed after {client_to_server} up and \
+                 {server_to_client} down bytes"
+            ),
+            Err(err) => debug!("WebSocket {connection_id} relay error: {err}"),
+        }
+    });
+
+    let mut out = Response::new(empty_body());
+    *out.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+    *out.version_mut() = downstream_version;
+    if let Some(phrase) = response_parts.extensions.get::<ReasonPhrase>() {
+        out.extensions_mut().insert(phrase.clone());
+    }
+    let mut headers = HeaderMap::new();
+    for (name, value) in forwarded_headers(&response_parts.headers) {
+        // Compression was not offered upstream, so the history must not
+        // advertise an extension it cannot decode.
+        if name == SEC_WEBSOCKET_EXTENSIONS {
+            continue;
+        }
+        headers.append(name, value);
+    }
+    headers.insert(CONNECTION, HeaderValue::from_static("Upgrade"));
+    headers.insert(UPGRADE, HeaderValue::from_static("websocket"));
+    *out.headers_mut() = headers;
+    out
+}
+
+fn is_websocket_upgrade(parts: &http::request::Parts) -> bool {
+    parts.method == Method::GET
+        && parts.version == Version::HTTP_11
+        && header_has_token(&parts.headers, CONNECTION, "upgrade")
+        && header_has_token(&parts.headers, UPGRADE, "websocket")
+}
+
+fn header_has_token(headers: &HeaderMap, name: http::header::HeaderName, token: &str) -> bool {
+    headers.get_all(name).iter().any(|value| {
+        value.to_str().is_ok_and(|text| {
+            text.split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case(token))
+        })
+    })
+}
+
+fn websocket_upstream_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut out = HeaderMap::new();
+    for (name, value) in forwarded_headers(headers) {
+        if name == HOST || name == SEC_WEBSOCKET_EXTENSIONS {
+            continue;
+        }
+        out.append(name, value);
+    }
+    out.insert(CONNECTION, HeaderValue::from_static("Upgrade"));
+    out.insert(UPGRADE, HeaderValue::from_static("websocket"));
+    out
+}
+
+fn request_is_tls(request: &RequestInfo) -> bool {
+    matches!(
+        request.scheme.to_ascii_lowercase().as_str(),
+        "https" | "wss"
+    )
+}
+
+fn websocket_url(request: &RequestInfo) -> String {
+    let scheme = if request_is_tls(request) { "wss" } else { "ws" };
+    let path = if request.path.is_empty() {
+        "/"
+    } else {
+        request.path.as_str()
+    };
+    format!("{scheme}://{}{path}", request.host)
 }
 
 fn finish(

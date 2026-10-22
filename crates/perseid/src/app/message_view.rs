@@ -105,8 +105,25 @@ pub(super) fn message_text(
     mode: MessageView,
     text: &str,
 ) {
+    let copy_label = match pane {
+        MessagePane::Request => "Copy request",
+        MessagePane::Response => "Copy response",
+    };
+    message_text_labeled(ui, id, pane, mode, text, copy_label);
+}
+
+/// Render read-only message text with a custom context-menu copy label. Used
+/// by the WebSocket detail pane, where "request"/"response" would be wrong.
+pub(super) fn message_text_labeled(
+    ui: &mut egui::Ui,
+    id: u64,
+    pane: MessagePane,
+    mode: MessageView,
+    text: &str,
+    copy_label: &str,
+) {
     let mut readonly = text;
-    let _ = message_frame(ui, id, pane, mode, &mut readonly);
+    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label);
 }
 
 /// Render the shared message frame with an editable text buffer.
@@ -120,7 +137,11 @@ pub(super) fn message_editor(
     mode: MessageView,
     text: &mut String,
 ) -> bool {
-    message_frame(ui, id, pane, mode, text)
+    let copy_label = match pane {
+        MessagePane::Request => "Copy request",
+        MessagePane::Response => "Copy response",
+    };
+    message_frame(ui, id, pane, mode, text, copy_label)
 }
 
 fn message_frame(
@@ -129,6 +150,7 @@ fn message_frame(
     pane: MessagePane,
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
+    copy_label: &str,
 ) -> bool {
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
@@ -173,10 +195,6 @@ fn message_frame(
         });
     }
     let saved_selection = ui.data(|data| data.get_temp::<Arc<str>>(selection_key));
-    let copy_all = match pane {
-        MessagePane::Request => "Copy request",
-        MessagePane::Response => "Copy response",
-    };
     frame.response.container_context_menu(|ui| {
         let selected = saved_selection.as_deref().or_else(|| {
             selection
@@ -193,7 +211,7 @@ fn message_frame(
             ui.ctx().copy_text(selected.to_owned());
             ui.close();
         }
-        if ui.button(copy_all).clicked() {
+        if ui.button(copy_label).clicked() {
             ui.ctx().copy_text(text.as_str().to_owned());
             ui.close();
         }

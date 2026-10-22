@@ -33,6 +33,23 @@ fn main() -> Result<(), perseid::proxy::StartError> {
                 ProxyEvent::ResponseHead { id, head } => {
                     println!("{id:>4} <- {} {}", head.status, head.reason);
                 }
+                ProxyEvent::WebSocketMessage {
+                    id,
+                    connection,
+                    direction,
+                    opcode,
+                    payload,
+                    ..
+                } => {
+                    println!(
+                        "{id:>4} ws {} {:?} {:?} {} bytes ({})",
+                        connection.id,
+                        direction,
+                        opcode,
+                        payload.total_len(),
+                        connection.url
+                    );
+                }
                 ProxyEvent::Finished { id, end } => match end.result {
                     ExchangeResult::Response { body } => println!(
                         "{id:>4} == {} ms, {} bytes captured{}",
