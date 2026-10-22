@@ -31,7 +31,7 @@ impl InterceptEntry {
         Self { item, draft }
     }
 
-    fn key(&self) -> InterceptKey {
+    pub(super) fn key(&self) -> InterceptKey {
         self.item.key()
     }
 }
@@ -133,51 +133,11 @@ impl PerseidApp {
         } else {
             self.intercept_selected.len()
         };
-        let listener = self
-            .proxy
-            .as_ref()
-            .map(Proxy::local_addr)
-            .unwrap_or(self.listen);
 
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(12, 6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Intercept")
-                            .size(17.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    if pending > 0 {
-                        ui.colored_label(theme::AMBER, format!("{pending} held"));
-                    }
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            self.capture_toggle(ui);
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(listener.to_string())
-                                    .monospace()
-                                    .small()
-                                    .color(theme::TEXT_MUTED),
-                            );
-                            if self.proxy.is_some() {
-                                ui.colored_label(theme::GREEN, "listening");
-                            } else {
-                                ui.colored_label(theme::RED, "not running");
-                                if ui.button("Retry").clicked() {
-                                    let notify = self.notify.clone();
-                                    self.start_proxy(notify);
-                                }
-                            }
-                        },
-                    );
-                });
-                ui.add_space(5.0);
-
                 // Burp's Intercept tab has one master on/off control. Requests
                 // are held by default; responses are a separate, opt-in rule
                 // set and stay off until explicitly enabled here.
@@ -189,7 +149,7 @@ impl PerseidApp {
                         } else {
                             "Intercept is off"
                         })
-                        .size(13.5)
+                        .size(12.0)
                         .strong()
                         .color(if on { Color32::WHITE } else { theme::TEXT }),
                     )
@@ -206,8 +166,8 @@ impl PerseidApp {
                             theme::BORDER
                         },
                     ))
-                    .corner_radius(5.0)
-                    .min_size(egui::vec2(136.0, 30.0));
+                    .corner_radius(3.0)
+                    .min_size(egui::vec2(112.0, 24.0));
                     if ui
                         .add(toggle)
                         .on_hover_text(if on {
@@ -276,47 +236,16 @@ impl PerseidApp {
                     {
                         drop_all = true;
                     }
-                });
 
-                ui.add_space(4.0);
-                let decrypting = self.tls_intercept && self.tls_ca.is_some();
-                let holding_message = if self.intercept_enabled {
-                    if self.intercept_responses {
-                        if decrypting {
-                            "New HTTP and decrypted HTTPS requests and responses will wait here."
-                        } else {
-                            "New HTTP requests and responses will wait here. HTTPS stays an opaque CONNECT tunnel."
-                        }
-                    } else if decrypting {
-                        "New HTTP and decrypted HTTPS requests will wait here."
-                    } else {
-                        "New HTTP requests will wait here. HTTPS stays an opaque CONNECT tunnel."
+                    if pending > 0 {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.colored_label(theme::AMBER, format!("{pending} held"));
+                            },
+                        );
                     }
-                } else {
-                    "New HTTP traffic is forwarded automatically."
-                };
-                ui.label(
-                    RichText::new(holding_message)
-                        .small()
-                        .color(if self.intercept_enabled {
-                            theme::ACCENT_DARK
-                        } else {
-                            theme::TEXT_MUTED
-                        }),
-                );
-                let https_hint = if decrypting {
-                    "HTTPS is decrypted into ordinary HTTP messages."
-                } else {
-                    "HTTPS is CONNECT passthrough; enable decryption in Proxy > TLS."
-                };
-                ui.label(
-                    RichText::new(format!(
-                        "{https_hint} Bodies over {} are held for header edits only.",
-                        view::human_bytes(self.intercept_limit as u64)
-                    ))
-                    .small()
-                    .color(theme::TEXT_MUTED),
-                );
+                });
                 if let Some(error) = &self.proxy_error {
                     ui.label(RichText::new(error).small().color(theme::RED));
                 }
@@ -339,12 +268,12 @@ impl PerseidApp {
         if pending > 0 {
             egui::Panel::bottom(INTERCEPT_EDITOR_ID)
                 .resizable(true)
-                .default_size(300.0)
-                .min_size(220.0)
+                .default_size(320.0)
+                .min_size(180.0)
                 .frame(
                     egui::Frame::NONE
                         .fill(theme::SURFACE)
-                        .inner_margin(egui::Margin::same(8)),
+                        .inner_margin(egui::Margin::same(5)),
                 )
                 .show(ui, |ui| self.intercept_editor(ui));
         }
@@ -407,12 +336,12 @@ impl PerseidApp {
             .resizable(true)
             .sense(egui::Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::exact(74.0))
-            .column(Column::exact(54.0))
-            .column(Column::exact(78.0))
-            .column(Column::exact(70.0))
+            .column(Column::exact(64.0))
+            .column(Column::exact(44.0))
+            .column(Column::exact(68.0))
+            .column(Column::exact(56.0))
             .column(Column::initial(500.0).at_least(180.0))
-            .column(Column::exact(78.0))
+            .column(Column::exact(68.0))
             .column(Column::remainder().at_least(64.0));
 
         if let Some(index) = scroll_to {
@@ -420,7 +349,7 @@ impl PerseidApp {
         }
 
         table
-            .header(22.0, |mut header| {
+            .header(18.0, |mut header| {
                 for title in [
                     "Time",
                     "Type",
@@ -441,7 +370,7 @@ impl PerseidApp {
                 }
             })
             .body(|body| {
-                body.rows(22.0, rows, |mut row| {
+                body.rows(18.0, rows, |mut row| {
                     let index = row.index();
                     let Some(entry) = queue.get(index) else {
                         return;
@@ -660,7 +589,7 @@ impl PerseidApp {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(title)
-                            .size(15.0)
+                            .size(13.0)
                             .strong()
                             .color(theme::TEXT),
                     );
@@ -729,7 +658,7 @@ impl PerseidApp {
                                     .code_editor()
                                     .font(egui::FontSelection::FontId(font.clone()))
                                     .layouter(&mut head_layouter)
-                                    .desired_rows(7)
+                                    .desired_rows(5)
                                     .desired_width(f32::INFINITY),
                             )
                             .changed()
@@ -753,7 +682,7 @@ impl PerseidApp {
                                         .code_editor()
                                         .font(egui::FontSelection::FontId(font.clone()))
                                         .layouter(&mut body_layouter)
-                                        .desired_rows(9)
+                                        .desired_rows(4)
                                         .desired_width(f32::INFINITY),
                                 )
                                 .changed()

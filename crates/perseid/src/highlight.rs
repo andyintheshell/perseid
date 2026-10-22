@@ -12,7 +12,7 @@ use crate::theme;
 
 /// Message text is a little smaller than the UI's default monospace style so
 /// more of a request or response fits in the detail panes.
-pub const MESSAGE_FONT_SIZE: f32 = 12.0;
+pub const MESSAGE_FONT_SIZE: f32 = 11.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Language {

@@ -82,7 +82,7 @@ impl PerseidApp {
     fn http_history_view(&mut self, ui: &mut egui::Ui) {
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(12, 6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| self.history_toolbar(ui));
         self.rebuild_visible();
         // The filter or scope can hide the selected exchange. Do not leave its
@@ -95,12 +95,12 @@ impl PerseidApp {
 
         egui::Panel::bottom(PROXY_DETAIL_ID)
             .resizable(true)
-            .default_size(340.0)
-            .min_size(280.0)
+            .default_size(300.0)
+            .min_size(220.0)
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(8)),
+                    .inner_margin(egui::Margin::same(4)),
             )
             .show(ui, |ui| self.detail_panel(ui));
 
@@ -113,15 +113,13 @@ impl PerseidApp {
         let mut clear = false;
         let mut send_to_repeater = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("HTTP history").strong().color(theme::TEXT));
-            ui.separator();
             ui.label(RichText::new("Filter").color(theme::TEXT_MUTED));
             let filter_id = egui::Id::unique(FILTER_ID);
             let response = ui.add(
                 TextEdit::singleline(&mut self.filter)
                     .id(filter_id)
                     .hint_text("method, host, path, status")
-                    .desired_width(260.0),
+                    .desired_width(240.0),
             );
             if response.changed() {
                 self.visible_key = None;
@@ -208,12 +206,12 @@ impl PerseidApp {
             .resizable(true)
             .sense(egui::Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::exact(44.0))
-            .column(Column::exact(64.0))
-            .column(Column::initial(420.0).at_least(180.0))
+            .column(Column::exact(40.0))
             .column(Column::exact(56.0))
-            .column(Column::exact(76.0))
-            .column(Column::initial(130.0).at_least(80.0))
+            .column(Column::initial(420.0).at_least(180.0))
+            .column(Column::exact(50.0))
+            .column(Column::exact(68.0))
+            .column(Column::initial(115.0).at_least(80.0))
             .column(Column::remainder().at_least(64.0));
 
         if self.scroll_to_selected {
@@ -224,7 +222,7 @@ impl PerseidApp {
         }
 
         table
-            .header(22.0, |mut header| {
+            .header(18.0, |mut header| {
                 for title in [
                     "#",
                     "Method",
@@ -245,7 +243,7 @@ impl PerseidApp {
                 }
             })
             .body(|body| {
-                body.rows(20.0, rows, |mut row| {
+                body.rows(16.0, rows, |mut row| {
                     let index = row.index();
                     let id = self.visible[index];
                     let Some(item) = self.history.get(id) else {
@@ -359,16 +357,16 @@ impl PerseidApp {
         // Keep the splitter resizable so wide messages still have room.
         let mut request_view = self.request_view;
         let mut response_view = self.response_view;
-        let default_width = (ui.available_width() * 0.5).max(240.0);
+        let default_width = (ui.available_width() * 0.5).max(220.0);
 
         egui::Panel::left(PROXY_REQUEST_ID)
             .resizable(true)
             .default_size(default_width)
-            .min_size(180.0)
+            .min_size(150.0)
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(4)),
+                    .inner_margin(egui::Margin::same(3)),
             )
             .show(ui, |ui| {
                 message_toolbar(ui, MessagePane::Request, &mut request_view, Some(item));
@@ -385,7 +383,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(4)),
+                    .inner_margin(egui::Margin::same(3)),
             )
             .show(ui, |ui| {
                 message_toolbar(ui, MessagePane::Response, &mut response_view, Some(item));

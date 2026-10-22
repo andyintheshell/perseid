@@ -24,7 +24,7 @@ use std::net::SocketAddr;
 
 use clap::Parser;
 
-use crate::history::DEFAULT_HISTORY_BYTES;
+use crate::history::default_history_bytes;
 
 /// A lightweight web security workbench for inspecting, replaying, and
 /// testing HTTP traffic.
@@ -47,8 +47,9 @@ pub(crate) struct Args {
     #[arg(long, value_name = "N", default_value_t = 2000)]
     pub history_limit: usize,
 
-    /// Maximum total request/response body bytes retained by history.
-    #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_HISTORY_BYTES)]
+    /// Maximum total request/response body bytes retained by history
+    /// (default: half of physical memory).
+    #[arg(long, value_name = "BYTES", default_value_t = default_history_bytes())]
     pub history_bytes: usize,
 
     /// Start without the proxy (UI only).
@@ -99,7 +100,10 @@ pub fn run() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Perseid")
         .with_inner_size([1280.0, 820.0])
-        .with_min_inner_size([720.0, 480.0]);
+        .with_min_inner_size([720.0, 480.0])
+        // The menu shares the title-bar row with the window controls, Burp
+        // style. The app draws the drag area and resize border itself.
+        .with_decorations(false);
     if let Some(icon) = branding::window_icon() {
         viewport = viewport.with_icon(icon);
     } else {

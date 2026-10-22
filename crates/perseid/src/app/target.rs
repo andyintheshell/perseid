@@ -48,26 +48,23 @@ impl PerseidApp {
 
             egui::Panel::left(TARGET_TREE_ID)
                 .resizable(true)
-                .default_size(380.0)
-                .min_size(220.0)
+                .default_size(340.0)
+                .min_size(200.0)
                 .frame(
                     egui::Frame::NONE
                         .fill(theme::SURFACE)
-                        .inner_margin(egui::Margin::same(8)),
+                        .inner_margin(egui::Margin::same(5)),
                 )
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Site map").strong().color(theme::TEXT));
-                        ui.label(
-                            RichText::new(format!(
-                                "{} hosts / {} endpoints",
-                                map.hosts.len(),
-                                map.endpoint_count()
-                            ))
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                        );
-                    });
+                    ui.label(
+                        RichText::new(format!(
+                            "{} hosts / {} endpoints",
+                            map.hosts.len(),
+                            map.endpoint_count()
+                        ))
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                    );
                     ui.separator();
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
@@ -124,7 +121,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::CANVAS)
-                    .inner_margin(egui::Margin::same(8)),
+                    .inner_margin(egui::Margin::same(5)),
             )
             .show(ui, |ui| self.detail_panel(ui));
     }
@@ -142,8 +139,8 @@ impl PerseidApp {
                     ui.set_max_width(780.0);
                     card(ui, |ui| {
                         ui.label(
-                        RichText::new("Target scope")
-                            .size(17.0)
+                        RichText::new("Scope rules")
+                            .size(14.0)
                             .strong()
                             .color(theme::TEXT),
                     );
@@ -233,7 +230,7 @@ impl PerseidApp {
                 card(ui, |ui| {
                     ui.label(
                         RichText::new("Captured hosts")
-                            .size(15.0)
+                            .size(13.5)
                             .strong()
                             .color(theme::TEXT),
                     );

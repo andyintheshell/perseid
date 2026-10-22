@@ -106,16 +106,17 @@ scripts/screenshots.sh
 ```
 
 This builds `perseid` with the `screenshots` feature, runs it under Xvfb,
-seeds a deterministic demo history, captures the egui framebuffer, and writes
-the two PNGs to `docs/images/`. It requires `xvfb`, `xauth`, and Python 3 (for
-the PNG check). Use `--out DIR` to write elsewhere, or `--no-build` to reuse an
-existing `target/debug/perseid`.
+seeds a deterministic demo history, captures every documented UI tab from the
+egui framebuffer, and writes the PNGs to `docs/images/`. It requires `xvfb`,
+`xauth`, and Python 3 (for the PNG check). Use `--out DIR` to write elsewhere,
+or `--no-build` to reuse an existing `target/debug/perseid`.
 
 The screenshots contain synthetic demo traffic, never captured traffic. The
 separate [Screenshots workflow](.github/workflows/screenshots.yml) runs the
 same script on UI changes, verifies the PNGs, uploads them as artifacts, and
-publishes an inline preview. The pull-request workflow always starts and uses a
-small change-detection job to skip the screenshot build when no relevant paths
+posts or updates a pull-request comment containing the full-window preview of
+every tab. The pull-request workflow always starts and uses a small
+change-detection job to skip the screenshot build when no relevant paths
 changed. That keeps a skipped run from leaving a required check pending.
 
 ## Project layout
@@ -138,8 +139,11 @@ through the bounded channel.
 - Keep changes focused; separate refactors from behavior changes where
   practical.
 - Add or update tests for proxy, history, and scope behavior.
-- For UI changes, include a screenshot or a short note describing the manual
-  check you performed.
+- For UI changes, include a screenshot. Every UI tab must be represented; the
+  Screenshots workflow posts or updates a comment with all tab previews for
+  same-repository pull requests. If that automatic comment is unavailable
+  (for example, on a fork), link the workflow artifact or attach the previews
+  to the pull request yourself.
 - Update the [roadmap](docs/roadmap.md), [parity matrix](docs/burp-parity.md),
   or user docs when a change affects them.
 

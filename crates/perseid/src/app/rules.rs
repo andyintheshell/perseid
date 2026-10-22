@@ -35,15 +35,9 @@ impl PerseidApp {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new("Match/replace")
-                                .size(17.0)
+                            RichText::new(format!("{} rules", self.match_replace.len()))
                                 .strong()
                                 .color(theme::TEXT),
-                        );
-                        ui.label(
-                            RichText::new(format!("{} rules", self.match_replace.len()))
-                                .small()
-                                .color(theme::TEXT_MUTED),
                         );
                         ui.with_layout(
                             egui::Layout::right_to_left(egui::Align::Center),

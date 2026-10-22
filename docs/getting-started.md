@@ -29,7 +29,7 @@ proxy is running and lets you retry if the address is already in use.
 --capture-limit <BYTES>   maximum body bytes kept per request/response [default: 1048576]
 --intercept-limit <BYTES> maximum body bytes buffered for interception or rewriting [default: 1048576]
 --history-limit <N>       maximum number of exchanges kept in memory [default: 2000]
---history-bytes <BYTES>   maximum total body bytes retained by history [default: 268435456]
+--history-bytes <BYTES>   maximum total body bytes retained by history [default: half of physical memory]
 --no-proxy                start the UI without the proxy
 --ca-dir <DIR>            TLS interception CA directory [default: $PERSEID_CA_DIR or the platform data directory]
 --no-tls-intercept        start without decrypting HTTPS (the local CA is still available)
@@ -325,10 +325,11 @@ leaves the filter. Clicking a row also selects it.
   HTML encoding is text-oriented: binary input is represented as numeric
   entities per byte, so high bytes do not round-trip as raw bytes.
 - History is in memory only. It is bounded by `--history-limit` and
-  `--history-bytes`; captured bodies are capped per message by
-  `--capture-limit`, and interception buffers up to `--intercept-limit` per
-  message. The oldest exchanges are evicted when either history bound is
-  reached.
+  `--history-bytes`; the byte budget defaults to half of physical memory
+  (256 MiB if the platform does not report it). Captured bodies are capped per
+  message by `--capture-limit`, and interception buffers up to
+  `--intercept-limit` per message. The oldest exchanges are evicted when either
+  history bound is reached.
 - Captured traffic is in memory only; there is no project file or settings
   persistence yet. The TLS certificate authority is the exception: it is
   persisted so browser trust survives restarts and updates.

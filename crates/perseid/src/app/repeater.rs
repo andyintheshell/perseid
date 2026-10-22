@@ -70,7 +70,7 @@ impl RepeaterTab {
         }
     }
 
-    fn from_history(id: u64, item: &crate::history::HistoryItem) -> Self {
+    pub(super) fn from_history(id: u64, item: &crate::history::HistoryItem) -> Self {
         let path = if item.request.path.is_empty() {
             &item.request.host
         } else {
@@ -128,6 +128,43 @@ impl RepeaterTab {
             error: None,
             response_view: MessageView::Pretty,
         }
+    }
+
+    /// Seed a representative replay response for the documentation screenshot.
+    #[cfg(feature = "screenshots")]
+    pub(super) fn seed_screenshot_response(&mut self) {
+        let body = crate::proxy::CapturedBody::from_bytes(
+            br#"{
+  "items": [
+    { "id": 1, "name": "Router", "in_stock": true },
+    { "id": 2, "name": "Cable", "in_stock": true }
+  ],
+  "served_by": "demo-api"
+}"#
+            .to_vec(),
+        );
+        let headers = vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("Content-Length".to_string(), body.total_len().to_string()),
+            (
+                "Server".to_string(),
+                "DemoServer/1.0 Python/3.14.7".to_string(),
+            ),
+        ];
+        self.response = Some(RepeaterReply {
+            views: view::response_views_from_parts("HTTP/1.1", 200, "OK", &headers, &body),
+            status: 200,
+            reason: "OK".to_string(),
+            duration: Duration::from_millis(18),
+            size: body.total_len(),
+            truncated: false,
+            body_complete: true,
+            body_error: None,
+        });
+        self.pending = None;
+        self.pending_since = None;
+        self.error = None;
+        self.response_view = MessageView::Pretty;
     }
 }
 
@@ -237,17 +274,10 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(12, 4)),
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Repeater")
-                            .size(15.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    ui.separator();
                     if ui.button("+").on_hover_text("New Repeater tab").clicked() {
                         new_tab = true;
                     }
@@ -326,7 +356,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(12, 6)),
+                    .inner_margin(egui::Margin::symmetric(8, 3)),
             )
             .show(ui, |ui| {
                 let tab = &mut self.repeater_tabs[index];
@@ -338,7 +368,7 @@ impl PerseidApp {
                     )
                     .fill(theme::ACCENT_DARK)
                     .stroke(Stroke::new(1.0, theme::ACCENT_DARK))
-                    .min_size(egui::vec2(76.0, 30.0));
+                    .min_size(egui::vec2(60.0, 24.0));
                     if ui
                         .add_enabled(tab.pending.is_none(), send_button)
                         .on_hover_text("Send the edited request (Ctrl+Enter)")
@@ -348,7 +378,7 @@ impl PerseidApp {
                         send = true;
                     }
 
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     ui.label(RichText::new("Target").small().color(theme::TEXT_MUTED));
                     egui::ComboBox::from_id_salt(("perseid.repeater.scheme", tab.id))
                         .width(70.0)
@@ -415,16 +445,16 @@ impl PerseidApp {
 
     fn repeater_editor(&mut self, ui: &mut egui::Ui) {
         let index = self.repeater_active;
-        let default_width = (ui.available_width() * 0.5).max(300.0);
+        let default_width = (ui.available_width() * 0.5).max(260.0);
 
         egui::Panel::left(REPEATER_REQUEST_ID)
             .resizable(true)
             .default_size(default_width)
-            .min_size(220.0)
+            .min_size(180.0)
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(8)),
+                    .inner_margin(egui::Margin::same(5)),
             )
             .show(ui, |ui| {
                 let tab = &mut self.repeater_tabs[index];
@@ -435,7 +465,7 @@ impl PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::same(8)),
+                    .inner_margin(egui::Margin::same(5)),
             )
             .show(ui, |ui| {
                 let tab = &mut self.repeater_tabs[index];

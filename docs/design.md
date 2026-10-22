@@ -181,7 +181,8 @@ Important implementation principles:
 
 - Disk-backed history with bounded in-memory windows (planned).
 - Hard limits on captured body size, with bounded text and hex previews.
-- A total retained-body budget for history, independent of the exchange count.
+- A total retained-body budget for history, independent of the exchange count
+  (half of physical memory by default, with a 256 MiB fallback).
 - Bounded worker queues, concurrent connections and tunnels, and a bounded UI
   event channel with drop counters. Repeater responses share the capture limit,
   and simultaneous Repeater sends are capped independently of tab count.

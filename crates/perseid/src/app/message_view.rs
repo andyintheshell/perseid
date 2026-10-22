@@ -68,7 +68,7 @@ pub(super) fn message_toolbar(
             );
         }
     });
-    ui.add_space(2.0);
+    ui.add_space(1.0);
     ui.horizontal(|ui| {
         if message_mode_tab(ui, *mode == MessageView::Pretty, "Pretty").clicked() {
             *mode = MessageView::Pretty;
@@ -80,7 +80,7 @@ pub(super) fn message_toolbar(
             *mode = MessageView::Hex;
         }
     });
-    ui.add_space(2.0);
+    ui.add_space(1.0);
 }
 
 pub(super) fn message_text(
@@ -99,7 +99,7 @@ pub(super) fn message_text(
         .fill(Color32::WHITE)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(4.0)
-        .inner_margin(egui::Margin::same(8))
+        .inner_margin(egui::Margin::same(5))
         .show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             if mode == MessageView::Hex {

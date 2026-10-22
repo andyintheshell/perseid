@@ -149,6 +149,13 @@ enum MessageView {
     Hex,
 }
 
+#[derive(Clone, Copy)]
+enum WindowControl {
+    Minimize,
+    Maximize,
+    Close,
+}
+
 pub struct PerseidApp {
     proxy: Option<Proxy>,
     proxy_error: Option<String>,
@@ -225,6 +232,78 @@ struct DetailCache {
     id: u64,
     request: MessageViews,
     response: MessageViews,
+}
+
+/// Draw one custom title-bar window control.
+fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 20.0), egui::Sense::click());
+    let hovered = response.hovered();
+    let (fill, color) = match control {
+        WindowControl::Close if hovered => (theme::RED, Color32::WHITE),
+        _ if hovered => (theme::ACCENT_WASH, theme::ACCENT_DARK),
+        _ => (Color32::TRANSPARENT, theme::TEXT_MUTED),
+    };
+    if fill != Color32::TRANSPARENT {
+        ui.painter().rect_filled(rect, 3.0, fill);
+    }
+
+    let center = rect.center();
+    let stroke = Stroke::new(1.0, color);
+    match control {
+        WindowControl::Minimize => {
+            ui.painter().line_segment(
+                [
+                    egui::pos2(center.x - 4.0, center.y + 3.0),
+                    egui::pos2(center.x + 4.0, center.y + 3.0),
+                ],
+                stroke,
+            );
+        }
+        WindowControl::Maximize if maximized => {
+            let back = egui::Rect::from_min_size(
+                egui::pos2(center.x - 2.0, center.y - 4.0),
+                egui::vec2(6.0, 6.0),
+            );
+            let front = egui::Rect::from_min_size(
+                egui::pos2(center.x - 4.0, center.y - 2.0),
+                egui::vec2(6.0, 6.0),
+            );
+            ui.painter()
+                .rect_stroke(back, 0.0, stroke, egui::StrokeKind::Inside);
+            ui.painter()
+                .rect_stroke(front, 0.0, stroke, egui::StrokeKind::Inside);
+        }
+        WindowControl::Maximize => {
+            let square = egui::Rect::from_center_size(center, egui::vec2(7.0, 7.0));
+            ui.painter()
+                .rect_stroke(square, 0.0, stroke, egui::StrokeKind::Inside);
+        }
+        WindowControl::Close => {
+            ui.painter().line_segment(
+                [
+                    egui::pos2(center.x - 3.5, center.y - 3.5),
+                    egui::pos2(center.x + 3.5, center.y + 3.5),
+                ],
+                stroke,
+            );
+            ui.painter().line_segment(
+                [
+                    egui::pos2(center.x + 3.5, center.y - 3.5),
+                    egui::pos2(center.x - 3.5, center.y + 3.5),
+                ],
+                stroke,
+            );
+        }
+    }
+
+    response
+        .on_hover_text(match control {
+            WindowControl::Minimize => "Minimize",
+            WindowControl::Maximize if maximized => "Restore",
+            WindowControl::Maximize => "Maximize",
+            WindowControl::Close => "Close",
+        })
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 impl PerseidApp {
@@ -362,10 +441,6 @@ impl PerseidApp {
             match screenshots::ScreenshotDriver::new(dir) {
                 Ok(driver) => {
                     app.screenshots = Some(driver);
-                    if let Err(err) = app.prepare_screenshot_scene() {
-                        log::error!("screenshot mode: {err}");
-                        std::process::exit(1);
-                    }
                 }
                 Err(err) => {
                     log::error!("screenshot mode: {err}");
@@ -726,14 +801,22 @@ impl PerseidApp {
         }
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
+    fn title_bar(&mut self, ui: &mut egui::Ui) {
+        let titlebar_rect = ui.max_rect();
+        let maximized = ui
+            .ctx()
+            .input(|input| input.viewport().maximized.unwrap_or(false));
+
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+            ui.spacing_mut().button_padding = egui::vec2(5.0, 1.0);
+
             if let Some(mark) = &self.mark {
                 let response = ui
                     .add(
                         egui::Image::from_texture(mark)
-                            .fit_to_exact_size(egui::vec2(24.0, 24.0))
-                            .corner_radius(6.0)
+                            .fit_to_exact_size(egui::vec2(17.0, 17.0))
+                            .corner_radius(4.0)
                             .sense(egui::Sense::click()),
                     )
                     .on_hover_text("About Perseid")
@@ -742,7 +825,7 @@ impl PerseidApp {
                     self.about_open = true;
                 }
             }
-            ui.add_space(6.0);
+            ui.add_space(3.0);
 
             ui.scope(|ui| {
                 let widgets = &mut ui.style_mut().visuals.widgets;
@@ -808,27 +891,58 @@ impl PerseidApp {
                 });
             });
 
+            // The empty part of the title bar drags the window, like Burp's
+            // menu bar. Reserve room on the right for the window controls.
+            let drag_height = ui.spacing().interact_size.y.max(18.0);
+            let drag_width = (ui.available_width() - 3.0 * 24.0 - 8.0).max(0.0);
+            let (drag_rect, drag_response) = ui.allocate_exact_size(
+                egui::vec2(drag_width, drag_height),
+                egui::Sense::click_and_drag(),
+            );
+            if drag_response.drag_started() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            if drag_response.double_clicked() {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+            }
+            if drag_rect.width() > 0.0 {
+                ui.painter().text(
+                    drag_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Perseid",
+                    egui::FontId::proportional(10.5),
+                    theme::TEXT_MUTED,
+                );
+            }
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.capture_toggle(ui);
-                ui.separator();
-                if let Some(proxy) = &self.proxy {
-                    ui.colored_label(theme::GREEN, format!("proxy on {}", proxy.local_addr()));
-                } else {
-                    let response = ui.colored_label(theme::RED, "proxy not running");
-                    if let Some(error) = &self.proxy_error {
-                        response.on_hover_text(error);
-                    }
-                    if ui.button("Retry").clicked() {
-                        let notify = self.notify.clone();
-                        self.start_proxy(notify);
-                    }
+                if window_control(ui, WindowControl::Close, maximized).clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                if window_control(ui, WindowControl::Maximize, maximized).clicked() {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                }
+                if window_control(ui, WindowControl::Minimize, maximized).clicked() {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
             });
         });
+
+        // A hairline matches the menu/title separation in Burp without adding
+        // another full-width panel.
+        ui.painter().line_segment(
+            [
+                egui::pos2(titlebar_rect.left(), titlebar_rect.bottom()),
+                egui::pos2(titlebar_rect.right(), titlebar_rect.bottom()),
+            ],
+            Stroke::new(1.0, theme::BORDER),
+        );
     }
 
     fn main_tabs(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(4.0);
         let shortcuts = [
             ui.ctx().format_shortcut(&TAB_TARGET_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_PROXY_SHORTCUT),
@@ -845,6 +959,23 @@ impl PerseidApp {
                     ui.ctx().memory_mut(|memory| memory.stop_text_input());
                 }
             }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.capture_toggle(ui);
+                ui.separator();
+                if let Some(proxy) = &self.proxy {
+                    ui.colored_label(theme::GREEN, format!("proxy on {}", proxy.local_addr()));
+                } else {
+                    let response = ui.colored_label(theme::RED, "proxy not running");
+                    if let Some(error) = &self.proxy_error {
+                        response.on_hover_text(error);
+                    }
+                    if ui.button("Retry").clicked() {
+                        let notify = self.notify.clone();
+                        self.start_proxy(notify);
+                    }
+                }
+            });
         });
     }
 
@@ -870,8 +1001,9 @@ impl PerseidApp {
                     .color(theme::TEXT_MUTED),
             )
             .on_hover_text(format!(
-                "{} captured body bytes retained",
-                view::human_bytes(self.history.retained_bytes() as u64)
+                "{} of {} captured body bytes retained",
+                view::human_bytes(self.history.retained_bytes() as u64),
+                view::human_bytes(self.history.byte_limit() as u64)
             ));
 
             let in_flight = self.history.in_flight();
@@ -901,28 +1033,6 @@ impl PerseidApp {
             if repeater_pending > 0 {
                 ui.separator();
                 ui.colored_label(theme::BLUE, format!("{repeater_pending} Repeater pending"));
-            }
-
-            if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("#{} {}", item.number, item.request.method))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
-                ui.colored_label(view::status_color(item), view::status_text(item));
-                if let Some(duration) = item.duration() {
-                    ui.label(
-                        RichText::new(view::format_duration(duration))
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                    );
-                }
-                ui.label(
-                    RichText::new(view::human_bytes(item.transferred()))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
             }
 
             if let Some(proxy) = &self.proxy {
@@ -958,16 +1068,6 @@ impl PerseidApp {
                 );
             }
 
-            ui.separator();
-            ui.label(
-                RichText::new(format!(
-                    "capture limit {}",
-                    view::human_bytes(self.capture_limit as u64)
-                ))
-                .small()
-                .color(theme::TEXT_MUTED),
-            );
-
             if self.paused {
                 ui.separator();
                 ui.colored_label(theme::AMBER, "capture paused");
@@ -975,23 +1075,96 @@ impl PerseidApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.memory_indicator(ui);
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("UI {:.0}%", ui.ctx().pixels_per_point() * 100.0))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
-                ui.separator();
-                let https_status = if self.tls_intercept && self.tls_ca.is_some() {
-                    "HTTPS: decrypting via the local CA"
-                } else if self.tls_ca.is_some() {
-                    "HTTPS: CONNECT passthrough - TLS interception is off"
-                } else {
-                    "HTTPS: CONNECT passthrough - no interception CA"
-                };
-                ui.label(RichText::new(https_status).small().color(theme::TEXT_MUTED));
             });
         });
+    }
+
+    /// The window is undecorated so the menu can share the title-bar row with
+    /// the window controls. Draw its resize border ourselves.
+    fn resize_handles(&self, ui: &mut egui::Ui) {
+        let rect = ui.ctx().content_rect();
+        let edge = 4.0;
+        let corner = 10.0;
+        let handles = [
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + corner, rect.top()),
+                    egui::pos2(rect.right() - corner, rect.top() + edge),
+                ),
+                egui::ResizeDirection::North,
+                egui::CursorIcon::ResizeVertical,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + corner, rect.bottom() - edge),
+                    egui::pos2(rect.right() - corner, rect.bottom()),
+                ),
+                egui::ResizeDirection::South,
+                egui::CursorIcon::ResizeVertical,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), rect.top() + corner),
+                    egui::pos2(rect.left() + edge, rect.bottom() - corner),
+                ),
+                egui::ResizeDirection::West,
+                egui::CursorIcon::ResizeHorizontal,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.right() - edge, rect.top() + corner),
+                    egui::pos2(rect.right(), rect.bottom() - corner),
+                ),
+                egui::ResizeDirection::East,
+                egui::CursorIcon::ResizeHorizontal,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), rect.top()),
+                    egui::pos2(rect.left() + corner, rect.top() + corner),
+                ),
+                egui::ResizeDirection::NorthWest,
+                egui::CursorIcon::ResizeNwSe,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.right() - corner, rect.top()),
+                    egui::pos2(rect.right(), rect.top() + corner),
+                ),
+                egui::ResizeDirection::NorthEast,
+                egui::CursorIcon::ResizeNeSw,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), rect.bottom() - corner),
+                    egui::pos2(rect.left() + corner, rect.bottom()),
+                ),
+                egui::ResizeDirection::SouthWest,
+                egui::CursorIcon::ResizeNeSw,
+            ),
+            (
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.right() - corner, rect.bottom() - corner),
+                    egui::pos2(rect.right(), rect.bottom()),
+                ),
+                egui::ResizeDirection::SouthEast,
+                egui::CursorIcon::ResizeNwSe,
+            ),
+        ];
+
+        for (index, (rect, direction, cursor)) in handles.into_iter().enumerate() {
+            let response = ui
+                .interact(
+                    rect,
+                    egui::Id::unique(("perseid.window.resize", index)),
+                    egui::Sense::drag(),
+                )
+                .on_hover_cursor(cursor);
+            if response.drag_started() {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+            }
+        }
     }
 
     fn main_content(&mut self, ui: &mut egui::Ui) {
@@ -1013,22 +1186,27 @@ impl eframe::App for PerseidApp {
         self.keyboard(&ctx);
         self.rebuild_visible();
 
-        egui::Panel::top("perseid.top")
+        egui::Panel::top("perseid.titlebar")
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(12, 6)),
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
             )
-            .show(ui, |ui| {
-                self.top_bar(ui);
-                self.main_tabs(ui);
-            });
+            .show(ui, |ui| self.title_bar(ui));
+
+        egui::Panel::top("perseid.toolbar")
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::symmetric(8, 3)),
+            )
+            .show(ui, |ui| self.main_tabs(ui));
 
         egui::Panel::bottom("perseid.statusbar")
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(12, 4)),
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
             )
             .show(ui, |ui| self.status_bar(ui));
 
@@ -1039,6 +1217,7 @@ impl eframe::App for PerseidApp {
         self.memory_window(&ctx);
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
+        self.resize_handles(ui);
 
         #[cfg(feature = "screenshots")]
         self.drive_screenshots(&ctx);
