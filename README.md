@@ -48,9 +48,11 @@ tool and its limits; the [gallery](docs/screenshots.md) shows every tab.
 ## Quick start
 
 You need **Rust 1.95 or newer** and a graphical desktop with OpenGL support.
-Linux is CI-tested; macOS has been built and smoke-tested locally on Apple
-Silicon. See [platform setup](docs/getting-started.md#requirements) for Linux
-dependencies, Homebrew instructions, and support caveats.
+Linux, Apple Silicon macOS, and Windows are CI-tested. The Linux screenshot
+workflow also runs under Xvfb; CI coverage does not imply signed installers or
+support for every graphics driver. See
+[platform setup](docs/getting-started.md#requirements) for Linux dependencies,
+Homebrew instructions, and platform caveats.
 
 ```sh
 git clone https://github.com/andyintheshell/perseid.git
@@ -105,7 +107,7 @@ cargo run -p perseid --locked
 
 Bug reports, workflow feedback, and focused pull requests are welcome. Start
 with [CONTRIBUTING.md](CONTRIBUTING.md); useful areas include HTTP correctness,
-accessibility, low-memory Linux behavior, and macOS testing.
+accessibility, low-memory Linux behavior, and real-world macOS/Windows testing.
 
 - [Report a bug or suggest a feature](https://github.com/andyintheshell/perseid/issues).
 - [Report a security vulnerability privately](SECURITY.md)—never attach live

@@ -44,9 +44,11 @@ use a local lab or another target you are explicitly authorized to test.
 
 ## Platform status
 
-**Linux is the CI reference platform.** Apple Silicon macOS has been built and
-smoke-tested locally; there is no macOS CI job. Windows-specific code exists,
-but Windows builds and setup are not validated by this repository's CI.
+**Linux is the native-dependency and screenshot reference platform.** The
+required CI workflow runs formatting, Clippy, tests, and package checks in
+parallel on Linux, GitHub-hosted Apple Silicon macOS, and Windows with MSVC.
+The Linux screenshot workflow remains a separate Xvfb job. Cross-platform CI
+does not provide signed installers or validate every desktop/graphics setup.
 
 See [requirements](getting-started.md#requirements) before assuming that an OS
 mentioned in a path or keyboard example has full release support.

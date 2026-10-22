@@ -23,7 +23,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Rust changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
@@ -64,7 +64,7 @@ jobs:
   # Actions and Python scans are cheap enough to keep on every pull request.
   analyze-other:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       actions: read
@@ -95,7 +95,7 @@ jobs:
     name: Analyze (rust)
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       actions: read

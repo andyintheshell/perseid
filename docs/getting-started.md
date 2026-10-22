@@ -17,9 +17,9 @@ plain-HTTP walkthrough.
 
 | Platform | Validation status |
 | --- | --- |
-| Linux | CI reference platform; the published memory baseline is from a Kali arm64 VM. |
-| macOS | Built and smoke-tested locally on Apple Silicon with Homebrew Rust; no macOS CI coverage. |
-| Windows | Platform-specific paths and code exist, but build/run setup is not CI-validated. |
+| Linux | CI-tested on Ubuntu 26.04; the desktop screenshot workflow also runs on Linux/Xvfb. The published memory baseline is from a Kali arm64 VM. |
+| macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. Homebrew instructions are below. No packaged `.app` or installer is produced. |
+| Windows | CI-tested on the GitHub-hosted Windows 2025 runner with MSVC. This checks builds and tests, not a signed installer or every graphics driver. |
 
 ### Linux
 
@@ -63,6 +63,16 @@ export PATH="$(brew --prefix rust)/bin:$PATH"
 Package-manager or developer-tools installation may require administrator
 approval. **Do not run Cargo or Perseid with sudo.** The default loopback port
 and per-user CA directory do not require root.
+
+CI pins its runners to Ubuntu 26.04, macOS 26 (Apple Silicon), and Windows 2025.
+It runs formatting, linting, tests, and Cargo package checks on all three
+platforms in parallel using Rust 1.95.0. The Linux job installs its native
+desktop dependencies; the macOS job verifies that its hosted runner is arm64.
+Before caching, CI removes each image's unrelated floating `stable` Rust
+toolchain so image updates do not invalidate the cache for the pinned project
+toolchain. The test suite runs headlessly. Running the app still requires a
+working desktop and graphics stack; CI coverage is not a promise of release
+installers or support for every desktop configuration.
 
 ## Build and run
 

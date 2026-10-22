@@ -16,15 +16,21 @@ the easiest to review.
 
 ## Development setup
 
-Follow [platform setup](docs/getting-started.md#requirements) first. Linux is
-the CI reference platform; macOS has local Apple Silicon smoke testing, not
-automated platform coverage. A graphical run needs OpenGL and a desktop session.
-
 The manifest minimum is Rust 1.95 (edition 2024). `rust-toolchain.toml` and CI
 select **1.95.0**. With rustup, that selection is automatic. Homebrew's `rust`
 formula supplies its current toolchain instead; it is suitable for local builds
 but may produce different compiler or Clippy diagnostics. Include the toolchain
 version when reporting a failure.
+
+Follow [platform setup](docs/getting-started.md#requirements) for native
+dependencies. A graphical run needs a desktop session and OpenGL. CI pins Ubuntu
+26.04, macOS 26 on Apple Silicon, and Windows 2025, and runs format, Clippy,
+tests, and packaging in three parallel jobs. Linux installs its desktop build
+dependencies. After installing the pinned toolchain, each job removes the runner
+image's unrelated floating `stable` Rust toolchain before caching; this keeps
+cache keys stable as hosted images are refreshed. This verifies cross-platform
+builds and tests, not release installers or every graphics configuration. The
+screenshot workflow remains a separate Ubuntu 26.04/Xvfb check.
 
 From the repository root:
 
@@ -58,8 +64,8 @@ CARGO_BUILD_JOBS=4 cargo build
 CARGO_BUILD_JOBS=1 cargo test --workspace --locked
 ```
 
-CI sets `CARGO_BUILD_JOBS=4` because GitHub's runners have enough memory for
-the full job count.
+CI sets `CARGO_BUILD_JOBS=4` on all three runners to keep the same check shape;
+reduce the local job count if your machine has less memory.
 
 Perseid creates its TLS certificate authority on first launch and reuses the
 same per-user CA for debug and release runs. That is deliberate: a development
