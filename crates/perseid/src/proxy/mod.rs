@@ -45,6 +45,11 @@
 //!   capture pipeline as plain HTTP.
 //! - A local certificate page at the listener address (and `http://perseid/`)
 //!   downloads the public CA certificate. Portal requests are not captured.
+//! - WebSocket upgrades over HTTP/1.1 from plain `ws://` connections and
+//!   decrypted `wss://` tunnels. Frames are relayed unchanged while complete
+//!   text and binary messages are published as
+//!   [`ProxyEvent::WebSocketMessage`]; compression extensions are not
+//!   negotiated, and control frames are omitted.
 //! - Direct Repeater replay with its own runtime and HTTP/HTTPS client. Edited
 //!   requests can target the connection authority independently of a preserved
 //!   virtual `Host` header, and response bodies are bounded by
@@ -80,6 +85,7 @@ mod server;
 mod tls;
 mod tunnel;
 mod util;
+mod websocket;
 
 pub use config::{
     DEFAULT_CAPTURE_LIMIT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_EVENT_QUEUE, DEFAULT_INTERCEPT_LIMIT,
@@ -88,6 +94,7 @@ pub use config::{
 };
 pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
+    WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
 };
 pub use intercept::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
 pub use intruder::{
@@ -210,7 +217,7 @@ impl Proxy {
         connector.enforce_http(false);
         let connector = HttpsConnector::new(
             connector,
-            upstream_tls,
+            upstream_tls.clone(),
             false,
             Arc::new(DefaultServerNameResolver::default()),
         );
@@ -219,9 +226,29 @@ impl Proxy {
                 .http1_preserve_header_case(true)
                 .build(connector);
 
+        // WebSocket upgrades only exist in HTTP/1.1. Give them a separate
+        // connector whose ALPN list cannot select h2, even when the origin
+        // supports it for ordinary requests.
+        let mut ws_tls = (*upstream_tls).clone();
+        ws_tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+        let mut ws_http = HttpConnector::new();
+        ws_http.set_connect_timeout(Some(config.connect_timeout));
+        ws_http.enforce_http(false);
+        let ws_connector = HttpsConnector::new(
+            ws_http,
+            Arc::new(ws_tls),
+            false,
+            Arc::new(DefaultServerNameResolver::default()),
+        );
+        let ws_client: Client<HttpsConnector<HttpConnector>, ProxyBody> =
+            Client::builder(TokioExecutor::new())
+                .http1_preserve_header_case(true)
+                .build(ws_connector);
+
         let tls_ca = Arc::new(RwLock::new(config.tls.authority.clone()));
         let ctx = Arc::new(server::Ctx {
             client,
+            ws_client,
             tls_ca: tls_ca.clone(),
             listen: addr,
             tx: tx as SyncSender<ProxyEvent>,
@@ -388,7 +415,9 @@ impl Proxy {
 
     /// While paused, the proxy keeps forwarding but does not start recording
     /// new exchanges. Exchanges already in flight still deliver their terminal
-    /// events, so history never strands rows.
+    /// events, so history never strands rows. WebSocket connections stay open;
+    /// messages completed while paused are not recorded, and recording resumes
+    /// when capture is re-enabled.
     pub fn set_paused(&self, paused: bool) {
         self.paused.store(paused, Ordering::Relaxed);
     }

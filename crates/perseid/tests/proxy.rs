@@ -14,7 +14,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use perseid::proxy::{
     CertificateAuthority, ExchangeResult, InterceptItem, InterceptKind, MatchReplaceRule, Proxy,
     ProxyConfig, ProxyEvent, ProxySettings, RequestInfo, RuleDirection, RulePart, StartError,
-    TlsConfig,
+    TlsConfig, WebSocketDirection, WebSocketOpcode,
 };
 use rcgen::{CertificateParams, KeyPair};
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
@@ -190,7 +190,7 @@ async fn next_intercept(proxy: &mut Proxy) -> InterceptItem {
         .expect("the intercept channel should stay open")
 }
 
-async fn read_http_head(stream: &mut TcpStream) -> String {
+async fn read_http_head<S: AsyncRead + Unpin>(stream: &mut S) -> String {
     let mut buf = Vec::new();
     let mut byte = [0u8; 1];
     let deadline = tokio::time::Instant::now() + TIMEOUT;
@@ -205,6 +205,73 @@ async fn read_http_head(stream: &mut TcpStream) -> String {
         }
     }
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Read one WebSocket frame and return its FIN bit, opcode, and unmasked
+/// payload. Test frames are small enough to read completely.
+async fn read_websocket_frame<S: AsyncRead + Unpin>(stream: &mut S) -> (bool, u8, Vec<u8>) {
+    let mut head = [0u8; 2];
+    tokio::time::timeout(TIMEOUT, stream.read_exact(&mut head))
+        .await
+        .expect("WebSocket frame header should arrive")
+        .expect("WebSocket frame header");
+    let fin = head[0] & 0x80 != 0;
+    let opcode = head[0] & 0x0f;
+    let masked = head[1] & 0x80 != 0;
+    let mut length = u64::from(head[1] & 0x7f);
+    if length == 126 {
+        let mut extended = [0u8; 2];
+        stream.read_exact(&mut extended).await.unwrap();
+        length = u64::from(u16::from_be_bytes(extended));
+    } else if length == 127 {
+        let mut extended = [0u8; 8];
+        stream.read_exact(&mut extended).await.unwrap();
+        length = u64::from_be_bytes(extended);
+    }
+    let mut mask = [0u8; 4];
+    if masked {
+        stream.read_exact(&mut mask).await.unwrap();
+    }
+    let mut payload = vec![0u8; length as usize];
+    stream.read_exact(&mut payload).await.unwrap();
+    if masked {
+        for (index, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[index % 4];
+        }
+    }
+    (fin, opcode, payload)
+}
+
+/// Client-to-server frame. Browsers always mask these.
+fn websocket_masked_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let mask = [0x0a, 0x1b, 0x2c, 0x3d];
+    let mut frame = Vec::with_capacity(payload.len() + 14);
+    frame.push(0x80 | opcode);
+    if payload.len() < 126 {
+        frame.push(0x80 | payload.len() as u8);
+    } else {
+        frame.push(0x80 | 126);
+        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    }
+    frame.extend_from_slice(&mask);
+    for (index, byte) in payload.iter().enumerate() {
+        frame.push(byte ^ mask[index % 4]);
+    }
+    frame
+}
+
+/// Server-to-client frame. Servers do not mask.
+fn websocket_server_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(payload.len() + 10);
+    frame.push(0x80 | opcode);
+    if payload.len() < 126 {
+        frame.push(payload.len() as u8);
+    } else {
+        frame.push(126);
+        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    }
+    frame.extend_from_slice(payload);
+    frame
 }
 
 /// Read until the accumulated response contains `needle`.
@@ -2265,6 +2332,347 @@ async fn h2c_absolute_https_requests_keep_their_scheme_after_head_rewrites() {
     assert_eq!(request.version, "HTTP/2");
     assert_eq!(request.path, "/target");
     assert_eq!(head_of(&events).version, "HTTP/2");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn websocket_handshake_relays_frames_and_captures_messages() {
+    init_logging();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = listener.local_addr().unwrap();
+    let (head_tx, head_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("WebSocket origin accept");
+        let head = read_request(&mut stream).await;
+        let _ = head_tx.send(head);
+        stream
+            .write_all(
+                b"HTTP/1.1 101 Switching Protocols\r\n\
+                  Upgrade: websocket\r\n\
+                  Connection: Upgrade\r\n\
+                  Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\
+                  Sec-WebSocket-Protocol: chat\r\n\
+                  \r\n",
+            )
+            .await
+            .expect("101 response");
+        for expected in [
+            b"hello".as_slice(),
+            b"paused".as_slice(),
+            b"again".as_slice(),
+        ] {
+            let (fin, opcode, payload) = read_websocket_frame(&mut stream).await;
+            assert!(fin);
+            assert_eq!(opcode, 1);
+            assert_eq!(payload, expected);
+            stream
+                .write_all(&websocket_server_frame(1, &payload))
+                .await
+                .expect("echo frame");
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(200), stream.read(&mut [0u8; 1])).await;
+    });
+
+    let proxy = test_proxy(1024, 64);
+    let mut stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let request = format!(
+        "GET http://{origin}/socket HTTP/1.1\r\n\
+         Host: {origin}\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Protocol: chat\r\n\
+         Sec-WebSocket-Extensions: permessage-deflate\r\n\
+         \r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let response = read_http_head(&mut stream).await;
+    assert!(
+        response.starts_with("HTTP/1.1 101"),
+        "unexpected handshake response: {response:?}"
+    );
+    let lower = response.to_ascii_lowercase();
+    assert!(lower.contains("upgrade: websocket"));
+    assert!(lower.contains("connection: upgrade"));
+    assert!(lower.contains("sec-websocket-protocol: chat"));
+    assert!(
+        !lower.contains("sec-websocket-extensions"),
+        "the proxy must not negotiate a compression extension it cannot decode"
+    );
+
+    stream
+        .write_all(&websocket_masked_frame(1, b"hello"))
+        .await
+        .unwrap();
+    let (fin, opcode, payload) = read_websocket_frame(&mut stream).await;
+    assert!(fin);
+    assert_eq!(opcode, 1);
+    assert_eq!(payload, b"hello");
+
+    // A persistent WebSocket stays open while capture is paused. The paused
+    // message must be forwarded but omitted, and capture must resume without a
+    // new handshake.
+    proxy.set_paused(true);
+    stream
+        .write_all(&websocket_masked_frame(1, b"paused"))
+        .await
+        .unwrap();
+    let (_, opcode, payload) = read_websocket_frame(&mut stream).await;
+    assert_eq!(opcode, 1);
+    assert_eq!(payload, b"paused");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    proxy.set_paused(false);
+    stream
+        .write_all(&websocket_masked_frame(1, b"again"))
+        .await
+        .unwrap();
+    let (_, opcode, payload) = read_websocket_frame(&mut stream).await;
+    assert_eq!(opcode, 1);
+    assert_eq!(payload, b"again");
+
+    let upstream_head = tokio::time::timeout(TIMEOUT, head_rx)
+        .await
+        .expect("origin should receive the handshake")
+        .expect("handshake request channel");
+    let upstream_lower = String::from_utf8_lossy(&upstream_head).to_ascii_lowercase();
+    assert!(upstream_lower.contains("connection: upgrade"));
+    assert!(upstream_lower.contains("upgrade: websocket"));
+    assert!(
+        !upstream_lower.contains("sec-websocket-extensions"),
+        "extension offers should be stripped before reaching the origin"
+    );
+
+    let mut messages = Vec::new();
+    let deadline = Instant::now() + TIMEOUT;
+    while messages.len() < 4 && Instant::now() < deadline {
+        match proxy.recv_timeout(Duration::from_millis(100)) {
+            Ok(ProxyEvent::WebSocketMessage {
+                connection,
+                direction,
+                opcode,
+                payload,
+                ..
+            }) => messages.push((connection, direction, opcode, payload)),
+            Ok(event) => panic!("unexpected HTTP history event for a WebSocket: {event:?}"),
+            Err(_) => {}
+        }
+    }
+    assert_eq!(
+        messages.len(),
+        4,
+        "capture should resume after it is unpaused"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|(_, _, _, payload)| payload.data() != b"paused"),
+        "a message completed while capture was paused must not enter history"
+    );
+
+    let find = |direction, payload: &[u8]| {
+        messages
+            .iter()
+            .find(|(_, candidate_direction, _, candidate)| {
+                *candidate_direction == direction && candidate.data() == payload
+            })
+            .unwrap_or_else(|| panic!("missing {direction:?} {payload:?} message"))
+    };
+    let (connection, direction, opcode, payload) = find(WebSocketDirection::ToServer, b"hello");
+    assert_eq!(*direction, WebSocketDirection::ToServer);
+    assert_eq!(*opcode, WebSocketOpcode::Text);
+    assert_eq!(payload.data(), b"hello");
+    assert_eq!(connection.url, format!("ws://{origin}/socket"));
+    assert_eq!(connection.host, origin.to_string());
+    assert!(!connection.tls);
+    assert_eq!(connection.listener_port, proxy.local_addr().port());
+    assert_eq!(connection.protocol.as_deref(), Some("chat"));
+    let (downstream, direction, opcode, payload) = find(WebSocketDirection::ToClient, b"hello");
+    assert_eq!(*direction, WebSocketDirection::ToClient);
+    assert_eq!(*opcode, WebSocketOpcode::Text);
+    assert_eq!(payload.data(), b"hello");
+    assert_eq!(downstream.id, connection.id);
+    let (again_upstream, _, _, _) = find(WebSocketDirection::ToServer, b"again");
+    let (again_downstream, _, _, _) = find(WebSocketDirection::ToClient, b"again");
+    assert_eq!(again_upstream.id, connection.id);
+    assert_eq!(again_downstream.id, connection.id);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rejected_websocket_handshake_stays_in_http_history() {
+    init_logging();
+    let origin = spawn_origin(
+        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\nnope"
+            .to_string(),
+    )
+    .await;
+    let proxy = test_proxy(1024, 64);
+    let mut stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let request = format!(
+        "GET http://{origin}/socket HTTP/1.1\r\n\
+         Host: {origin}\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\n\
+         \r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let response = read_http_head(&mut stream).await;
+    assert!(
+        response.starts_with("HTTP/1.1 403"),
+        "unexpected rejected handshake response: {response:?}"
+    );
+    drop(stream);
+
+    let events = drain_until_finished(&proxy);
+    let request = started_of(&events);
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.host, origin.to_string());
+    assert_eq!(head_of(&events).status, 403);
+    assert!(
+        events
+            .iter()
+            .all(|event| !matches!(event, ProxyEvent::WebSocketMessage { .. })),
+        "a non-101 handshake must not create WebSocket history rows"
+    );
+    let ExchangeResult::Response { body } = &finished_of(&events).result else {
+        panic!("rejected handshake should finish as a regular HTTP response");
+    };
+    assert_eq!(
+        body.data(),
+        b"nope",
+        "the rejected handshake response body should be captured as HTTP"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn intercepts_wss_and_captures_decrypted_messages() {
+    init_logging();
+    let (config, origin_pem) = origin_certificate("127.0.0.1");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = listener.local_addr().unwrap();
+    let config = Arc::new(config);
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("WSS origin accept");
+        let acceptor = TlsAcceptor::from(config);
+        let mut tls = acceptor.accept(stream).await.expect("origin TLS handshake");
+        let head = read_request(&mut tls).await;
+        assert!(
+            String::from_utf8_lossy(&head)
+                .to_ascii_lowercase()
+                .contains("upgrade: websocket"),
+            "origin did not receive an upgrade request"
+        );
+        tls.write_all(
+            b"HTTP/1.1 101 Switching Protocols\r\n\
+              Upgrade: websocket\r\n\
+              Connection: Upgrade\r\n\
+              Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\
+              Sec-WebSocket-Protocol: chat\r\n\
+              \r\n",
+        )
+        .await
+        .expect("101 response");
+        let (fin, opcode, payload) = read_websocket_frame(&mut tls).await;
+        assert!(fin);
+        assert_eq!(opcode, 1);
+        assert_eq!(payload, b"secure hello");
+        tls.write_all(&websocket_server_frame(1, &payload))
+            .await
+            .expect("echo frame");
+        let _ = tokio::time::timeout(Duration::from_millis(200), tls.read(&mut [0u8; 1])).await;
+    });
+
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca.clone()),
+        vec![origin_pem],
+        ProxySettings {
+            tls_intercept: true,
+            ..ProxySettings::default()
+        },
+    );
+
+    let mut stream = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let connect = format!("CONNECT {origin} HTTP/1.1\r\nHost: {origin}\r\n\r\n");
+    stream.write_all(connect.as_bytes()).await.unwrap();
+    let connect_head = read_http_head(&mut stream).await;
+    assert!(
+        connect_head.starts_with("HTTP/1.1 200"),
+        "unexpected CONNECT response: {connect_head:?}"
+    );
+
+    let mut tls_config = ClientConfig::builder()
+        .with_root_certificates(pem_roots(&[ca.cert_pem()]))
+        .with_no_client_auth();
+    tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    let connector = TlsConnector::from(Arc::new(tls_config));
+    let name = ServerName::try_from("localhost".to_string()).expect("valid server name");
+    let mut tls = connector
+        .connect(name, stream)
+        .await
+        .expect("client TLS handshake through the proxy");
+    let request = format!(
+        "GET /chat HTTP/1.1\r\n\
+         Host: {origin}\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Protocol: chat\r\n\
+         \r\n"
+    );
+    tls.write_all(request.as_bytes()).await.unwrap();
+    let response = read_http_head(&mut tls).await;
+    assert!(
+        response.starts_with("HTTP/1.1 101"),
+        "unexpected decrypted handshake response: {response:?}"
+    );
+    tls.write_all(&websocket_masked_frame(1, b"secure hello"))
+        .await
+        .unwrap();
+    let (fin, opcode, payload) = read_websocket_frame(&mut tls).await;
+    assert!(fin);
+    assert_eq!(opcode, 1);
+    assert_eq!(payload, b"secure hello");
+
+    let mut messages = Vec::new();
+    let deadline = Instant::now() + TIMEOUT;
+    while messages.len() < 2 && Instant::now() < deadline {
+        match proxy.recv_timeout(Duration::from_millis(100)) {
+            Ok(ProxyEvent::WebSocketMessage {
+                connection,
+                direction,
+                opcode,
+                payload,
+                ..
+            }) => messages.push((connection, direction, opcode, payload)),
+            Ok(ProxyEvent::Started { request, .. }) => {
+                assert_ne!(
+                    request.method, "GET",
+                    "a successful WebSocket handshake must not create an HTTP history row"
+                );
+            }
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
+    assert_eq!(messages.len(), 2, "both WSS directions should be captured");
+    let (connection, direction, opcode, payload) = &messages[0];
+    assert_eq!(*direction, WebSocketDirection::ToServer);
+    assert_eq!(*opcode, WebSocketOpcode::Text);
+    assert_eq!(payload.data(), b"secure hello");
+    assert_eq!(connection.url, format!("wss://{origin}/chat"));
+    assert_eq!(connection.host, origin.to_string());
+    assert!(connection.tls);
+    assert_eq!(connection.listener_port, proxy.local_addr().port());
+    assert_eq!(connection.protocol.as_deref(), Some("chat"));
+
+    let (connection, direction, opcode, payload) = &messages[1];
+    assert_eq!(*direction, WebSocketDirection::ToClient);
+    assert_eq!(*opcode, WebSocketOpcode::Text);
+    assert_eq!(payload.data(), b"secure hello");
+    assert_eq!(connection.id, messages[0].0.id);
 }
 
 #[tokio::test(flavor = "multi_thread")]

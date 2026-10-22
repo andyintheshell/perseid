@@ -18,6 +18,7 @@ use std::time::{Duration, Instant, SystemTime};
 use crate::proxy::{
     CapturedBody, CertificateAuthority, ExchangeEnd, ExchangeResult, InterceptItem,
     MatchReplaceRule, ProxyEvent, RequestInfo, ResponseHead, RuleDirection, RulePart,
+    WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
 };
 
 use super::comparer::ComparerState;
@@ -27,6 +28,7 @@ use super::intruder::IntruderState;
 use super::repeater::RepeaterTab;
 use super::*;
 use crate::history::History;
+use crate::websocket_history::WebSocketHistory;
 
 const DESIGN_WIDTH: f32 = 1280.0;
 const DESIGN_HEIGHT: f32 = 820.0;
@@ -56,6 +58,7 @@ const SCENE_FILES: &[&str] = &[
     "perseid-decoder.png",
     "perseid-comparer.png",
     "perseid-comparer-result.png",
+    "perseid-proxy-websockets.png",
 ];
 
 const CURL_UA: &str = "curl/8.22.0";
@@ -256,7 +259,9 @@ impl PerseidApp {
     /// matrix. Per-tab state is reset by [`Self::prepare_screenshot_scene`].
     pub(super) fn prepare_screenshot_base(&mut self) -> Result<(), String> {
         self.clear_history();
+        self.clear_websocket_history();
         self.seed_screenshot_history();
+        self.seed_screenshot_websockets();
         // Keep documentation deterministic and avoid exposing the developer's
         // home directory in the TLS scene.
         self.ca_dir = PathBuf::from("~/.local/share/perseid");
@@ -281,6 +286,12 @@ impl PerseidApp {
         self.selected = Some(2);
         self.scroll_to_selected = false;
         self.detail = None;
+        self.websocket_filter.clear();
+        self.websocket_visible_key = None;
+        self.websocket_selected = None;
+        self.websocket_scroll_to_selected = false;
+        self.websocket_detail = None;
+        self.websocket_view = MessageView::Pretty;
         self.memory_open = false;
         self.about_open = false;
         self.tls_setup_open = false;
@@ -395,6 +406,13 @@ impl PerseidApp {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
                 self.comparer.open_screenshot_result();
+            }
+            // Proxy > WebSockets history with a JSON message selected.
+            11 => {
+                self.main_tab = MainTab::Proxy;
+                self.proxy_section = ProxySection::WebSocketsHistory;
+                self.websocket_selected = Some(23);
+                self.websocket_view = MessageView::Pretty;
             }
             _ => return Err(format!("unknown screenshot scene {index}")),
         }
@@ -610,6 +628,92 @@ impl PerseidApp {
             &date,
         );
     }
+
+    fn seed_screenshot_websockets(&mut self) {
+        let now = SystemTime::now();
+        let base = now.checked_sub(Duration::from_secs(8)).unwrap_or(now);
+        let secure = WebSocketConnectionInfo {
+            id: 4,
+            url: "wss://127.0.0.1:8090/socket".to_string(),
+            host: "127.0.0.1:8090".to_string(),
+            tls: true,
+            listener_port: 8080,
+            protocol: Some("chat".to_string()),
+        };
+        let plain = WebSocketConnectionInfo {
+            id: 7,
+            url: "ws://127.0.0.1:8090/events".to_string(),
+            host: "127.0.0.1:8090".to_string(),
+            tls: false,
+            listener_port: 8080,
+            protocol: None,
+        };
+
+        demo_websocket(
+            &mut self.websocket_history,
+            21,
+            base,
+            &secure,
+            WebSocketDirection::ToServer,
+            WebSocketOpcode::Text,
+            br#"{"type":"subscribe","channel":"orders"}"#,
+        );
+        demo_websocket(
+            &mut self.websocket_history,
+            22,
+            base + Duration::from_millis(120),
+            &secure,
+            WebSocketDirection::ToClient,
+            WebSocketOpcode::Text,
+            br#"{"type":"subscribed","channel":"orders","ok":true}"#,
+        );
+        demo_websocket(
+            &mut self.websocket_history,
+            23,
+            base + Duration::from_secs(1),
+            &secure,
+            WebSocketDirection::ToClient,
+            WebSocketOpcode::Text,
+            br#"{"type":"order","id":1042,"customer":"demo","total":79.9,"lines":[{"sku":"RB-01","quantity":2},{"sku":"CB-09","quantity":1}]}"#,
+        );
+        demo_websocket(
+            &mut self.websocket_history,
+            24,
+            base + Duration::from_secs(2),
+            &plain,
+            WebSocketDirection::ToServer,
+            WebSocketOpcode::Text,
+            br#"{"type":"ping","at":1760000000}"#,
+        );
+        demo_websocket(
+            &mut self.websocket_history,
+            25,
+            base + Duration::from_secs(2),
+            &plain,
+            WebSocketDirection::ToClient,
+            WebSocketOpcode::Binary,
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        );
+    }
+}
+
+fn demo_websocket(
+    history: &mut WebSocketHistory,
+    id: u64,
+    timestamp: SystemTime,
+    connection: &WebSocketConnectionInfo,
+    direction: WebSocketDirection,
+    opcode: WebSocketOpcode,
+    payload: &[u8],
+) {
+    history.apply(ProxyEvent::WebSocketMessage {
+        id,
+        timestamp,
+        connection: connection.clone(),
+        direction,
+        opcode,
+        payload: CapturedBody::from_bytes(payload.to_vec()),
+    });
 }
 
 fn proxy_headers(host: &str) -> Vec<(String, String)> {

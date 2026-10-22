@@ -45,6 +45,43 @@ pub struct ResponseHead {
     pub headers: HeaderList,
 }
 
+/// The direction a WebSocket message travelled through the proxy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebSocketDirection {
+    /// Browser/client to origin server.
+    ToServer,
+    /// Origin server to browser/client.
+    ToClient,
+}
+
+/// The WebSocket data opcode used to deliver a complete message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebSocketOpcode {
+    Text,
+    Binary,
+}
+
+/// Handshake-derived metadata shared by every message on one connection.
+///
+/// Burp assigns a stable WebSocket ID to each connection and repeats it on
+/// every message row. The fields here are deliberately small: a busy message
+/// history should not retain a full copy of the handshake for every frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebSocketConnectionInfo {
+    /// Stable connection ID, also used as the WebSocket ID in history.
+    pub id: u64,
+    /// `ws://` or `wss://` URL of the handshake target.
+    pub url: String,
+    /// Host used for scope filtering, e.g. `example.com:8080`.
+    pub host: String,
+    /// Whether the handshake travelled over TLS.
+    pub tls: bool,
+    /// Local proxy listener port that accepted the connection.
+    pub listener_port: u16,
+    /// Subprotocol selected by the origin, when one was negotiated.
+    pub protocol: Option<String>,
+}
+
 /// A body as retained by the capture limits.
 ///
 /// Only the first `capture_limit` bytes are stored; `total` always counts
@@ -172,15 +209,29 @@ pub enum ProxyEvent {
     ResponseHead { id: u64, head: ResponseHead },
     /// The exchange is over: body relayed, tunnel closed, or failure.
     Finished { id: u64, end: ExchangeEnd },
+    /// A complete WebSocket message was observed and reassembled.
+    ///
+    /// Frames are still forwarded byte-for-byte; this event is a bounded
+    /// copy of the unmasked payload for the WebSockets history. Control
+    /// frames and incomplete fragments do not produce events.
+    WebSocketMessage {
+        id: u64,
+        timestamp: SystemTime,
+        connection: WebSocketConnectionInfo,
+        direction: WebSocketDirection,
+        opcode: WebSocketOpcode,
+        payload: CapturedBody,
+    },
 }
 
 impl ProxyEvent {
-    /// The exchange this event belongs to.
+    /// The exchange or message this event belongs to.
     pub fn id(&self) -> u64 {
         match *self {
             ProxyEvent::Started { id, .. }
             | ProxyEvent::ResponseHead { id, .. }
-            | ProxyEvent::Finished { id, .. } => id,
+            | ProxyEvent::Finished { id, .. }
+            | ProxyEvent::WebSocketMessage { id, .. } => id,
         }
     }
 }

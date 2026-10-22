@@ -23,8 +23,8 @@ documentation.
 - Perseid now covers the entry point, editable replay, and local payload
   transformation: proxy capture, interception, scope, message inspection, a
   tabbed Repeater seeded from history, and a Burp-style Decoder. The remaining
-  daily-workflow gaps are WebSocket replay, session convenience, persistence,
-  and Comparer — not scanner coverage.
+  daily-workflow gaps are WebSocket message interception/replay, session
+  convenience, persistence, and Comparer — not scanner coverage.
 - Burp CE is explicitly a manual toolkit.[1] PortSwigger calls Repeater and
   Intruder "the center of the Burp Suite manual testing workflow" and says they
   have been "among Burp Suite's most popular tools" since 2003.[11] Burp's
@@ -183,7 +183,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | --- | --- | --- | --- | --- |
 | Proxy capture and HTTP history | 1 | 2 | **Working**, with a bounded in-memory history, metadata filter, and scope filter; no persistence or body search. | Maintain and harden |
 | Repeater / manual request editor | 2 | 4 | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. No WebSocket replay, saved tabs, or persistence; replay bypasses proxy scope and rewriting. | Maintain; WebSocket in M4 |
-| Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, binary, and WebSocket messages are limited or absent. | Maintain |
+| Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, and binary bodies are limited; WebSocket messages are captured in history but cannot be held or edited. | Maintain |
 | Target scope and site map | 4 | 3 | **Partial**: scope filtering and blocking work; the site map is built from captured history only. No crawl, parameter discovery, annotations, or persisted scope. | Maintain; improve with search |
 | Intruder / fuzzer | 5 | 6 | **Working** for HTTP/HTTPS: editable `$$` positions, shared or per-position payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests, and Pretty/Raw/Hex results. No payload processing or saved attacks; enforced scope is checked before the attack and for every generated request. | Maintain; add processing and saved attacks |
 | Automated scan and alert triage | Pro only | 1 | **Missing**: no scanner, passive checks, or alert management. | **Non-goal** |
@@ -192,7 +192,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Authentication and session handling | 7 | 7 | **Partial**: an external browser keeps its own cookies while proxying; Perseid has no cookie jar, login macro, token refresh, per-user context, or session rules. | **P1 — add to M3/M4** |
 | Match/replace rewriting | 8 | Replacer add-on | **Working**: request/response head and buffered UTF-8 body rules, literal or regex, applied after interception. Runtime-only and not persisted. | Maintain |
 | Comparer / diff | 9 | 12 | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. In-memory only. | Maintain |
-| WebSocket testing | 10 | 11 | **Missing**: WebSocket-specific handling is still planned. | **P1 — M4** |
+| WebSocket testing | 10 | 11 | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. No message interception, editing, replay, or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | 11 | 8 | **Partial**: clipboard copy of a request, response, or selection; no save, export, HAR, curl, or report generation. | **P2 — after parity** |
 | Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: bounded in-memory history plus a metadata substring filter; no SQLite store, body search, annotations, or saved settings. | **P0 — M3** |
 | Sequencer / token analysis | 12 | 13 | **Missing**: no token sampling or randomness analysis. | **P1 — M4** |
@@ -247,11 +247,12 @@ Intruder-style fuzzing, the highest-value M4 item, has landed early: it covers
 all four Burp attack types, editable payload sets, and bounded concurrency.
 That leaves:
 
-1. **WebSockets** next because both tools support them and modern targets
-   increasingly use them, but the workflow is target-dependent.
+1. **WebSocket message interception and replay** next. Capture/history for
+   plain `ws://` and decrypted `wss://` has landed; editing and resending are the
+   remaining parts of the same target-dependent workflow.
 2. **Sequencer** is the lowest-frequency M4 item in both rankings. It is still
-   part of CE parity, but it should not delay WebSockets, session handling, or
-   Intruder refinements such as payload processing.
+   part of CE parity, but it should not delay WebSocket replay, session handling,
+   or Intruder refinements such as payload processing.
 
 ### 4. Treat evidence export as a cheap early win, not a reporting suite
 

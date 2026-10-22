@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use crate::history::{History, HistoryItem};
 use crate::proxy::RequestInfo;
+use crate::view::{websocket_direction_text, websocket_opcode_text};
+use crate::websocket_history::WebSocketMessageItem;
 
 pub(super) fn request_url(item: &HistoryItem) -> String {
     if item.is_tunnel() {
@@ -63,6 +65,20 @@ pub(super) fn matches_filter(item: &HistoryItem, needle: &str) -> bool {
     let haystack = format!(
         "{} {} {} {} {}",
         item.request.method, item.request.host, item.request.path, item.request.uri, status
+    );
+    haystack.to_lowercase().contains(needle)
+}
+
+pub(super) fn websocket_matches_filter(item: &WebSocketMessageItem, needle: &str) -> bool {
+    let haystack = format!(
+        "{} {} {} {} {} {} {}",
+        item.connection.url,
+        item.connection.host,
+        item.connection.id,
+        item.connection.listener_port,
+        websocket_direction_text(item.direction),
+        websocket_opcode_text(item.opcode),
+        item.connection.protocol.as_deref().unwrap_or_default(),
     );
     haystack.to_lowercase().contains(needle)
 }

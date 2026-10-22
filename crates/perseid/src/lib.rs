@@ -16,6 +16,7 @@ mod pretty;
 mod site_map;
 mod theme;
 mod view;
+mod websocket_history;
 
 pub mod proxy;
 

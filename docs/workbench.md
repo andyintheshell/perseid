@@ -12,7 +12,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | Tab | Use it for |
 | --- | --- |
 | **Target** | A site map derived from history and a shared scope list. |
-| **Proxy** | HTTP history, held interception messages, match/replace rules, and proxy/TLS settings. |
+| **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
 | **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
@@ -66,6 +66,33 @@ is a quick way to verify the path without a browser or CA trust.
 - The status bar shows in-flight requests, held messages, dropped capture events,
   rejected connections, and evictions. A dropped-event warning means the history
   may be incomplete even if the client received its response.
+
+### WebSockets history
+
+**Proxy > WebSockets history** is a separate, message-level history. Plain
+`ws://` connections and decrypted `wss://` connections inside intercepted TLS
+are supported. An opaque CONNECT tunnel cannot be decoded, so enable HTTPS
+interception for the host if you need its WebSocket messages.
+
+- Rows represent complete text or binary messages, not frames. Fragmented
+  messages are reassembled, client masking is removed, and ping/pong/close
+  control frames are omitted. Incomplete messages are discarded.
+- The table shows URL, direction, payload length, TLS, time, listener port, and
+  a stable WebSocket ID per connection. The filter matches those fields, the
+  host, and a negotiated subprotocol.
+- The handshake supplies connection metadata but does not become a WebSocket
+  row. A successful WebSocket handshake also does not create an HTTP history
+  row. A rejected or non-`101` handshake follows the ordinary HTTP capture path.
+- The detail pane offers Pretty, Raw, and Hex views. Text messages are
+  JSON/HTML/formatted when possible; binary messages use a hex dump. Payloads
+  are bounded by `--capture-limit`, and the detail header reports truncation.
+- Message capture is independent of interception. **Capture** still pauses
+  recording, but enabling or disabling **Proxy > Intercept** does not.
+- `Sec-WebSocket-Extensions` is removed from the forwarded handshake, so the
+  origin does not negotiate compression that the history cannot decode.
+- There is no WebSocket message interception, editing, replay, or send-to-tool
+  action yet. WebSocket history has the same count and retained-byte defaults as
+  HTTP history and is in memory only.
 
 Click the **Memory** indicator for the current and peak allocator heap and a
 rolling graph. This is not process RSS or a hard memory ceiling; see
@@ -346,7 +373,7 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | --- | --- |
 | Captured bodies | 1 MiB retained per request/response by default; forwarding can stream larger bodies. |
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
-| History | 2,000 exchanges and half of physical RAM in retained body bytes by default; 256 MiB fallback, with a 64 MiB floor when RAM is reported. |
+| History | 2,000 HTTP exchanges and 2,000 WebSocket messages; both use the same retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
@@ -355,7 +382,7 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Saved state | No persisted history, Intruder results, Repeater tabs, Decoder chains, Comparer items, scope, or rewrite rules. The local CA is persisted. |
-| Missing tools/protocols | No Sequencer, WebSocket tooling, or HTTP/3/QUIC support. |
+| Missing tools/protocols | No Sequencer, WebSocket message interception/replay, or HTTP/3/QUIC support. |
 
 See [CLI options](getting-started.md#options) to change retention limits and
 [Safety and privacy](safety.md) for the data-handling implications. Larger

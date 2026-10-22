@@ -11,14 +11,21 @@ The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
-[History](#proxy--http-history) · [Intercept](#proxy--intercept) ·
-[Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
-[Comparer](#comparer) · [Comparer result](#comparer-result) ·
+[History](#proxy--http-history) · [WebSockets history](#proxy--websockets-history) ·
+[Intercept](#proxy--intercept) · [Intruder](#intruder) · [Repeater](#repeater) ·
+[Decoder](#decoder) · [Comparer](#comparer) · [Comparer result](#comparer-result) ·
 [Memory](#memory-usage)
 
 ## Proxy > HTTP history
 
 ![Proxy HTTP history with request and response detail](images/perseid-main.png)
+
+## Proxy > WebSockets history
+
+A separate message-level history for plain `ws://` and decrypted `wss://`
+traffic, with direction, length, TLS, time, listener port, and WebSocket ID.
+
+![Proxy WebSockets history with a formatted JSON message selected](images/perseid-proxy-websockets.png)
 
 ## Target > Site map
 

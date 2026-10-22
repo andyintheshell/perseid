@@ -57,7 +57,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
 | HTTPS interception with a local CA | Yes | Automatic local CA, HTTPS interception on by default, local certificate page, pass-through hosts, manual trust setup | Working | — |
 | HTTP/2 proxying | Yes | h2 over TLS via ALPN, h2c prior knowledge on the listener | Working | — |
-| WebSocket proxy and frame history | Yes | No | Planned | M4 |
+| WebSocket proxy and frame history | Yes | Plain `ws://` and decrypted `wss://` message history with text/binary reassembly, masking removal, filtering, and Pretty/Raw/Hex detail; no WebSocket message interception, replay, or editing | Partial | M4 (landed early) |
 | Repeater | Yes | Editable HTTP/HTTPS request tabs seeded from history, target/virtual-host control, direct replay, and Pretty/Raw/Hex responses; no WebSocket replay or saved tabs yet | Partial | M3 (HTTP/HTTPS); WS in M4 |
 | Decoder | Yes | Stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms | Partial | M3 |
 | Comparer | Yes | One shared item list seeded from history, paste, or file; bounded word/byte diffs; paired Text/Hex panes, difference navigation, and synchronized scrolling; in-memory only | Working | M3 |
@@ -78,7 +78,12 @@ store. Hosts on the pass-through list stay opaque. Inside intercepted tunnels
 Perseid negotiates HTTP/2 when the client offers it through ALPN and falls back
 to HTTP/1.1 otherwise; HTTPS origins are offered h2 the same way. HTTP history
 follows Burp's model: it lists HTTP requests and responses, including decrypted
-HTTPS requests, but not the `CONNECT` transport tunnels that carry them. See
+HTTPS requests, but not the `CONNECT` transport tunnels that carry them.
+WebSocket traffic has a separate message-level history. Successful handshakes
+provide the URL, TLS state, listener port, and WebSocket ID for text and binary
+messages; control frames and incomplete fragments are omitted, and client
+masking is removed. Compression extensions are stripped from the forwarded
+handshake so captured payloads remain readable. See
 [HTTPS interception](tls.md) for the trust and removal workflow.
 Interception buffers bodies up to `--intercept-limit`; larger or streaming
 bodies are held for header edits, and body rewrite rules apply only to buffered
@@ -117,7 +122,8 @@ uses an independent direct HTTP/HTTPS client and runtime, not the local proxy,
 so it remains usable when the proxy is stopped. It deliberately bypasses
 interception, match/replace rules, and scope enforcement, and its exchanges do
 not appear in Proxy history. Responses are bounded by `--capture-limit`.
-WebSocket Repeater and saved tabs remain part of the M3/M4 work.
+WebSocket message interception/replay and saved tabs remain part of the M3/M4
+work.
 
 Decoder follows Burp's stacked-panel model. Every operation appends an
 editable Text/Hex panel, and applying an operation to an earlier panel replaces
@@ -191,7 +197,7 @@ or are explicitly authorized to test.
 | **M1 — Proxy core** | Intercepting HTTP/1.1 proxy with editable hold/forward/drop, scope controls, match/replace rules, and in-memory session history. *(Complete.)* |
 | **M2 — HTTPS** | Local CA lifecycle, TLS interception, explicit browser trust setup, and pass-through controls. *(Complete.)* |
 | **M3 — Daily workbench** | Persistent searchable history, Repeater, Decoder, and Comparer. *(Repeater, Decoder, and Comparer are complete; persistence remains.)* |
-| **M4 — Protocols and testing tools** | WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. HTTP/2 and Intruder landed ahead of this milestone. |
+| **M4 — Protocols and testing tools** | WebSocket proxying and history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope and user-controlled concurrency. HTTP/2, WebSocket capture/history, and Intruder landed ahead of this milestone; WebSocket message editing/replay and Sequencer remain. |
 | **M5 — Parity hardening** | Packaging, crash recovery, accessibility, published benchmarks, and a documented parity audit. |
 
 After M5, Perseid can claim CE manual-toolkit parity subject to the

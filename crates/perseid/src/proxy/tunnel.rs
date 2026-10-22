@@ -290,9 +290,11 @@ async fn serve_intercepted(
 
     // ALPN normally tells the client which protocol to use; the auto builder
     // also detects the HTTP/2 preface for clients that do not negotiate ALPN.
+    // Upgrades are required for decrypted WebSocket handshakes (`wss://`);
+    // HTTP/2 does not use this path, so the auto builder still serves h2.
     auto::Builder::new(TokioExecutor::new())
         .preserve_header_case(true)
-        .serve_connection(io, service)
+        .serve_connection_with_upgrades(io, service)
         .await
         .map_err(|err| format!("intercepted connection error: {err}"))
 }

@@ -22,9 +22,10 @@ a Java runtime. Captured bodies and in-memory history have configurable limits.
 
 > [!IMPORTANT]
 > **Public alpha—not a finished Burp replacement.** HTTP/HTTPS interception,
-> Intruder, Repeater, Decoder, and Comparer are available for hands-on testing.
-> WebSockets, Sequencer, and persistent projects are not implemented. Expect
-> rough edges, and report reproducible problems. See the
+> WebSocket capture and history, Intruder, Repeater, Decoder, and Comparer are
+> available for hands-on testing. WebSocket message
+> interception/editing/replay, Sequencer, and persistent projects are not
+> implemented. Expect rough edges, and report reproducible problems. See the
 > [capability matrix](docs/burp-parity.md) for the precise feature status.
 
 [![Perseid HTTP history with side-by-side request and response views](docs/images/perseid-main.png)](docs/screenshots.md)
@@ -33,7 +34,7 @@ a Java runtime. Captured bodies and in-memory history have configurable limits.
 
 | Task | Available today |
 | --- | --- |
-| **Capture and inspect** | HTTP/1.1 and HTTP/2 proxy, filtered history, a host/path site map, and Pretty/Raw/Hex message views with gzip, deflate, and Brotli decoding. |
+| **Capture and inspect** | HTTP/1.1 and HTTP/2 proxy, filtered HTTP history, a WebSockets message history for `ws://` and decrypted `wss://`, a host/path site map, and Pretty/Raw/Hex message views with gzip, deflate, and Brotli decoding. |
 | **Intercept and edit** | Hold requests and optionally responses; edit heads and buffered text bodies; forward or drop selected messages or the whole queue. |
 | **Inspect HTTPS** | Automatically generated local CA, a certificate download page, and per-host TLS pass-through. You install and remove trust manually. |
 | **Replay a request** | Editable HTTP/HTTPS Repeater tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
@@ -87,8 +88,9 @@ cargo run -p perseid --locked
 - Large, streaming, and binary intercepted bodies are **header-editable only**.
   Message previews and direct-send seeds may be truncated or lossy.
 - There is **no automated scanner, crawler, bundled browser, or WebSocket
-  tooling**. Intruder generates requests from user-supplied payloads; it is not
-  an automated scanner.
+  message interception/replay**. WebSocket text and binary messages are captured
+  and inspected, but cannot be edited or resent yet. Intruder generates requests
+  from user-supplied payloads; it is not an automated scanner.
 - Burp Suite Community manual-toolkit parity is a
   [goal](docs/burp-parity.md), not a current claim. There are no universal
   memory or performance guarantees; see the [measured baseline](docs/performance.md).

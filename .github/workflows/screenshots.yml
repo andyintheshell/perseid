@@ -170,6 +170,7 @@ jobs:
 
           declare -A labels=(
             [perseid-main.png]="Proxy - HTTP history"
+            [perseid-proxy-websockets.png]="Proxy - WebSockets history"
             [perseid-target-site-map.png]="Target - Site map"
             [perseid-target-scope.png]="Target - Scope"
             [perseid-proxy-intercept.png]="Proxy - Intercept"
@@ -184,6 +185,7 @@ jobs:
           )
           order=(
             perseid-main.png
+            perseid-proxy-websockets.png
             perseid-target-site-map.png
             perseid-target-scope.png
             perseid-proxy-intercept.png

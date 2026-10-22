@@ -70,7 +70,7 @@ Current crate layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/perseid/src/proxy/` | Embedded proxy: loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, body teeing, bounded capture events, the direct Repeater client, and the Intruder attack engine. Exposed as `perseid::proxy`. |
+| `crates/perseid/src/proxy/` | Embedded proxy: loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, WebSocket upgrade relay and frame/message capture, body teeing, bounded capture events, the direct Repeater client, and the Intruder attack engine. Exposed as `perseid::proxy`. |
 | `crates/perseid/src/` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Intruder and Repeater editors, Decoder panels and transform engine, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
 
 The proxy stays behind its own module boundary even though it is compiled into
@@ -127,10 +127,11 @@ operation truncates the panels after its source and appends the result, so the
 chain cannot describe transformations that no longer produced the visible
 bytes.
 
-Planned additions include a disk-backed history store, WebSocket handling, and
-a native extension point. Proxy, Repeater, and Intruder network operations run
-off the UI thread. Proxy capture events use a bounded, lossy channel with a drop
-counter; Repeater jobs and Intruder events use separate bounded queues. Repeater
+Planned additions include a disk-backed history store, WebSocket message
+interception/replay, and a native extension point. Proxy, Repeater, and Intruder
+network operations run off the UI thread. Proxy capture events use a bounded,
+lossy channel with a drop counter; Repeater jobs and Intruder events use separate
+bounded queues. Repeater
 admission reserves both an operation slot and bytes through result consumption,
 not just through network completion. Held messages use a separate bounded
 interception channel with a one-shot decision per message, so capture-event
@@ -151,7 +152,9 @@ lets users keep their normal browser, extensions, and devtools.
 The workspace follows Burp's tool organization so existing users can find
 familiar surfaces immediately: **Target**, **Proxy**, **Intruder**,
 **Repeater**, **Decoder**, and **Comparer**, in that order. **Proxy > HTTP
-history** is the default landing view because it is the live capture surface.
+history** is the default landing view because it is the live capture surface;
+**Proxy > WebSockets history** sits beside it for complete message-level
+WebSocket traffic.
 
 The visual language is a warm, low-contrast light theme: near-white surfaces,
 pale orange selection states, and a burnt-orange accent. The palette lives in
@@ -195,8 +198,8 @@ Initial technology choices, subject to prototyping and measurement:
 
 - **Rust** for the application and networking components.
 - **Tokio** for asynchronous networking.
-- **hyper** for HTTP/1.1 and HTTP/2 forwarding plus direct Repeater and Intruder
-  traffic; WebSocket handling is planned.
+- **hyper** for HTTP/1.1 and HTTP/2 forwarding, HTTP/1.1 WebSocket upgrades
+  plus direct Repeater and Intruder traffic.
 - **regex** for match/replace rules, with rules compiled once per policy update.
 - **rustls** and an automatically generated CA for HTTPS interception. The CA
   persists across runs, interception is on by default, and the user installs
