@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml)
 [![Rust 1.95+](https://img.shields.io/badge/Rust-1.95%2B-orange?logo=rust)](rust-toolchain.toml)
-[![Early prototype](https://img.shields.io/badge/status-early%20prototype-FF9915)](docs/roadmap.md)
+[![Public alpha](https://img.shields.io/badge/status-public%20alpha-FF9915)](docs/roadmap.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-112D68)](#license)
 
 [Get started](docs/getting-started.md) · [User guide](docs/workbench.md) ·
@@ -21,10 +21,11 @@ inspect a request, change it, and send it again—without an embedded browser or
 a Java runtime. Captured bodies and in-memory history have configurable limits.
 
 > [!IMPORTANT]
-> **Early prototype, not a finished Burp replacement.** HTTP/HTTPS interception,
-> Intruder, Repeater, Decoder, and Comparer work today. WebSockets, Sequencer,
-> and persistent projects are not implemented. See the
-> [capability matrix](docs/burp-parity.md) for the precise status.
+> **Public alpha—not a finished Burp replacement.** HTTP/HTTPS interception,
+> Intruder, Repeater, Decoder, and Comparer are available for hands-on testing.
+> WebSockets, Sequencer, and persistent projects are not implemented. Expect
+> rough edges, and report reproducible problems. See the
+> [capability matrix](docs/burp-parity.md) for the precise feature status.
 
 [![Perseid HTTP history with side-by-side request and response views](docs/images/perseid-main.png)](docs/screenshots.md)
 
