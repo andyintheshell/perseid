@@ -185,7 +185,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Repeater / manual request editor | 2 | 4 | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. No WebSocket replay, saved tabs, or persistence; replay bypasses proxy scope and rewriting. | Maintain; WebSocket in M4 |
 | Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, binary, and WebSocket messages are limited or absent. | Maintain |
 | Target scope and site map | 4 | 3 | **Partial**: scope filtering and blocking work; the site map is built from captured history only. No crawl, parameter discovery, annotations, or persisted scope. | Maintain; improve with search |
-| Intruder / fuzzer | 5 | 6 | **Missing**: the Intruder tab is a planned-workspace overview. | **P1 — M4** |
+| Intruder / fuzzer | 5 | 6 | **Working** for HTTP/HTTPS: editable `$$` positions, shared or per-position payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests, and Pretty/Raw/Hex results. No payload processing or saved attacks; enforced scope is checked before the attack and for every generated request. | Maintain; add processing and saved attacks |
 | Automated scan and alert triage | Pro only | 1 | **Missing**: no scanner, passive checks, or alert management. | **Non-goal** |
 | Spidering and crawling | Pro only | 5 | **Missing**: no crawler or automated content discovery. | **Non-goal** |
 | Decoder / encoder | 6 | 9 | **Partial**: local transforms work with stacked Text/Hex panels; Plain, URL, HTML, Base64, ASCII hex, numeric Hex/Octal/Binary, and Gzip; 31 common hashes; Smart decode; selection-aware transforms. No Send to Decoder, SKEIN/TupleHash/OID aliases, or persisted chains; 8 MiB input / 16 MiB output caps. | Maintain; fill hash gaps in M3 |
@@ -204,17 +204,18 @@ Perseid's current support is documented in the
 
 ## What this means for the roadmap
 
-### 1. Repeater and Decoder have landed; finish the loop around them
+### 1. Intruder, Repeater, and Decoder have landed; finish the loop around them
 
 Milestone 3 already lists persistent history, search, Repeater, Decoder, and
 Comparer. The rankings put Repeater first, and editable HTTP/HTTPS replay now
 exists: a request can be seeded from history, edited in its own tab, sent
-directly to the target, and inspected in Pretty/Raw/Hex. Decoder now provides
-the matching local transformation surface: stacked panels for URL, HTML,
-Base64, ASCII hex, numeric conversions, Gzip, hashes, and Smart decode, with
-selection-aware transforms and a replaceable downstream chain. That closes the
-gaps where the product stopped after capture or forced payload edits into an
-external script.
+directly to the target, and inspected in Pretty/Raw/Hex. Intruder extends that
+workflow with marked positions and payload attacks, including all four attack
+types and bounded concurrency. Decoder provides the matching local
+transformation surface: stacked panels for URL, HTML, Base64, ASCII hex,
+numeric conversions, Gzip, hashes, and Smart decode, with selection-aware
+transforms and a replaceable downstream chain. That closes the gaps where the
+product stopped after capture or forced payload edits into an external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
 persistent, searchable history keeps replay material across launches; a Send to
@@ -239,17 +240,17 @@ full session-handling rules, but it removes a blocker that otherwise appears
 immediately on real engagements. It should be pulled into M3 or early M4 rather
 than left implicit.
 
-### 3. Keep M4's order: fuzzing, then protocol breadth, then Sequencer
+### 3. Keep M4's order: protocol breadth, then Sequencer
 
-The M4 scope is directionally right. Within it:
+Intruder-style fuzzing, the highest-value M4 item, has landed early: it covers
+all four Burp attack types, editable payload sets, and bounded concurrency.
+That leaves:
 
-1. **Intruder-style fuzzing** is the highest-value item. It is a headline CE
-   capability, and an unthrottled implementation is a genuine differentiator.
-2. **WebSockets** come next because both tools support them and modern targets
+1. **WebSockets** next because both tools support them and modern targets
    increasingly use them, but the workflow is target-dependent.
-3. **Sequencer** is the lowest-frequency M4 item in both rankings. It is still
-   part of CE parity, but it should not delay fuzzing, WebSockets, or session
-   handling.
+2. **Sequencer** is the lowest-frequency M4 item in both rankings. It is still
+   part of CE parity, but it should not delay WebSockets, session handling, or
+   Intruder refinements such as payload processing.
 
 ### 4. Treat evidence export as a cheap early win, not a reporting suite
 

@@ -8,9 +8,10 @@ toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
 **Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
-milestones are complete. HTTP/HTTPS Repeater and Decoder work, while persistent
-history, richer search, and Comparer remain. HTTP/2 arrived ahead of the protocol
-milestone. This is a sequence of capabilities, not a schedule or release promise.
+milestones are complete. HTTP/HTTPS Intruder, Repeater, and Decoder work, while
+persistent history, richer search, and Comparer remain. HTTP/2 and Intruder
+arrived ahead of the protocol milestone. This is a sequence of capabilities, not
+a schedule or release promise.
 
 ## Milestones
 
@@ -63,9 +64,12 @@ milestone. This is a sequence of capabilities, not a schedule or release promise
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
   and user-controlled concurrency.
 
-  *Status: HTTP/2 proxying landed ahead of this milestone; WebSocket handling,
-  Sequencer, and the Intruder engine remain. The Intruder tab is a
-  planned-workspace overview.*
+  *Status: HTTP/2 and Intruder-style fuzzing landed ahead of this milestone.
+  Intruder supports `$$` positions, editable payload sets, Sniper/Battering
+  ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests, live result
+  inspection, and enforced-scope checks for every generated request. Payload
+  processing rules and saved attacks remain. WebSocket handling and Sequencer
+  are still missing.*
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a

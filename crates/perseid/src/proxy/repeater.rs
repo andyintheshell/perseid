@@ -602,7 +602,7 @@ async fn worker(
     }
 }
 
-async fn execute(
+pub(super) async fn execute(
     client: &Client<HttpsConnector<HttpConnector>, ProxyBody>,
     request: RepeaterRequest,
     capture_limit: usize,

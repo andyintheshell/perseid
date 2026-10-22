@@ -22,6 +22,7 @@ use crate::proxy::{
 
 use super::decoder::DecoderState;
 use super::intercept::InterceptEntry;
+use super::intruder::IntruderState;
 use super::repeater::RepeaterTab;
 use super::*;
 use crate::history::History;
@@ -286,6 +287,7 @@ impl PerseidApp {
         self.tls_passthrough.clear();
         self.repeater_tabs.clear();
         self.repeater_active = 0;
+        self.intruder = IntruderState::new();
         self.decoder = DecoderState::new();
 
         match index {
@@ -349,9 +351,10 @@ impl PerseidApp {
                 self.tls_intercept = true;
                 self.tls_passthrough.push("banking.example.com".to_string());
             }
-            // Intruder (preview).
+            // Intruder with a populated template, payload set, and results.
             6 => {
                 self.main_tab = MainTab::Intruder;
+                self.intruder.seed_screenshot();
             }
             // Repeater with two seeded history requests.
             7 => {

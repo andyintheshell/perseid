@@ -3,19 +3,19 @@
 //! The navigation intentionally mirrors the tools Burp users already know:
 //! Target, Proxy, Intruder, Repeater, and Decoder. Proxy history, editable
 //! interception, the Target site map, scope enforcement, match/replace rules,
-//! the direct Repeater, and Decoder's encode/decode/hash chain are live;
-//! Intruder remains a clearly marked preview until its engine lands.
+//! the direct Repeater, Intruder's payload attacks, and Decoder's
+//! encode/decode/hash chain are live.
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
-//! [`decoder`], [`intercept`], [`proxy`], [`repeater`], [`rules`], [`target`],
-//! [`previews`], [`windows`], [`widgets`], [`message_view`], [`util`], and
+//! [`decoder`], [`intercept`], [`intruder`], [`proxy`], [`repeater`], [`rules`],
+//! [`target`], [`windows`], [`widgets`], [`message_view`], [`util`], and
 //! [`scale`].
 
 mod decoder;
 mod intercept;
+mod intruder;
 mod message_view;
-mod previews;
 mod proxy;
 mod repeater;
 mod rules;
@@ -35,8 +35,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::proxy::{
-    CertificateAuthority, InterceptKey, MatchReplaceRule, Proxy, ProxyConfig, ProxySettings,
-    Repeater, TlsConfig,
+    CertificateAuthority, InterceptKey, Intruder, MatchReplaceRule, Proxy, ProxyConfig,
+    ProxySettings, Repeater, TlsConfig,
 };
 use egui::{Color32, Key, RichText, Stroke};
 
@@ -195,6 +195,9 @@ pub struct PerseidApp {
     repeater_tabs: Vec<repeater::RepeaterTab>,
     repeater_active: usize,
     repeater_next_tab: u64,
+    /// Direct attack engine, started on the first Start attack.
+    intruder_engine: Option<Intruder>,
+    intruder: intruder::IntruderState,
     decoder: decoder::DecoderState,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
@@ -414,6 +417,8 @@ impl PerseidApp {
             repeater_tabs: Vec::new(),
             repeater_active: 0,
             repeater_next_tab: 1,
+            intruder_engine: None,
+            intruder: intruder::IntruderState::new(),
             decoder: decoder::DecoderState::new(),
             site_map: None,
             scope: BTreeSet::new(),
@@ -556,13 +561,16 @@ impl PerseidApp {
     }
 
     fn drain_events(&mut self, ctx: &egui::Context) {
-        // Repeater is independent of the proxy, so drain it before the proxy
-        // early return. A result may arrive while the proxy is stopped.
+        // Repeater and Intruder are independent of the proxy, so drain them
+        // before the proxy early return. Results may arrive while the proxy is
+        // stopped.
         self.drain_repeater_results();
+        self.drain_intruder_results();
         if self
             .repeater_tabs
             .iter()
             .any(repeater::RepeaterTab::is_pending)
+            || self.intruder.is_running()
         {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
@@ -739,9 +747,12 @@ impl PerseidApp {
         }
 
         // Ctrl+Enter is the Burp-style send gesture. Consume it before
-        // `egui_wants_keyboard_input` so it works while the request editor has
-        // focus.
-        if self.main_tab == MainTab::Repeater
+        // `egui_wants_keyboard_input` so it works while an editor has focus.
+        if self.main_tab == MainTab::Intruder
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::Enter))
+        {
+            self.toggle_intruder_attack();
+        } else if self.main_tab == MainTab::Repeater
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::Enter))
         {
             self.send_active_repeater();
@@ -1029,6 +1040,11 @@ impl PerseidApp {
             if repeater_pending > 0 {
                 ui.separator();
                 ui.colored_label(theme::BLUE, format!("{repeater_pending} Repeater pending"));
+            }
+
+            if let Some(summary) = self.intruder.status_summary() {
+                ui.separator();
+                ui.colored_label(theme::BLUE, summary);
             }
 
             if let Some(proxy) = &self.proxy {

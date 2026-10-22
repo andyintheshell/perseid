@@ -12,7 +12,8 @@ for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
 [History](#proxy--http-history) · [Intercept](#proxy--intercept) ·
-[Repeater](#repeater) · [Decoder](#decoder) · [Memory](#memory-usage)
+[Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
+[Memory](#memory-usage)
 
 ## Proxy > HTTP history
 
@@ -42,9 +43,10 @@ Hold messages in a table; select a row to inspect or edit its Raw representation
 
 ## Intruder
 
-This is a planned-workspace preview, not an implemented fuzzing engine.
+Mark `$$` positions, edit payload sets, and review generated requests and
+responses from a finished Sniper attack.
 
-![Intruder preview workspace](images/perseid-intruder.png)
+![Intruder with a marked request, payload set, and attack results](images/perseid-intruder.png)
 
 ## Repeater
 
