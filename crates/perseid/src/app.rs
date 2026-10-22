@@ -240,8 +240,8 @@ fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) ->
     let hovered = response.hovered();
     let (fill, color) = match control {
         WindowControl::Close if hovered => (theme::RED, Color32::WHITE),
-        _ if hovered => (theme::ACCENT_WASH, theme::ACCENT_DARK),
-        _ => (Color32::TRANSPARENT, theme::TEXT_MUTED),
+        _ if hovered => (theme::ACCENT_WASH, theme::TEXT),
+        _ => (Color32::TRANSPARENT, theme::TEXT),
     };
     if fill != Color32::TRANSPARENT {
         ui.painter().rect_filled(rect, 3.0, fill);
@@ -830,13 +830,13 @@ impl PerseidApp {
                 let widgets = &mut ui.style_mut().visuals.widgets;
                 widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                 widgets.inactive.bg_stroke = Stroke::NONE;
-                widgets.inactive.fg_stroke = Stroke::new(1.0, theme::TEXT_MUTED);
+                widgets.inactive.fg_stroke = Stroke::new(1.0, theme::TEXT);
                 widgets.hovered.weak_bg_fill = theme::ACCENT_WASH;
                 widgets.hovered.bg_stroke = Stroke::NONE;
-                widgets.hovered.fg_stroke = Stroke::new(1.0, theme::ACCENT_DARK);
+                widgets.hovered.fg_stroke = Stroke::new(1.0, theme::TEXT);
                 widgets.active.weak_bg_fill = theme::ACCENT_SOFT;
                 widgets.active.bg_stroke = Stroke::NONE;
-                widgets.active.fg_stroke = Stroke::new(1.0, theme::ACCENT_DARK);
+                widgets.active.fg_stroke = Stroke::new(1.0, theme::TEXT);
 
                 ui.menu_button("Perseid", |ui| {
                     if ui.button("About Perseid").clicked() {
@@ -1179,7 +1179,12 @@ impl eframe::App for PerseidApp {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(8, 2)),
+                    .inner_margin(egui::Margin {
+                        left: 8,
+                        right: 0,
+                        top: 2,
+                        bottom: 2,
+                    }),
             )
             .show(ui, |ui| self.title_bar(ui));
 

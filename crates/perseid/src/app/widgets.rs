@@ -80,7 +80,7 @@ fn tab_button(
     let font = egui::FontId::proportional(style.font_size);
     let measured = ui
         .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), theme::TEXT_MUTED);
+        .layout_no_wrap(label.to_owned(), font.clone(), theme::TEXT);
     let icon_width = if with_gear { 13.0 } else { 0.0 };
     let content_width = measured.size().x + icon_width;
     let desired = egui::vec2(
@@ -91,13 +91,12 @@ fn tab_button(
 
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
-        let (fill, text_color) = if selected {
-            (Color32::TRANSPARENT, theme::ACCENT_DARK)
-        } else if hovered {
-            (theme::ACCENT_WASH, theme::ACCENT_DARK)
+        let fill = if hovered && !selected {
+            theme::ACCENT_WASH
         } else {
-            (Color32::TRANSPARENT, theme::TEXT_MUTED)
+            Color32::TRANSPARENT
         };
+        let text_color = theme::TEXT;
 
         let painter = ui.painter();
         let corner_radius = egui::CornerRadius::same(style.corner_radius);
@@ -218,12 +217,7 @@ pub(super) fn badge(ui: &mut egui::Ui, text: &str) {
 pub(super) fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
     ui.add_space(22.0);
     ui.vertical_centered(|ui| {
-        ui.label(
-            RichText::new(title)
-                .size(14.0)
-                .strong()
-                .color(theme::TEXT_MUTED),
-        );
+        ui.label(RichText::new(title).size(14.0).strong().color(theme::TEXT));
         ui.add_space(3.0);
         ui.label(RichText::new(body).color(theme::TEXT_MUTED));
     });

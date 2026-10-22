@@ -85,7 +85,7 @@ impl PerseidApp {
                     "No artificial rate limit: Perseid will run attacks at the concurrency and pace you configure.",
                 )
                 .small()
-                .color(theme::ACCENT_DARK),
+                .color(theme::TEXT_MUTED),
             );
         });
     }

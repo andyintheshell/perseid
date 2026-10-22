@@ -30,7 +30,10 @@ const DESIGN_WIDTH: f32 = 1280.0;
 const DESIGN_HEIGHT: f32 = 820.0;
 const MAIN_FILE: &str = "perseid-main.png";
 const MEMORY_FILE: &str = "perseid-memory.png";
-const MAIN_WIDTH: u32 = 1620;
+// The screenshots are captured at 2x (1280x820 points). Keeping the native
+// framebuffer width gives GitHub and HiDPI readers a full-resolution source
+// instead of an extra Lanczos downscale.
+const MAIN_WIDTH: u32 = 2560;
 const MEMORY_WIDTH: u32 = 970;
 const CROP_MARGIN_POINTS: f32 = 0.0;
 const TIMEOUT: Duration = Duration::from_secs(150);
@@ -664,7 +667,11 @@ fn example_body() -> Vec<u8> {
 
 fn save_scene(image: &egui::ColorImage, file: &str, out_dir: &Path) -> Result<(), String> {
     let rgba = to_rgba(image)?;
-    let resized = resize_to_width(&rgba, MAIN_WIDTH);
+    let resized = if rgba.width() == MAIN_WIDTH {
+        rgba
+    } else {
+        resize_to_width(&rgba, MAIN_WIDTH)
+    };
     let path = out_dir.join(file);
     write_png(&path, &resized)?;
     log::info!(
