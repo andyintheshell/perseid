@@ -4,9 +4,9 @@
 use egui::{Align, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
-use super::message_view::{message_text, message_toolbar};
+use super::message_view::{message_text, message_toolbar, message_view_text};
 use super::util::{mime_type, request_url};
-use super::widgets::{empty_state, section_bar, section_tab};
+use super::widgets::{empty_state, section_bar, section_tab, section_tab_gear, table_frame};
 use super::*;
 
 impl PerseidApp {
@@ -51,19 +51,18 @@ impl PerseidApp {
                 self.proxy_section = ProxySection::MatchReplace;
                 ui.ctx().memory_mut(|memory| memory.stop_text_input());
             }
-            let tls_label = if self.tls_ca_error.is_some() {
-                "TLS !"
-            } else if self.tls_intercept && self.tls_ca.is_some() {
-                "TLS on"
+            let settings_label = if self.tls_ca_error.is_some() {
+                "Proxy settings !"
             } else {
-                "TLS"
+                "Proxy settings"
             };
-            let tls_hint = self
+            let settings_hint = self
                 .tls_ca_error
                 .as_deref()
                 .unwrap_or("Certificate authority and HTTPS decryption controls");
-            if section_tab(ui, self.proxy_section == ProxySection::Tls, tls_label)
-                .on_hover_text(tls_hint)
+            ui.separator();
+            if section_tab_gear(ui, self.proxy_section == ProxySection::Tls, settings_label)
+                .on_hover_text(settings_hint)
                 .clicked()
             {
                 self.proxy_section = ProxySection::Tls;
@@ -201,110 +200,113 @@ impl PerseidApp {
         }
 
         let mut clicked = None;
-        let mut table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .sense(egui::Sense::click())
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::exact(40.0))
-            .column(Column::exact(56.0))
-            .column(Column::initial(420.0).at_least(180.0))
-            .column(Column::exact(50.0))
-            .column(Column::exact(68.0))
-            .column(Column::initial(115.0).at_least(80.0))
-            .column(Column::remainder().at_least(64.0));
+        table_frame(ui, |ui| {
+            let mut table = TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .sense(egui::Sense::click())
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::exact(40.0))
+                .column(Column::exact(56.0))
+                .column(Column::initial(420.0).at_least(180.0))
+                .column(Column::exact(50.0))
+                .column(Column::exact(68.0))
+                .column(Column::initial(115.0).at_least(80.0))
+                .column(Column::remainder().at_least(64.0));
 
-        if self.scroll_to_selected {
-            if let Some(row) = self.selected_row_index() {
-                table = table.scroll_to_row(row, Some(Align::Center));
-            }
-            self.scroll_to_selected = false;
-        }
-
-        table
-            .header(18.0, |mut header| {
-                for title in [
-                    "#",
-                    "Method",
-                    "URL",
-                    "Status",
-                    "Length",
-                    "MIME type",
-                    "Time",
-                ] {
-                    header.col(|ui| {
-                        ui.label(
-                            RichText::new(title)
-                                .strong()
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
+            if self.scroll_to_selected {
+                if let Some(row) = self.selected_row_index() {
+                    table = table.scroll_to_row(row, Some(Align::Center));
                 }
-            })
-            .body(|body| {
-                body.rows(16.0, rows, |mut row| {
-                    let index = row.index();
-                    let id = self.visible[index];
-                    let Some(item) = self.history.get(id) else {
-                        return;
-                    };
+                self.scroll_to_selected = false;
+            }
 
-                    row.set_selected(self.selected == Some(id));
-                    row.col(|ui| {
-                        ui.label(
-                            RichText::new(item.number.to_string())
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
-                    row.col(|ui| {
-                        ui.label(RichText::new(&item.request.method).color(theme::TEXT));
-                    });
-                    let url = request_url(item);
-                    row.col(|ui| {
-                        ui.add(Label::new(RichText::new(&url).color(theme::TEXT)).truncate())
-                            .on_hover_text(&url);
-                    });
-                    row.col(|ui| {
-                        ui.label(
-                            RichText::new(view::status_text(item)).color(view::status_color(item)),
-                        );
-                    });
-                    row.col(|ui| {
-                        ui.label(
-                            RichText::new(view::human_bytes(item.transferred()))
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
-                    row.col(|ui| {
-                        let mime = mime_type(item);
-                        let color = if item.is_tunnel() {
-                            theme::AMBER
-                        } else {
-                            theme::TEXT_MUTED
-                        };
-                        ui.add(Label::new(RichText::new(mime).small().color(color)).truncate());
-                    });
-                    row.col(|ui| {
-                        ui.label(
-                            RichText::new(view::format_time(item.timestamp))
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
-
-                    let hover = if item.is_tunnel() {
-                        format!("{url}\nCONNECT tunnel: payload was not decrypted.")
-                    } else {
-                        url
-                    };
-                    if row.response().on_hover_text(hover).clicked() {
-                        clicked = Some(id);
+            table
+                .header(18.0, |mut header| {
+                    for title in [
+                        "#",
+                        "Method",
+                        "URL",
+                        "Status",
+                        "Length",
+                        "MIME type",
+                        "Time",
+                    ] {
+                        header.col(|ui| {
+                            ui.label(
+                                RichText::new(title)
+                                    .strong()
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
                     }
+                })
+                .body(|body| {
+                    body.rows(16.0, rows, |mut row| {
+                        let index = row.index();
+                        let id = self.visible[index];
+                        let Some(item) = self.history.get(id) else {
+                            return;
+                        };
+
+                        row.set_selected(self.selected == Some(id));
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(item.number.to_string())
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(RichText::new(&item.request.method).color(theme::TEXT));
+                        });
+                        let url = request_url(item);
+                        row.col(|ui| {
+                            ui.add(Label::new(RichText::new(&url).color(theme::TEXT)).truncate())
+                                .on_hover_text(&url);
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(view::status_text(item))
+                                    .color(view::status_color(item)),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(view::human_bytes(item.transferred()))
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+                        row.col(|ui| {
+                            let mime = mime_type(item);
+                            let color = if item.is_tunnel() {
+                                theme::AMBER
+                            } else {
+                                theme::TEXT_MUTED
+                            };
+                            ui.add(Label::new(RichText::new(mime).small().color(color)).truncate());
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(view::format_time(item.timestamp))
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+
+                        let hover = if item.is_tunnel() {
+                            format!("{url}\nCONNECT tunnel: payload was not decrypted.")
+                        } else {
+                            url
+                        };
+                        if row.response().on_hover_text(hover).clicked() {
+                            clicked = Some(id);
+                        }
+                    });
                 });
-            });
+        });
 
         if let Some(id) = clicked {
             self.select_id(id);
@@ -398,13 +400,5 @@ impl PerseidApp {
 
         self.request_view = request_view;
         self.response_view = response_view;
-    }
-}
-
-fn message_view_text(views: &MessageViews, mode: MessageView) -> &str {
-    match mode {
-        MessageView::Pretty => &views.pretty,
-        MessageView::Raw => &views.raw,
-        MessageView::Hex => &views.hex,
     }
 }

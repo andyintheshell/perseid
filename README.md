@@ -98,7 +98,7 @@ cargo run -p perseid
 The proxy listens on `127.0.0.1:8080` and the Perseid window opens. Perseid
 creates its local CA on first launch, opens a certificate setup window, and
 intercepts HTTPS by default. Open `http://127.0.0.1:8080/` directly, or use
-**Proxy > TLS > Open certificate page**, to download and install the certificate
+**Proxy > Proxy settings > Open certificate page**, to download and install the certificate
 in your browser. Then point the browser — or an extension such as FoxyProxy —
 at `127.0.0.1:8080` for HTTP and HTTPS. To hold HTTP (and decrypted HTTPS) traffic, open **Proxy > Intercept**
 and click **Intercept is off** once to turn interception on. Full trust and

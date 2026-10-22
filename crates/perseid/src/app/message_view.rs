@@ -69,6 +69,13 @@ pub(super) fn message_toolbar(
         }
     });
     ui.add_space(1.0);
+    message_tabs(ui, mode);
+    ui.add_space(1.0);
+}
+
+/// Draw the Pretty/Raw/Hex row shared by the history detail panes and the
+/// interception editor.
+pub(super) fn message_tabs(ui: &mut egui::Ui, mode: &mut MessageView) {
     ui.horizontal(|ui| {
         if message_mode_tab(ui, *mode == MessageView::Pretty, "Pretty").clicked() {
             *mode = MessageView::Pretty;
@@ -80,7 +87,14 @@ pub(super) fn message_toolbar(
             *mode = MessageView::Hex;
         }
     });
-    ui.add_space(1.0);
+}
+
+pub(super) fn message_view_text(views: &MessageViews, mode: MessageView) -> &str {
+    match mode {
+        MessageView::Pretty => &views.pretty,
+        MessageView::Raw => &views.raw,
+        MessageView::Hex => &views.hex,
+    }
 }
 
 pub(super) fn message_text(
@@ -90,11 +104,37 @@ pub(super) fn message_text(
     mode: MessageView,
     text: &str,
 ) {
+    let mut readonly = text;
+    let _ = message_frame(ui, id, pane, mode, &mut readonly);
+}
+
+/// Render the shared message frame with an editable text buffer.
+///
+/// Interception uses this for the Raw view; Pretty and Hex remain read-only
+/// representations of the same draft.
+pub(super) fn message_editor(
+    ui: &mut egui::Ui,
+    id: u64,
+    pane: MessagePane,
+    mode: MessageView,
+    text: &mut String,
+) -> bool {
+    message_frame(ui, id, pane, mode, text)
+}
+
+fn message_frame(
+    ui: &mut egui::Ui,
+    id: u64,
+    pane: MessagePane,
+    mode: MessageView,
+    text: &mut dyn egui::TextBuffer,
+) -> bool {
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
     let secondary_pressed =
         ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary));
     let mut selection = None;
+    let mut changed = false;
     let frame = egui::Frame::NONE
         .fill(Color32::WHITE)
         .stroke(Stroke::new(1.0, theme::BORDER))
@@ -106,9 +146,11 @@ pub(super) fn message_text(
                 // A single text galley for a 64 KiB hex dump is surprisingly
                 // expensive to lay out. Virtualize the lines so memory stays
                 // proportional to the visible page rather than the whole dump.
-                message_hex(ui, id, pane, mode, text);
+                message_hex(ui, id, pane, mode, text.as_str());
             } else {
-                selection = message_numbered(ui, id, pane, mode, text);
+                let output = message_numbered(ui, id, pane, mode, text);
+                selection = output.selection;
+                changed = output.changed;
             }
         });
 
@@ -118,7 +160,7 @@ pub(super) fn message_text(
     // something to copy after that happens.
     if secondary_pressed {
         let selected = selection
-            .map(|range| range.slice_str(text))
+            .map(|range| range.slice_str(text.as_str()))
             .filter(|selected| !selected.is_empty())
             .map(Arc::<str>::from);
         ui.data_mut(|data| {
@@ -137,7 +179,7 @@ pub(super) fn message_text(
     frame.response.container_context_menu(|ui| {
         let selected = saved_selection.as_deref().or_else(|| {
             selection
-                .map(|range| range.slice_str(text))
+                .map(|range| range.slice_str(text.as_str()))
                 .filter(|selected| !selected.is_empty())
         });
         // Keep the item in the menu even without a selection so the entries
@@ -151,29 +193,32 @@ pub(super) fn message_text(
             ui.close();
         }
         if ui.button(copy_all).clicked() {
-            ui.ctx().copy_text(text.to_owned());
+            ui.ctx().copy_text(text.as_str().to_owned());
             ui.close();
         }
     });
+    changed
 }
 
-/// Render the Pretty and Raw views as a wrapped, selectable text editor.
+/// Render a wrapped, selectable text editor with a painted line-number gutter.
 ///
 /// The editor owns the text buffer, so wrapping, selection, copying, and
 /// keyboard navigation all use egui's native text behavior. Line numbers stay
 /// in a painted gutter outside the buffer: they align with the editor's galley
 /// but can never be selected or copied.
-///
-/// Returns the current selection, if any, so the message frame can offer a
-/// right-click copy action for it.
+struct NumberedOutput {
+    selection: Option<egui::text::CCursorRange>,
+    changed: bool,
+}
+
 fn message_numbered(
     ui: &mut egui::Ui,
     id: u64,
     pane: MessagePane,
     mode: MessageView,
-    text: &str,
-) -> Option<egui::text::CCursorRange> {
-    let line_count = text.lines().count() + usize::from(text.ends_with('\n'));
+    text: &mut dyn egui::TextBuffer,
+) -> NumberedOutput {
+    let line_count = text.as_str().lines().count() + usize::from(text.as_str().ends_with('\n'));
     let font = message_font();
     let digits = line_count.max(1).to_string().len();
     let number_width = ui.fonts_mut(|fonts| {
@@ -200,7 +245,6 @@ fn message_numbered(
         let job = highlight::message_job(buffer.as_str(), wrap_width, &font);
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
-    let mut readonly = text;
 
     // A right-click is turned into a context menu by the message frame, but
     // egui's text editor treats any pointer press as the start of a selection.
@@ -221,7 +265,7 @@ fn message_numbered(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            let output = egui::TextEdit::multiline(&mut readonly)
+            let output = egui::TextEdit::multiline(text)
                 .id(text_id)
                 .font(egui::FontSelection::FontId(font.clone()))
                 .frame(frame)
@@ -236,7 +280,11 @@ fn message_numbered(
             }
             autoscroll_message_selection(ui, &output.response.response);
             paint_line_numbers(ui, &output.galley, output.galley_pos, &font);
-            previous_selection.or(output.cursor_range.filter(|range| !range.is_empty()))
+            NumberedOutput {
+                selection: previous_selection
+                    .or(output.cursor_range.filter(|range| !range.is_empty())),
+                changed: output.response.response.changed(),
+            }
         })
         .inner
 }
@@ -481,7 +529,8 @@ mod tests {
             ..Default::default()
         };
         let output = ctx.run_ui(input, |ui| {
-            let _ = message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, text);
+            let mut readonly = text;
+            let _ = message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, &mut readonly);
         });
         let commands = output.platform_output.commands.clone();
         output.drop_without_applying_deltas();
@@ -600,12 +649,13 @@ mod tests {
                         egui::vec2(300.0, 300.0),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
+                            let mut readonly = text;
                             let _ = message_numbered(
                                 ui,
                                 1,
                                 MessagePane::Request,
                                 MessageView::Raw,
-                                text,
+                                &mut readonly,
                             );
                         },
                     );

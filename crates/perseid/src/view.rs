@@ -13,9 +13,6 @@ use crate::{pretty, theme};
 pub const TEXT_PREVIEW_LIMIT: usize = 256 * 1024;
 /// Maximum body bytes rendered as a hex dump (hex is far bulkier than text).
 pub const HEX_PREVIEW_LIMIT: usize = 64 * 1024;
-/// Binary bodies get a shorter inline hex preview in the interception editor;
-/// the Hex tab has the larger virtualized dump.
-const INTERCEPT_BINARY_PREVIEW_LIMIT: usize = 8 * 1024;
 
 pub fn human_bytes(n: u64) -> String {
     const KIB: f64 = 1024.0;
@@ -281,6 +278,78 @@ pub fn response_views_from_parts(
     }
 }
 
+/// Normalize a raw request or response head for the shared message viewer.
+///
+/// Intercepted heads arrive with CRLF line endings and lowercased header
+/// names from the HTTP stack. The history views present canonical header
+/// capitalization and LF newlines, so use the same representation while a
+/// message is being inspected or edited.
+pub fn canonicalize_editor_head(head: &str) -> String {
+    let normalized = head.replace("\r\n", "\n");
+    let mut lines = normalized.split('\n');
+    let mut out = String::new();
+    if let Some(first) = lines.next() {
+        out.push_str(first);
+        out.push('\n');
+    }
+    let mut terminated = false;
+    for line in lines {
+        if line.trim().is_empty() {
+            out.push('\n');
+            terminated = true;
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            out.push_str(&display_header_name(name.trim()));
+            out.push_str(": ");
+            out.push_str(value.trim());
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !terminated {
+        out.push('\n');
+    }
+    out
+}
+
+/// Build Pretty/Raw/Hex views for an intercepted message.
+///
+/// The body is inspected as-is rather than decoded: an interception editor
+/// must never make it look safe to forward a formatted or decompressed body.
+/// Pretty and Hex are bounded previews, while the interception editor's Raw
+/// tab keeps the complete editable body.
+pub fn editor_views(head: &str, body: &[u8]) -> MessageViews {
+    let head = canonicalize_editor_head(head);
+    let content_type = head
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("content-type")
+                .then(|| value.trim())
+        });
+
+    let mut pretty = head.clone();
+    let mut raw = head.clone();
+    if !body.is_empty() {
+        pretty.push_str(&format_pretty_body(content_type, body));
+        let shown = &body[..body.len().min(TEXT_PREVIEW_LIMIT)];
+        raw.push_str(&normalize_body_text(visible_raw_text(shown)));
+    }
+
+    let mut bytes = head.into_bytes();
+    bytes.extend_from_slice(body);
+    MessageViews {
+        pretty,
+        raw,
+        hex: hex_preview(&bytes),
+    }
+}
+
 fn decode_for(body: &CapturedBody, content_encoding: Option<&str>) -> DecodeResult {
     if body.total_len() == 0 || body.data().is_empty() {
         return Ok(None);
@@ -450,23 +519,6 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, value)| value.as_str())
 }
 
-/// Render a bounded, read-only hex preview for the interception editor.
-pub fn format_binary_preview(body: &CapturedBody) -> String {
-    if body.total_len() == 0 {
-        return if body.is_complete() {
-            "(empty body)\n".to_string()
-        } else {
-            "(body not read)\n".to_string()
-        };
-    }
-
-    let data = body.data();
-    let shown = &data[..data.len().min(INTERCEPT_BINARY_PREVIEW_LIMIT)];
-    let mut out = hexdump(shown);
-    push_body_preview_notes(&mut out, body, shown.len(), data.len());
-    out
-}
-
 /// Decode bytes for the Raw view without letting control bytes erase the
 /// visible body. Egui has no glyphs for characters such as NUL, so binary
 /// responses could otherwise render as a blank panel even though the captured
@@ -484,25 +536,6 @@ fn visible_raw_text(bytes: &[u8]) -> String {
         }
     }
     out
-}
-
-fn push_body_preview_notes(out: &mut String, body: &CapturedBody, shown: usize, captured: usize) {
-    if shown < captured {
-        out.push_str(&format!(
-            "\n[Perseid: preview truncated to {} of {} captured]\n",
-            human_bytes(shown as u64),
-            human_bytes(captured as u64)
-        ));
-    }
-    if body.is_truncated() {
-        out.push_str(&format!(
-            "\n[Perseid: capture limit reached; {} on the wire]\n",
-            human_bytes(body.total_len())
-        ));
-    }
-    if !body.is_complete() {
-        out.push_str("\n[Perseid: body did not finish]\n");
-    }
 }
 
 /// Bodies with NUL bytes or invalid UTF-8 (that is not just a truncated final
@@ -723,6 +756,31 @@ mod tests {
     }
 
     #[test]
+    fn canonicalize_editor_head_normalizes_and_terminates_the_head() {
+        let head = canonicalize_editor_head("GET / HTTP/1.1\r\nhost: example.com");
+
+        assert_eq!(head, "GET / HTTP/1.1\nHost: example.com\n\n");
+    }
+
+    #[test]
+    fn editor_views_format_the_body_without_rewriting_the_raw_view() {
+        let head = "POST /items HTTP/1.1\r\nhost: example.com\r\ncontent-type: application/json\r\ncontent-length: 19\r\n\r\n";
+        let body = br#"{"a":1,"b":[2,3]}"#;
+        let views = editor_views(head, body);
+
+        assert!(
+            views.raw.starts_with(
+                "POST /items HTTP/1.1\nHost: example.com\nContent-Type: application/json\nContent-Length: 19\n\n"
+            ),
+            "unexpected raw view:\n{}",
+            views.raw
+        );
+        assert!(views.raw.contains("{\"a\":1,\"b\":[2,3]}"));
+        assert!(views.pretty.contains("\"a\": 1"));
+        assert!(views.hex.contains("50 4f 53 54"));
+    }
+
+    #[test]
     fn acronym_headers_keep_their_conventional_casing() {
         assert_eq!(display_header_name("etag"), "ETag");
         assert_eq!(display_header_name("www-authenticate"), "WWW-Authenticate");
@@ -934,14 +992,6 @@ mod tests {
         assert!(!views.raw.contains("cached copy"));
         assert!(!views.raw.contains("(empty body)"));
         assert!(!views.raw.contains("[Perseid"));
-    }
-
-    #[test]
-    fn intercept_binary_preview_remains_hex() {
-        let preview = format_binary_preview(&CapturedBody::from_bytes(vec![
-            0x89, b'P', b'N', b'G', 0, 1,
-        ]));
-        assert!(preview.starts_with("00000000  89 50 4e 47 00 01"));
     }
 
     #[test]

@@ -174,7 +174,7 @@ jobs:
             [perseid-target-scope.png]="Target - Scope"
             [perseid-proxy-intercept.png]="Proxy - Intercept"
             [perseid-proxy-match-replace.png]="Proxy - Match/replace"
-            [perseid-proxy-tls.png]="Proxy - TLS"
+            [perseid-proxy-tls.png]="Proxy - Proxy settings"
             [perseid-intruder.png]="Intruder"
             [perseid-repeater.png]="Repeater"
             [perseid-decoder.png]="Decoder"

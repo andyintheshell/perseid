@@ -141,7 +141,7 @@ messages use a reconstructed head: the request line is origin-form,
 response status lines omit the reason phrase. Pseudo-headers are regenerated
 when the edited message is forwarded. Scope serves both as a view filter and, when
 enabled, as a traffic guardrail checked before interception and again after
-edits. **Proxy > TLS** shows the automatically created certificate authority,
+edits. **Proxy > Proxy settings** shows the automatically created certificate authority,
 opens the local certificate download page, and manages the HTTPS decryption
 toggle, regeneration, removal, and the pass-through host list.
 

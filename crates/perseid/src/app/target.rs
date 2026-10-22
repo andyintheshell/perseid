@@ -101,14 +101,6 @@ impl PerseidApp {
                                     }
                                 });
                             }
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(
-                                    "CONNECT transport tunnels are not listed. Decrypted HTTPS requests appear here individually.",
-                                )
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                            );
                         });
                 });
         }

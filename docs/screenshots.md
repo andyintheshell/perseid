@@ -24,9 +24,9 @@ pull requests so every UI tab is reviewed together.
 
 ![Proxy match/replace rules](images/perseid-proxy-match-replace.png)
 
-## Proxy > TLS
+## Proxy > Proxy settings
 
-![Proxy TLS certificate authority and pass-through settings](images/perseid-proxy-tls.png)
+![Proxy settings certificate authority and pass-through configuration](images/perseid-proxy-tls.png)
 
 ## Intruder
 

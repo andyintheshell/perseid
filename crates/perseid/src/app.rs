@@ -802,7 +802,6 @@ impl PerseidApp {
     }
 
     fn title_bar(&mut self, ui: &mut egui::Ui) {
-        let titlebar_rect = ui.max_rect();
         let maximized = ui
             .ctx()
             .input(|input| input.viewport().maximized.unwrap_or(false));
@@ -930,16 +929,6 @@ impl PerseidApp {
                 }
             });
         });
-
-        // A hairline matches the menu/title separation in Burp without adding
-        // another full-width panel.
-        ui.painter().line_segment(
-            [
-                egui::pos2(titlebar_rect.left(), titlebar_rect.bottom()),
-                egui::pos2(titlebar_rect.right(), titlebar_rect.bottom()),
-            ],
-            Stroke::new(1.0, theme::BORDER),
-        );
     }
 
     fn main_tabs(&mut self, ui: &mut egui::Ui) {

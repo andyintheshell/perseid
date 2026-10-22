@@ -244,7 +244,7 @@ replacing the binary does not invalidate browser trust. Interception is on by
 default; the private key stays on your machine.
 
 On first launch Perseid opens a certificate setup window. Install the
-certificate in the browser you use for testing. Open **Proxy > TLS > Open
+certificate in the browser you use for testing. Open **Proxy > Proxy settings > Open
 certificate page**, or browse directly to
 `http://127.0.0.1:8080/` while the proxy is running. Download
 `perseid-ca.pem` and import it; step-by-step Firefox and Chromium instructions,
@@ -365,7 +365,7 @@ scale.
   guardrail off.
 - **HTTPS sites show no decrypted traffic:** **Intercept HTTPS** is off, the CA
   could not be loaded, or the host is on the pass-through list. Check the status
-  in **Proxy > TLS**. If the browser reports an untrusted certificate, import the
+  in **Proxy > Proxy settings**. If the browser reports an untrusted certificate, import the
   current `perseid-ca.pem` from the certificate page as described in
   [HTTPS interception](tls.md); regenerating the CA requires importing the new
   certificate.
