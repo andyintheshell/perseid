@@ -8,7 +8,8 @@
 use std::time::{Duration, Instant};
 
 use crate::proxy::{
-    DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterRequest, RepeaterResult,
+    DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterError, RepeaterRequest,
+    RepeaterResult,
 };
 use egui::TextEdit;
 
@@ -558,12 +559,15 @@ impl PerseidApp {
                 tab.pending_since = Some(Instant::now());
             }
             Err(err) => {
+                let closed = matches!(err, RepeaterError::Closed);
                 tab.response = None;
                 tab.error = Some(err.to_string());
                 // A closed job channel means the worker is gone even if the
                 // runtime thread is still winding down. Drop the handle so the
                 // next Send can start a fresh engine.
-                self.repeater = None;
+                if closed {
+                    self.repeater = None;
+                }
             }
         }
     }

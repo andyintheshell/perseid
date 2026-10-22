@@ -570,22 +570,25 @@ impl PerseidApp {
         let Some(proxy) = self.proxy.as_mut() else {
             return;
         };
+        // Only discard a stopped runtime after draining a queue sampled after
+        // it stopped. Shutdown itself may enqueue final body-completion events.
+        let was_stopped = !proxy.is_running();
         let dropped = proxy.dropped_events();
-        if dropped > self.dropped_seen {
-            self.dropped_seen = dropped;
-            self.history.interrupt_in_flight(
-                "capture events were dropped; the exchange result is unavailable",
-            );
-        }
         let mut selected_changed = false;
-        for _ in 0..MAX_EVENTS_PER_FRAME {
-            let Some(event) = proxy.try_recv() else {
-                break;
-            };
-            let id = self.history.apply(event);
-            if self.selected == Some(id) {
-                selected_changed = true;
-            }
+        let selected = self.selected;
+        let batch = self.history.drain_events(
+            || {
+                let event = proxy.try_recv()?;
+                selected_changed |= selected == Some(event.id());
+                Some(event)
+            },
+            MAX_EVENTS_PER_FRAME,
+            dropped,
+            &mut self.dropped_seen,
+        );
+        selected_changed |= batch.interrupted;
+        if !batch.queue_drained || proxy.dropped_events() > self.dropped_seen {
+            ctx.request_repaint();
         }
         // Interception has its own bounded, backpressured channel. Draining it
         // here keeps held requests moving even when the history event queue is
@@ -600,12 +603,16 @@ impl PerseidApp {
         }
         // Drain what the proxy queued before declaring it stopped, then
         // resolve any exchange whose terminal event never made it through.
-        let stopped = !proxy.is_running();
+        if !was_stopped && !proxy.is_running() {
+            ctx.request_repaint();
+        }
+        let stopped = was_stopped && batch.queue_drained;
         if stopped {
             self.proxy = None;
             self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
             self.history
                 .interrupt_in_flight("proxy stopped before the exchange finished");
+            selected_changed = true;
             self.clear_intercept_queue();
         }
         if selected_changed {

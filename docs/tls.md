@@ -19,7 +19,7 @@ your browser; that stays deliberate and manual.
 | macOS | `~/Library/Application Support/perseid` |
 | Windows | `%LOCALAPPDATA%\perseid`, or `%APPDATA%\perseid` |
 
-The two files are:
+Each committed CA generation contains two files:
 
 | File | Purpose |
 | --- | --- |
@@ -29,6 +29,18 @@ The two files are:
 The directory is created with mode `0700`, the private key is written with mode
 `0600`, and the public certificate with mode `0644`. On Windows the platform ACLs
 apply instead.
+
+New CAs live in a private `.perseid-ca-<generation>/` subdirectory. A small
+`.perseid-ca-current` file selects the complete generation atomically; the
+certificate and key are never replaced one at a time. **Proxy > Proxy settings**
+shows the active paths. A `.perseid-ca.lock` file serializes readers, generation,
+and deletion across processes. It contains no key material and may remain after
+the CA is deleted.
+
+Older installations with the two PEM files directly in the data directory are
+still loaded unchanged. Explicit regeneration switches to the generation layout.
+Failed staging leaves the previous pair intact; successful commits remove old
+generations and legacy files. The loader rejects mismatched certificate/key pairs.
 
 Override the directory with `--ca-dir <DIR>` or the `PERSEID_CA_DIR`
 environment variable. This is useful for sandboxed runs, tests, and keeping an
@@ -89,11 +101,11 @@ at `~/.pki/nssdb`. Install the `libnss3-tools` package if `certutil` is missing:
 ```sh
 mkdir -p "$HOME/.pki/nssdb"
 certutil -d sql:"$HOME/.pki/nssdb" -A -t "C,," -n "Perseid CA" \
-  -i "$HOME/.local/share/perseid/perseid-ca.pem"
+  -i /path/to/downloaded/perseid-ca.pem
 ```
 
-Use the path shown in **Proxy > Proxy settings** if you overrode the CA directory. Restart
-the browser after importing.
+Use the downloaded certificate or the active certificate path shown in
+**Proxy > Proxy settings**. Restart the browser after importing.
 
 On macOS and Windows, Chrome uses the system certificate store; import the
 certificate with the platform's certificate manager, trusting it for SSL/TLS
@@ -175,12 +187,10 @@ Removal is deliberate. Do it in this order:
 
    - macOS and Windows: remove the certificate from the system certificate
      manager.
-3. Delete the CA files with **Proxy > Proxy settings > Delete files**, or:
-
-   ```sh
-   rm -f "${PERSEID_CA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/perseid}/perseid-ca.pem" \
-        "${PERSEID_CA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/perseid}/perseid-ca-key.pem"
-   ```
+3. Delete the CA files with **Proxy > Proxy settings > Delete files**. This
+   removes the current generation, any abandoned staging generations, the
+   generation pointer, and legacy PEM files. Removing only the two legacy
+   top-level PEM paths is not sufficient for the generation layout.
 
 Deleting the files without removing browser trust leaves a trusted but unused
 CA behind. Remove both. If the files are deleted, Perseid creates a fresh CA the

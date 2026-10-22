@@ -166,6 +166,11 @@ pub struct History {
     revision: u64,
 }
 
+pub struct EventDrain {
+    pub queue_drained: bool,
+    pub interrupted: bool,
+}
+
 impl History {
     pub fn new(limit: usize, byte_limit: usize) -> Self {
         Self {
@@ -262,6 +267,40 @@ impl History {
         self.order.iter().filter_map(|id| self.items.get(id))
     }
 
+    /// Apply a bounded batch before recovering from a sampled loss count.
+    ///
+    /// A dropped terminal event may belong to a Started event still in the
+    /// queue. Do not acknowledge the loss until all events preceding that
+    /// sample have been applied, even if draining spans several UI frames.
+    /// Losses occurring during this batch are handled by the next sample.
+    pub fn drain_events(
+        &mut self,
+        mut next: impl FnMut() -> Option<ProxyEvent>,
+        limit: usize,
+        dropped: u64,
+        dropped_seen: &mut u64,
+    ) -> EventDrain {
+        let mut queue_drained = false;
+        for _ in 0..limit {
+            let Some(event) = next() else {
+                queue_drained = true;
+                break;
+            };
+            self.apply(event);
+        }
+        let mut interrupted = false;
+        if queue_drained && dropped > *dropped_seen {
+            *dropped_seen = dropped;
+            interrupted = self.interrupt_in_flight(
+                "capture events were dropped; the exchange result is unavailable",
+            ) > 0;
+        }
+        EventDrain {
+            queue_drained,
+            interrupted,
+        }
+    }
+
     /// Fold one proxy event into the history. Returns the exchange id.
     pub fn apply(&mut self, event: ProxyEvent) -> u64 {
         let id = event.id();
@@ -274,7 +313,7 @@ impl History {
                 // CONNECT is transport plumbing, not an HTTP request. Burp's
                 // HTTP history lists the requests carried inside the tunnel,
                 // not the tunnel itself, so it gets no row or request index.
-                if request.method.eq_ignore_ascii_case("CONNECT") {
+                if request.method.eq_ignore_ascii_case("CONNECT") || self.items.contains_key(&id) {
                     return id;
                 }
                 let number = self.next_number;
@@ -302,6 +341,7 @@ impl History {
             }
             ProxyEvent::Finished { id, end } => {
                 if let Some(item) = self.items.get_mut(&id) {
+                    let was_in_flight = item.is_in_flight();
                     let previous_bytes = item_body_bytes(item);
                     item.request_body = end.request_body;
                     item.phase = Phase::Finished {
@@ -313,7 +353,9 @@ impl History {
                         .retained_bytes
                         .saturating_sub(previous_bytes)
                         .saturating_add(current_bytes);
-                    self.in_flight = self.in_flight.saturating_sub(1);
+                    if was_in_flight {
+                        self.in_flight -= 1;
+                    }
                     self.evict_to_limits();
                 }
             }
@@ -397,6 +439,82 @@ mod tests {
                     body: CapturedBody::from_bytes(response),
                 },
             },
+        }
+    }
+
+    fn assert_accounting(history: &History) {
+        assert_eq!(
+            history.in_flight(),
+            history.iter().filter(|item| item.is_in_flight()).count()
+        );
+        assert_eq!(
+            history.retained_bytes(),
+            history.iter().map(item_body_bytes).sum()
+        );
+        assert_eq!(history.len(), history.iter().count());
+    }
+
+    #[test]
+    fn late_and_duplicate_events_do_not_change_other_exchanges_accounting() {
+        let mut history = History::new(10, 1024);
+        history.apply(started(1, "GET"));
+        history.interrupt_in_flight("events dropped");
+        history.apply(started(2, "GET"));
+        for event in [
+            finished_with_bodies(1, vec![1; 4], vec![2; 8]),
+            finished_with_bodies(1, vec![1; 4], vec![2; 8]),
+            started(2, "GET"),
+            started(1, "GET"),
+            finished(99),
+        ] {
+            history.apply(event);
+            assert_accounting(&history);
+            assert_eq!(history.in_flight(), 1);
+        }
+        history.apply(finished(2));
+        assert_accounting(&history);
+        assert_eq!(history.in_flight(), 0);
+        assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn loss_recovery_waits_for_queued_starts_across_batches() {
+        let mut history = History::new(10, 1024);
+        // The terminal event for request 2 was lost while its start was queued.
+        let mut events = VecDeque::from([started(1, "GET"), finished(1), started(2, "GET")]);
+        let mut seen = 0;
+        let first = history.drain_events(|| events.pop_front(), 2, 1, &mut seen);
+        assert!(!first.queue_drained);
+        assert_eq!(seen, 0);
+        let second = history.drain_events(|| events.pop_front(), 2, 1, &mut seen);
+        assert!(second.queue_drained && second.interrupted);
+        assert_eq!(seen, 1);
+        assert!(history.get(1).unwrap().error().is_none());
+        assert!(history.get(2).unwrap().error().is_some());
+        assert_accounting(&history);
+        assert_eq!(history.in_flight(), 0);
+    }
+
+    #[test]
+    fn accounting_survives_recovery_completion_eviction_and_clear() {
+        let mut history = History::new(3, 20);
+        for id in 1..=30 {
+            history.apply(started(id, "GET"));
+            history.apply(started(id, "GET"));
+            if id % 3 == 0 {
+                history.interrupt_in_flight("events dropped");
+            }
+            history.apply(finished_with_bodies(
+                id.saturating_sub(1),
+                vec![0; 4],
+                vec![0; 8],
+            ));
+            history.apply(finished(id.saturating_sub(1)));
+            assert_accounting(&history);
+            if id % 7 == 0 {
+                history.clear();
+                assert_accounting(&history);
+            }
         }
     }
 

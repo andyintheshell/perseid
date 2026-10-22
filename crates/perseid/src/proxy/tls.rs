@@ -37,6 +37,8 @@ pub enum CaError {
     MissingCertificate,
     #[error("could not parse the private key from PEM: {0}")]
     Key(#[source] rcgen::Error),
+    #[error("the CA certificate and private key are invalid or do not match: {0}")]
+    InvalidKeyPair(#[source] rustls::Error),
     #[error("a certificate needs a non-empty host name")]
     MissingHost,
     #[error("refusing to mint a certificate for an invalid host name: {host}")]
@@ -110,6 +112,13 @@ impl CertificateAuthority {
             .map_err(CaError::Certificate)?
             .ok_or(CaError::MissingCertificate)?;
         let key = KeyPair::from_pem(key_pem).map_err(CaError::Key)?;
+        let signing_key = rustls::crypto::ring::sign::any_supported_type(&PrivateKeyDer::Pkcs8(
+            PrivatePkcs8KeyDer::from(key.serialize_der()),
+        ))
+        .map_err(CaError::InvalidKeyPair)?;
+        CertifiedKey::new(vec![cert_der.clone()], signing_key)
+            .keys_match()
+            .map_err(CaError::InvalidKeyPair)?;
         let params = ca_params().map_err(CaError::Generate)?;
         Ok(Self {
             params,
@@ -367,6 +376,16 @@ impl CertCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_mismatched_certificates_and_keys() {
+        let first = CertificateAuthority::generate().unwrap();
+        let second = CertificateAuthority::generate().unwrap();
+        assert!(matches!(
+            CertificateAuthority::from_pem(first.cert_pem(), &second.key_pem()),
+            Err(CaError::InvalidKeyPair(_))
+        ));
+    }
 
     #[test]
     fn generates_a_reusable_authority() {
