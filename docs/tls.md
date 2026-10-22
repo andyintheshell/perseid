@@ -1,102 +1,49 @@
 # HTTPS interception
 
-Perseid decrypts HTTPS by terminating TLS inside the proxy. It does this with a
-certificate authority (CA) generated automatically on first launch and stored
-locally: Perseid mints a certificate for each host your browser connects to,
-signed by that CA.
+[Documentation](README.md) · [Getting started](getting-started.md) ·
+[Workbench](workbench.md) · [Troubleshooting](troubleshooting.md)
 
-HTTPS interception is on by default, as it is in Burp and ZAP. The CA is created
-once and reused across restarts, development builds, and updates. On first
-launch Perseid opens a short certificate setup window with a link to the local
-download page. The only step Perseid cannot do for you is installing trust in
-your browser; that stays deliberate and manual.
+Perseid creates a local certificate authority (CA) on first launch and uses it
+to issue certificates for intercepted hosts. HTTPS decryption is enabled by
+default in the **desktop app**, but **trust is never installed automatically**.
 
-## Where the CA lives
-
-| Platform | Default directory |
-| --- | --- |
-| Linux and other Unix-like systems | `$XDG_DATA_HOME/perseid`, or `~/.local/share/perseid` |
-| macOS | `~/Library/Application Support/perseid` |
-| Windows | `%LOCALAPPDATA%\perseid`, or `%APPDATA%\perseid` |
-
-Each committed CA generation contains two files:
-
-| File | Purpose |
-| --- | --- |
-| `perseid-ca.pem` | Public certificate; safe to import into a browser |
-| `perseid-ca-key.pem` | Private key; never share or copy off the machine |
-
-The directory is created with mode `0700`, the private key is written with mode
-`0600`, and the public certificate with mode `0644`. On Windows the platform ACLs
-apply instead.
-
-New CAs live in a private `.perseid-ca-<generation>/` subdirectory. A small
-`.perseid-ca-current` file selects the complete generation atomically; the
-certificate and key are never replaced one at a time. **Proxy > Proxy settings**
-shows the active paths. A `.perseid-ca.lock` file serializes readers, generation,
-and deletion across processes. It contains no key material and may remain after
-the CA is deleted.
-
-Older installations with the two PEM files directly in the data directory are
-still loaded unchanged. Explicit regeneration switches to the generation layout.
-Failed staging leaves the previous pair intact; successful commits remove old
-generations and legacy files. The loader rejects mismatched certificate/key pairs.
-
-Override the directory with `--ca-dir <DIR>` or the `PERSEID_CA_DIR`
-environment variable. This is useful for sandboxed runs, tests, and keeping an
-experimental CA separate from the one your browser trusts.
-
-## Created once, then reused
-
-On startup Perseid loads the existing CA if both files are present. If the
-directory is empty, it creates the CA before the proxy starts. It does not
-replace an existing CA when the app updates, and debug and release builds use
-the same directory, so `cargo run -p perseid` keeps the certificate you already
-trusted.
-
-The generated CA is long-lived and is never rotated automatically. If the files
-are half-present, unreadable, or corrupt, Perseid reports the error in **Proxy >
-TLS** and leaves HTTPS in passthrough instead of silently creating a new
-authority that your browser would not trust.
-
-> [!NOTE]
-> **Upgrading from Wiremoth or frop?** The trust subject and data directory
-> changed to `Perseid CA` and the Perseid data directory. A CA created at an
-> older application's path is not reused; remove that trust entry, let Perseid
-> create its own CA, and import the new certificate.
+> [!WARNING]
+> Trusting a CA allows it to authenticate sites to the trusting client. Prefer
+> a dedicated testing browser profile, keep the private key local, and remove
+> trust when you are finished. Only intercept explicitly authorized targets.
 
 ## Install the certificate
 
-The easiest route is Perseid's built-in certificate page. With the proxy
-running, open:
+1. Start Perseid and check the toolbar shows its proxy listening.
+2. Open `http://127.0.0.1:8080/` **directly**, or choose **Proxy > Proxy
+   settings > Open certificate page**. Use the actual listen port if changed.
+3. Download **`perseid-ca.pem`**, the public certificate—not the private key.
+4. Import it using the instructions for your testing browser below.
+5. Configure an **HTTP proxy** at `127.0.0.1:8080` for both HTTP and HTTPS.
+   This is an HTTP proxy carrying HTTPS `CONNECT` tunnels, not a SOCKS proxy.
 
-```text
-http://127.0.0.1:8080/
-```
-
-or use **Proxy > Proxy settings > Open certificate page**. This works even before the
-browser is configured to use the proxy, because the browser is connecting
-directly to Perseid's listener. Once the proxy is configured you can also use:
-
-```text
-http://perseid/
-```
-
-Download `perseid-ca.pem` from the page and import it. Perseid serves only the
-public certificate; the private key stays in the CA directory. Certificate-page
-requests are handled by Perseid and do not appear in HTTP history.
+The certificate page works before the browser is configured to proxy, because
+it is served by the local listener. Once proxying is configured,
+`http://perseid/` opens the same page. Certificate-page requests are not added
+to captured HTTP history.
 
 ### Firefox
 
+In the dedicated testing profile:
+
 1. Open **Settings > Privacy & Security > Certificates > View Certificates**.
-2. On the **Authorities** tab, click **Import** and select `perseid-ca.pem`.
-3. Check **Trust this CA to identify websites**, then click **OK**.
-4. Restart Firefox.
+2. On **Authorities**, choose **Import** and select the downloaded public CA.
+3. Enable trust for identifying websites and confirm.
+4. Restart the browser if needed, then visit your authorized HTTPS target.
 
-### Chrome, Chromium, and other NSS-based Linux browsers
+Menu labels vary by Firefox release. Importing the CA in one profile does not
+mean it has been imported in every other profile.
 
-On Linux, Chrome and Chromium read user-added authorities from the NSS database
-at `~/.pki/nssdb`. Install the `libnss3-tools` package if `certutil` is missing:
+### Chrome and Chromium on Linux
+
+NSS-based Linux setups commonly use `~/.pki/nssdb`. Install `libnss3-tools`
+with your distribution's package manager if `certutil` is missing, then import
+the **downloaded public certificate**:
 
 ```sh
 mkdir -p "$HOME/.pki/nssdb"
@@ -104,128 +51,185 @@ certutil -d sql:"$HOME/.pki/nssdb" -A -t "C,," -n "Perseid CA" \
   -i /path/to/downloaded/perseid-ca.pem
 ```
 
-Use the downloaded certificate or the active certificate path shown in
-**Proxy > Proxy settings**. Restart the browser after importing.
+Replace the placeholder path with the certificate you downloaded. You can also
+use the certificate path shown in **Proxy > Proxy settings**. Certificate-store
+behavior can vary by browser build or packaging; use its certificate manager
+if it does not use that NSS database. Restart the browser after importing.
 
-On macOS and Windows, Chrome uses the system certificate store; import the
-certificate with the platform's certificate manager, trusting it for SSL/TLS
-only.
+### Chrome and Chromium on macOS
 
-> [!WARNING]
-> A trusted CA can sign certificates for every site. Only trust it in a browser
-> profile used for authorized testing, and remove the trust when you are done.
+These browsers use OS certificate trust. You can import the public CA through
+**Keychain Access > File > Import Items**, typically into your **login**
+keychain. Open the imported **Perseid CA**, expand **Trust**, and explicitly
+trust it for **Secure Sockets Layer (SSL)**. macOS may ask you to confirm with
+your account credentials. Restart the browser if needed.
 
-## Point the browser at Perseid
+**This can affect other applications using that keychain, not just one browser
+profile.** Use Firefox's profile-specific authority import instead when you
+want to keep testing trust separate from your normal OS/browser trust. Do not
+import `perseid-ca-key.pem` and do not install anything into the System keychain
+just to follow this guide.
 
-Configure the browser's HTTP and HTTPS proxy as `127.0.0.1:8080` (or the address
-passed with `--listen`). Then browse an HTTPS site. Each request and response
-appears as its own row in **Proxy > HTTP history**, with an `https://` URL. Like
-Burp, Perseid treats the `CONNECT` tunnel as transport: it is not listed as a
-separate history request. When interception is off or a host is passed through,
-the encrypted traffic has no plaintext request to show, so it does not add
-history rows either.
+### Other browser/platform combinations
 
-Held interception, scope enforcement, and match/replace rules all apply to
-decrypted HTTPS messages exactly as they do to plain HTTP. Inside intercepted
-tunnels the proxy advertises `h2` and `http/1.1` through ALPN, preferring HTTP/2
-when the client supports it. The same preference is offered to HTTPS origins,
-with HTTP/1.1 as the fallback on both sides.
-
-Interception is on by default. Turn it off in **Proxy > Proxy settings** for the current
-run, or start with:
-
-```sh
-perseid --no-tls-intercept
-```
-
-The CA is still created and available for installation when interception is
-off. Decryption and the toggle are per-run settings; the CA itself persists.
-
-## Pass-through hosts
-
-Some hosts should never be decrypted: certificate-pinned applications, online
-banking, or non-HTTP TLS protocols that happen to use `CONNECT`. Add them under
-**Proxy > Proxy settings > Pass-through hosts**, or start Perseid with one or more
-`--tls-passthrough <HOST>` flags.
-
-Matching is the same as the scope list: a host matches its exact name, its
-subdomains, and any port. The list is an exclude list, so an empty list excludes
-nothing. Pass-through applies to new tunnels; an established tunnel keeps the
-mode it started with.
+Use the browser's documented certificate manager and trust only the public CA
+for website/SSL authentication. Windows-specific paths exist in Perseid, but
+Windows build/run setup is not CI-validated; these trust notes are not a claim
+of full Windows application support. See [platform status](README.md#platform-status).
 
 ## Verify interception
 
-Visit an HTTPS page after installing the certificate. In **HTTP history**:
+Visit an HTTPS endpoint on your local lab or another authorized target. In
+**Proxy > HTTP history**, you should see individual `https://` requests and
+their decrypted responses. There is no separate `CONNECT` row; that tunnel is
+transport, not an HTTP exchange shown in the history UI.
 
-- The URL starts with `https://`.
-- **Pretty** and **Raw** show the request and response, including compressed
-  bodies decoded for display.
-- There is no separate `CONNECT` row; the request index counts actual HTTP
-  requests, as in Burp.
+To test a client without changing its trust store, pass the public CA to curl
+for that request only, replacing both placeholders:
 
-If the browser shows a certificate warning instead, see the troubleshooting
-section below.
+```sh
+curl --noproxy "" --proxy http://127.0.0.1:8080 \
+  --cacert /path/to/downloaded/perseid-ca.pem \
+  https://your-authorized-lab.test/
+```
+
+Do not substitute `--insecure` for configuring trust. The browser/client trusting
+Perseid and Perseid trusting the upstream server are **separate** TLS checks.
+Origins are checked against platform trust anchors, with bundled public roots
+as a fallback when no native roots are available.
+
+The proxy negotiates HTTP/2 or HTTP/1.1 with intercepted clients and HTTPS
+origins. Decrypted requests follow the normal interception, scope, and rewrite
+pipeline. **Intercept HTTPS** controls decryption; **Intercept is off/on**
+controls whether messages wait for your Forward/Drop decision.
+
+## Where the CA lives
+
+| Platform | Default CA data directory |
+| --- | --- |
+| Linux and other Unix-like systems | `$XDG_DATA_HOME/perseid`, or `~/.local/share/perseid` |
+| macOS | `~/Library/Application Support/perseid` |
+| Windows | `%LOCALAPPDATA%\perseid`, falling back to `%APPDATA%\perseid` |
+
+`PERSEID_CA_DIR` overrides the platform location; `--ca-dir <DIR>` overrides
+both. **Proxy > Proxy settings** shows the active certificate and key paths.
+Newly created or explicitly regenerated CAs use this layout:
+
+```text
+perseid/
+├── .perseid-ca-current
+├── .perseid-ca.lock
+└── .perseid-ca-<generation>/
+    ├── perseid-ca.pem
+    └── perseid-ca-key.pem
+```
+
+| File | Purpose |
+| --- | --- |
+| `perseid-ca.pem` | Public certificate inside the active generation; safe to import into a testing client. |
+| `perseid-ca-key.pem` | Private key inside that generation; never share, upload, or copy off the machine. |
+| `.perseid-ca-current` | A small pointer selecting the complete active generation atomically. |
+| `.perseid-ca.lock` | Cross-process coordination for loading, generation, and deletion; contains no key material. |
+
+The data and generation directories use mode `0700`, keys use `0600`, and public
+certificates use `0644` on Unix. The pointer and lock use `0600`. Windows uses
+its platform ACL behavior instead. Use the paths in the UI or download the
+public certificate; do not assume the PEM files are directly in the data root.
+Do not edit the pointer or unlink the lock file to repair a trust problem.
+
+Both PEM documents are staged, synced, and checked for a matching key before
+the active pointer is replaced. A failure before commit leaves the previous CA
+active. Store operations are serialized across processes so a loader does not
+read half of a replacement pair. Successful commits normally remove old
+generations and legacy PEM files; cleanup warnings can leave superseded files
+for a later cleanup. The lock file may remain after deletion and is not a CA.
+
+### Existing installations and upgrades
+
+Existing CAs with both PEM files directly in the data directory are **reused
+unchanged**. Merely updating, rebuilding, or restarting the app does not rotate
+them or move them into a new generation. An explicit **Regenerate** creates a
+new CA using the generation layout and requires importing the new certificate.
+
+The CA is otherwise reused across debug/release builds and restarts. An
+incomplete store, invalid generation pointer, or mismatched certificate/key pair
+is reported rather than silently replaced. If loading fails, HTTPS stays in
+pass-through until a CA is available. Use an isolated `--ca-dir` for development
+experiments.
+
+The headless example and `ProxyConfig::default()` **do not** automatically
+create a CA or enable decryption. Those are desktop-app startup decisions;
+see the [library guide](../crates/perseid/README.md).
+
+If upgrading from an older project name such as Wiremoth or frop, the old data
+directory and trust entry are not automatically migrated. Remove the old trust
+entry and explicitly import the certificate created by Perseid.
+
+## Pass-through hosts
+
+Certificate-pinned applications and non-HTTP TLS protocols may need opaque
+tunnels. Add hosts in **Proxy > Proxy settings > Pass-through hosts**, or:
+
+```sh
+cargo run -p perseid --locked -- --tls-passthrough pinned.lab.test
+```
+
+Each entry matches the host, its subdomains, and any port. An empty pass-through
+list excludes nothing. Scope can still block the tunnel target, but opaque
+tunnel contents cannot be inspected, rewritten, or listed as decrypted history.
+
+To keep all HTTPS opaque for a run:
+
+```sh
+cargo run -p perseid --locked -- --no-tls-intercept
+```
+
+The CA is still prepared. Turning off decryption does not delete the key or
+remove trust. Mode changes and pass-through rules apply to new tunnels;
+existing tunnels keep the mode they started with.
 
 ## Regenerate or remove the CA
 
-**Proxy > Proxy settings > Regenerate** creates a new CA in place. Browsers that trusted the
-old certificate will report an untrusted certificate until they import the new
-one.
+**Regenerate** in **Proxy > Proxy settings** intentionally creates a new CA.
+Browsers that trusted the old certificate must import the replacement; remove
+the old trust entry as well. Regeneration is not the first remedy for a browser
+proxy-setting problem.
 
-Removal is deliberate. Do it in this order:
+To remove the CA safely:
 
-1. Turn off **Intercept HTTPS** (or close Perseid).
-2. Remove **Perseid CA** from the browser:
-   - Firefox: **Settings > Privacy & Security > Certificates > View
-     Certificates > Authorities**, select the Perseid entry, and click
-     **Delete or Distrust**.
-   - Chrome/Chromium on Linux:
+1. Turn off HTTPS interception or close Perseid.
+2. Remove **Perseid CA** from every client trust store where you installed it:
+   - Firefox: select it under **Authorities** and choose **Delete or Distrust**.
+   - NSS-based Linux setups:
 
      ```sh
      certutil -d sql:"$HOME/.pki/nssdb" -D -n "Perseid CA"
      ```
 
-   - macOS and Windows: remove the certificate from the system certificate
-     manager.
-3. Delete the CA files with **Proxy > Proxy settings > Delete files**. This
-   removes the current generation, any abandoned staging generations, the
-   generation pointer, and legacy PEM files. Removing only the two legacy
-   top-level PEM paths is not sufficient for the generation layout.
+   - macOS: remove the certificate you imported in Keychain Access.
+   - Other clients: use the same certificate manager used for import.
+3. Use **Proxy > Proxy settings > Delete files**. It removes the active and
+   abandoned generations, the generation pointer, and legacy PEM files. Deleting
+   only the two old top-level PEM paths is **not sufficient** for the generation
+   layout. The coordination lock may remain; it contains no key material.
 
-Deleting the files without removing browser trust leaves a trusted but unused
-CA behind. Remove both. If the files are deleted, Perseid creates a fresh CA the
-next time it starts; that new authority is not trusted until you import it.
+Deleting files does not remove browser/OS trust. Turning interception off does
+neither. On the next launch, Perseid creates a new CA if the store is empty;
+that new authority is not trusted until you explicitly import it.
 
 ## Troubleshooting
 
-- **The browser rejects the certificate:** the CA is not trusted in that browser
-  profile, the CA was regenerated after the import, or the host is on the
-  pass-through list while the client trusts only Perseid's CA. Re-import the
-  current `perseid-ca.pem`.
-- **`NET::ERR_CERT_AUTHORITY_INVALID` in Chrome on Linux:** the NSS import did
-  not apply to this profile. Check it with
-  `certutil -d sql:"$HOME/.pki/nssdb" -L` and restart the browser.
-- **The certificate page does not open:** the proxy may not be running, or the
-  listener is on a different address or port. Use the URL shown in **Proxy >
-  TLS**, or start the proxy from the toolbar.
-- **Some sites fail while others work:** certificate pinning or a non-HTTP
-  protocol. Add the host to the pass-through list.
-- **HTTP/3 sites behave differently:** Perseid proxies HTTP/1.1 and HTTP/2 but
-  does not proxy QUIC. Disable HTTP/3/QUIC in the browser if a site insists on
-  it.
-- **No decrypted rows appear:** interception is off, no CA is loaded, or the
-  host is on the pass-through list. Check the status in **Proxy > Proxy settings**.
-- **Traffic is captured but not editable:** only bodies within
-  `--intercept-limit` are buffered; larger or streaming bodies are header-only.
-- **The CA could not be created at startup:** Perseid shows the error under
-  **Proxy > Proxy settings**. Check that the data directory is writable, or point
-  `--ca-dir` at a writable location, then retry.
+| Symptom | Check |
+| --- | --- |
+| Browser rejects the certificate | The CA must be trusted in that client/profile. If regenerated, import the current public certificate. |
+| Certificate page does not open | Check the listener and actual port. Open its loopback URL directly before configuring the browser proxy. |
+| No decrypted history rows | Check **Intercept HTTPS**, CA readiness, client proxy settings, and the pass-through list. |
+| Only some hosts fail | Certificate pinning, private upstream CAs, or non-HTTP TLS may be involved; consider intentional pass-through. |
+| CA creation or loading fails | Check the error, store path, and permissions. Do not mix PEMs from different generations. A dedicated writable `--ca-dir` isolates experiments without altering the usual CA. |
+| PEM files seem missing | New stores use a hidden generation subdirectory. Use the active paths in **Proxy > Proxy settings** or the certificate download page. |
+| `NET::ERR_CERT_AUTHORITY_INVALID` on Linux | Check the certificate manager or `certutil -d sql:"$HOME/.pki/nssdb" -L`, and restart the browser. |
+| HTTP/3 behaves differently | QUIC is not proxied; use a client/target that can fall back to HTTP/1.1 or HTTP/2. |
 
-## Safety
-
-- The CA private key stays in the directory above and is never uploaded.
-- Perseid creates the CA automatically, but never installs it into a system or
-  browser trust store. Trust and removal are always user actions.
-- Captured HTTPS traffic lives in memory only and follows the same count and
-  byte bounds as HTTP. See [Safety and privacy](safety.md).
-- Only intercept systems you own or are explicitly authorized to test.
+See [Troubleshooting](troubleshooting.md) for held requests, missing history,
+editing limits, and safe bug-report diagnostics. Read
+[Safety and privacy](safety.md) before intercepting real traffic.

@@ -1,5 +1,7 @@
 # Perseid brand notes
 
+[Project home](../README.md) · [Documentation](../docs/README.md)
+
 **Name:** Perseid
 **Tagline:** INSPECT · MODIFY · REPLAY
 **Descriptor:** A lightweight web security workbench.
@@ -19,9 +21,11 @@
 The icon is a meteor-shower symbol: three navy streaks, one amber-to-coral
 streak ending in a large meteor, and a single small dot.
 
-**Typography:** Inter (or a system sans-serif fallback). The wordmark uses a
-heavy weight, the tagline is all caps in coral, and body copy is slate. No fonts
-are bundled.
+**Typography:** Brand artwork uses Inter (or a system sans-serif fallback).
+The wordmark uses a heavy weight, the tagline is all caps in coral, and body
+copy is slate. The desktop app separately bundles Selawik Regular for interface
+text under the [SIL Open Font License](../crates/perseid/assets/Selawik-OFL.txt).
+The application font is not a change to the artwork's type specification.
 
 **Files**
 
@@ -37,9 +41,9 @@ are bundled.
 - `perseid-wordmark.svg` / `.png`: wordmark without the mark.
 - `perseid-icon-512.png`, `perseid-icon-128.png`, `perseid-icon-32.png`: raster
   app icons exported from the platform kit.
+- `perseid-avatar-512.png`: GitHub profile/avatar image (512×512); upload it
+  manually in the GitHub account or organization settings.
 
 The application embeds packaged copies under `crates/perseid/assets/`:
 `icon-128.png` (window icon), `logo-light.png` (About lockup), and `mark.png`
 (toolbar mark). Keep those in sync when the brand assets change.
-- `perseid-avatar-512.png`: GitHub profile/avatar image (512×512); upload it
-  manually in the GitHub account or organization settings.

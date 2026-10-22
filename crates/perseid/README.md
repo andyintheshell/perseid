@@ -1,32 +1,87 @@
 # Perseid
 
-The native desktop workbench for Perseid. The package contains both the
-Burp-style desktop application and its embedded HTTP/1.1 and HTTP/2
-interception proxy. The UI provides the Target/Proxy/Intruder/Repeater/Decoder
-workspace, editable interception, editable Repeater tabs with direct replay,
-scope and match/replace controls, bounded in-memory history, site map, and
-message inspector.
+[Project home](../../README.md) · [Documentation](../../docs/README.md) ·
+[Contributing](../../CONTRIBUTING.md)
 
-The proxy is available to Rust callers as `perseid::proxy`, with editable
-request/response interception, opt-in scope enforcement, match/replace rules,
-bounded body capture, CONNECT passthrough, TLS interception with a local CA,
-immutable events over a bounded channel, and a direct HTTP/HTTPS Repeater client
-for manual replay.
+The single `perseid` package contains the native egui desktop workbench and
+its embedded HTTP/1.1/HTTP/2 interception proxy. Rust callers use
+`perseid::proxy`; the application binary adds history, message viewers,
+interception controls, Repeater tabs, Decoder, and local CA storage.
+
+## Run the desktop app
+
+From the repository root:
+
+```sh
+cargo run -p perseid --locked
+```
+
+See [Getting started](../../docs/getting-started.md) for platform dependencies,
+Homebrew setup, CLI flags, and a local-target walkthrough.
+
+## Use the proxy from Rust
+
+The proxy owns its runtime and publishes capture events. Dropping the handle
+requests shutdown and joins its runtime thread. For example:
 
 ```rust,no_run
-fn main() -> Result<(), perseid::proxy::StartError> {
-    let proxy = perseid::proxy::Proxy::start(Default::default())?;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
+use perseid::proxy::{Proxy, ProxyConfig};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let proxy = Proxy::start(ProxyConfig::default())?;
     println!("listening on {}", proxy.local_addr());
-    while let Some(event) = proxy.try_recv() {
-        println!("{event:?}");
+
+    loop {
+        match proxy.recv_timeout(Duration::from_secs(1)) {
+            Ok(event) => println!("{event:?}"),
+            Err(RecvTimeoutError::Timeout) if proxy.is_running() => continue,
+            Err(_) => break,
+        }
     }
     Ok(())
 }
 ```
 
-See the [repository README](https://github.com/andyintheshell/perseid) for
-setup, safety guidance, and the current feature set.
+**Defaults are not the same as the desktop app's startup behavior.**
+`ProxyConfig::default()` binds loopback and leaves TLS interception off. It
+does not generate or persist a CA. To decrypt HTTPS, a caller supplies a
+`CertificateAuthority` in `TlsConfig` and enables the relevant `ProxySettings`.
+The desktop app makes those decisions and manages the filesystem separately.
 
-## License
+The API also exposes editable interception decisions, scope and match/replace
+policy, bounded body capture, capture-drop counters, and a separate direct
+HTTP/HTTPS `Repeater` client. Repeater bypasses proxy interception, rewriting,
+and scope enforcement.
 
-MIT OR Apache-2.0
+Repeater admission includes queued requests, active work, and unread results.
+`send` can return `RepeaterError::Busy` without stopping other requests; drain
+`try_recv` to release reservations before retrying. Oversized requests and
+capture configurations are rejected separately. See the
+[workbench limits](../../docs/workbench.md#repeater) for the count/byte budgets.
+
+Loaded CA certificate/key pairs are checked for a match. The desktop app owns
+the [generation-based CA store](../../docs/tls.md#where-the-ca-lives); the proxy
+API itself still has no filesystem policy or automatic trust installation.
+
+For a runnable event-consumer example, see [headless.rs](examples/headless.rs):
+
+```sh
+cargo run -p perseid --example headless --locked
+cargo doc -p perseid --no-deps --locked --open
+```
+
+Headless use does not open a window, but still builds the same crate and GUI
+dependencies. This prototype API can change; consult the source/API docs for
+the checkout you are using.
+
+## Safety and license
+
+Use only on explicitly authorized targets. Captured traffic and CA keys are
+sensitive; read [Safety and privacy](../../docs/safety.md) and the
+[security policy](../../SECURITY.md).
+
+Dual-licensed under MIT or Apache-2.0, at your option.
+
+`SPDX-License-Identifier: MIT OR Apache-2.0`

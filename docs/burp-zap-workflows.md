@@ -1,5 +1,11 @@
 # Burp Community and ZAP workflow research
 
+[Documentation](README.md) · [Roadmap](roadmap.md) · [Capability matrix](burp-parity.md)
+
+> This is dated prioritization research, not a current setup guide or a
+> representative usage survey. For hands-on Perseid workflows, start with the
+> [workbench guide](workbench.md).
+
 **Purpose:** rank the workflows that Burp Suite Community Edition (CE) and
 OWASP ZAP users rely on most, and compare each workflow with what Perseid
 supports today. The result is input for milestone prioritization, not a
