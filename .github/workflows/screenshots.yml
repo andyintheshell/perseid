@@ -130,10 +130,10 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The shared preview branch is force-pushed so the summary can embed the
-  # images. Keep the write token in a separate job: the build and test steps
-  # above only need contents: read. Fork pull requests still get the artifact;
-  # their read-only token is never asked to push.
+  # The shared preview branch is force-pushed so the summary and PR comment can
+  # embed the images. Keep the write token in a separate job: the build and test
+  # steps above only need contents: read. Fork pull requests still get the
+  # artifact; their read-only token is never asked to push or comment.
   publish:
     name: Publish inline preview
     needs: screenshots
@@ -142,6 +142,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Download screenshots
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -152,11 +153,11 @@ jobs:
       - name: Publish inline preview
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           preview="$(mktemp -d)"
-          cp artifacts/screenshots/perseid-main.png "$preview/"
-          cp artifacts/screenshots/perseid-memory.png "$preview/"
+          cp artifacts/screenshots/*.png "$preview/"
           cd "$preview"
           git init -q
           git config user.name "github-actions[bot]"
@@ -166,12 +167,70 @@ jobs:
           git push --force \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             HEAD:screenshots-preview
+
+          declare -A labels=(
+            [perseid-main.png]="Proxy - HTTP history"
+            [perseid-target-site-map.png]="Target - Site map"
+            [perseid-target-scope.png]="Target - Scope"
+            [perseid-proxy-intercept.png]="Proxy - Intercept"
+            [perseid-proxy-match-replace.png]="Proxy - Match/replace"
+            [perseid-proxy-tls.png]="Proxy - Proxy settings"
+            [perseid-intruder.png]="Intruder"
+            [perseid-repeater.png]="Repeater"
+            [perseid-decoder.png]="Decoder"
+            [perseid-memory.png]="Memory usage"
+          )
+          order=(
+            perseid-main.png
+            perseid-target-site-map.png
+            perseid-target-scope.png
+            perseid-proxy-intercept.png
+            perseid-proxy-match-replace.png
+            perseid-proxy-tls.png
+            perseid-intruder.png
+            perseid-repeater.png
+            perseid-decoder.png
+            perseid-memory.png
+          )
+
+          # Reruns keep the same run id, so include the attempt in the query to
+          # make browsers and GitHub's image proxy fetch the new preview files.
+          preview_version="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          body_file="$(mktemp)"
           {
-            echo "### Inline preview"
+            echo "<!-- perseid-screenshots -->"
+            echo "### Perseid screenshots"
             echo
-            echo "![HTTP history](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/perseid-main.png?v=${GITHUB_RUN_ID})"
+            echo "Generated from \`${GITHUB_SHA}\` by the [Screenshots workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) (attempt ${GITHUB_RUN_ATTEMPT})."
             echo
-            echo "![Memory usage](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/perseid-memory.png?v=${GITHUB_RUN_ID})"
+            for name in "${order[@]}"; do
+              echo "#### ${labels[$name]}"
+              echo
+              echo "![${labels[$name]}](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/${name}?v=${preview_version})"
+              echo
+            done
+            echo "_This preview branch shows the latest generated run. If an image does not load (for example, in a private repository), download the screenshots artifact from the workflow run._"
+          } > "$body_file"
+
+          if [[ -n "${PR_NUMBER:-}" ]]; then
+            existing_id="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+                --jq 'first(.[] | select(.body | contains("<!-- perseid-screenshots -->"))) | .id // empty'
+            )"
+            if [[ -n "$existing_id" ]]; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/issues/comments/${existing_id}" \
+                -f body="$(cat "$body_file")" >/dev/null
+            else
+              gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+                -f body="$(cat "$body_file")" >/dev/null
+            fi
+          fi
+
+          {
+            cat "$body_file"
             echo
-            echo "_This preview branch shows the latest generated run. If the images do not load (for example, in a private repository), use the screenshots artifact from this run._"
+            echo "[Download the PNG artifacts](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#artifacts)"
           } >> "$GITHUB_STEP_SUMMARY"

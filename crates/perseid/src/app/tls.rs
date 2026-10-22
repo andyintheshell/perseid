@@ -33,12 +33,6 @@ impl PerseidApp {
                     ui.set_max_width(ui.available_width().min(780.0));
                     card(ui, |ui| {
                         ui.label(
-                            RichText::new("TLS interception")
-                                .size(17.0)
-                                .strong()
-                                .color(theme::TEXT),
-                        );
-                        ui.label(
                             "Perseid creates a local certificate authority (CA) on first launch \
                              and uses it to issue a certificate for each host you visit. The CA \
                              is reused across restarts and updates; trust is installed in your \
@@ -232,7 +226,7 @@ impl PerseidApp {
                     card(ui, |ui| {
                         ui.label(
                             RichText::new("Install the certificate")
-                                .size(15.0)
+                                .size(13.5)
                                 .strong()
                                 .color(theme::TEXT),
                         );

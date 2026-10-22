@@ -30,23 +30,27 @@ pub fn apply(ctx: &egui::Context) {
 
     let mut style = (*ctx.style_of(egui::Theme::Light)).clone();
     style.visuals = visuals();
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(8.0, 4.0);
+    // Burp keeps its chrome compact so more of the request and response stay
+    // visible. These are deliberately smaller than egui's defaults.
+    style.spacing.item_spacing = egui::vec2(6.0, 3.0);
+    style.spacing.button_padding = egui::vec2(6.0, 2.0);
+    style.spacing.interact_size.y = 20.0;
+    style.spacing.menu_margin = egui::Margin::same(4);
     style
         .text_styles
-        .insert(TextStyle::Heading, FontId::proportional(20.0));
+        .insert(TextStyle::Heading, FontId::proportional(16.0));
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::proportional(14.0));
+        .insert(TextStyle::Body, FontId::proportional(12.5));
     style
         .text_styles
-        .insert(TextStyle::Button, FontId::proportional(14.0));
+        .insert(TextStyle::Button, FontId::proportional(12.5));
     style
         .text_styles
-        .insert(TextStyle::Small, FontId::proportional(12.0));
+        .insert(TextStyle::Small, FontId::proportional(10.5));
     style
         .text_styles
-        .insert(TextStyle::Monospace, FontId::monospace(13.0));
+        .insert(TextStyle::Monospace, FontId::monospace(11.5));
     ctx.set_style_of(egui::Theme::Light, style);
 }
 

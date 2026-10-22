@@ -16,12 +16,6 @@ impl PerseidApp {
 
             card(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Intruder")
-                            .size(17.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
                     badge(ui, "MILESTONE 4");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_enabled(false, egui::Button::new("Start attack"))

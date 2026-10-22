@@ -141,7 +141,7 @@ messages use a reconstructed head: the request line is origin-form,
 response status lines omit the reason phrase. Pseudo-headers are regenerated
 when the edited message is forwarded. Scope serves both as a view filter and, when
 enabled, as a traffic guardrail checked before interception and again after
-edits. **Proxy > TLS** shows the automatically created certificate authority,
+edits. **Proxy > Proxy settings** shows the automatically created certificate authority,
 opens the local certificate download page, and manages the HTTPS decryption
 toggle, regeneration, removal, and the pass-through host list.
 
@@ -181,7 +181,8 @@ Important implementation principles:
 
 - Disk-backed history with bounded in-memory windows (planned).
 - Hard limits on captured body size, with bounded text and hex previews.
-- A total retained-body budget for history, independent of the exchange count.
+- A total retained-body budget for history, independent of the exchange count
+  (half of physical memory by default, with a 256 MiB fallback).
 - Bounded worker queues, concurrent connections and tunnels, and a bounded UI
   event channel with drop counters. Repeater responses share the capture limit,
   and simultaneous Repeater sends are capped independently of tab count.

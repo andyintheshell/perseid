@@ -12,7 +12,7 @@ use crate::theme;
 
 /// Message text is a little smaller than the UI's default monospace style so
 /// more of a request or response fits in the detail panes.
-pub const MESSAGE_FONT_SIZE: f32 = 12.0;
+pub const MESSAGE_FONT_SIZE: f32 = 11.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Language {
@@ -125,19 +125,6 @@ pub fn message_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
     let syntax = Syntax::from_lines(&lines);
     layout_text(text, wrap_width, font, |line, index| {
         line_job(line, syntax.role(index), syntax.language, font)
-    })
-}
-
-/// Build a body-only layout for the editable body buffer.
-///
-/// The interceptor edits the head and body separately, so the body buffer has
-/// no request/status line of its own. Detect the body language from its text
-/// and render every line with the body grammar.
-pub fn body_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
-    let lines: Vec<&str> = text.lines().collect();
-    let language = detect_language(&lines);
-    layout_text(text, wrap_width, font, |line, _| {
-        line_job(line, LineRole::Body, language, font)
     })
 }
 
@@ -598,21 +585,6 @@ mod tests {
         .drop_without_applying_deltas();
 
         assert!(rows > text.lines().count(), "long lines should wrap");
-    }
-
-    #[test]
-    fn body_jobs_preserve_bytes_and_highlight_the_body_language() {
-        let font = FontId::monospace(MESSAGE_FONT_SIZE);
-        let text = "{\r\n  \"name\": \"Perseid\"\r\n}\r\n";
-        let job = body_job(text, 120.0, &font);
-
-        assert_eq!(job.text, text);
-        assert!(
-            job.sections
-                .iter()
-                .any(|section| section.format.color == theme::ACCENT_DARK),
-            "JSON keys should use the header accent color"
-        );
     }
 
     #[test]

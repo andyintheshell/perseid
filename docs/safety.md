@@ -17,8 +17,9 @@ aids, not permission to test an arbitrary host.
 - Captured request and response bodies are capped by `--capture-limit`
   (1 MiB per message by default).
 - History is bounded by `--history-limit` (2000 exchanges by default) and
-  `--history-bytes` (256 MiB of retained request/response body bytes by
-  default). The oldest exchanges are evicted when either bound is reached.
+  `--history-bytes` (half of physical memory by default, with a 256 MiB
+  fallback when the platform does not report installed memory). The oldest
+  exchanges are evicted when either bound is reached.
 - The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
   once by default. Excess connections are closed; excess CONNECT requests get
   a 503 response. Both limits are library configuration, not browser settings.

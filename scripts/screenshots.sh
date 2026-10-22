@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Generate the two documentation screenshots headlessly.
+# Generate the documentation screenshots headlessly.
 #
 # Usage:
 #   scripts/screenshots.sh [--out DIR] [--no-build]
 #
 # The app is built with the `screenshots` feature, which seeds a deterministic
-# demo history and captures the egui framebuffer directly. No window manager,
-# mouse movement, or screen-grab utility is involved. On success the PNGs are
-# copied to DIR (default: docs/images).
+# demo history, walks every documented UI tab, and captures the egui framebuffer
+# directly. No window manager, mouse movement, or screen-grab utility is
+# involved. On success the PNGs are copied to DIR (default: docs/images).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -82,13 +82,13 @@ trap 'rm -rf "$TMP"' EXIT
 status=0
 xvfb-run -a -s "-screen 0 3000x2000x24" \
     env LIBGL_ALWAYS_SOFTWARE=1 WINIT_X11_SCALE_FACTOR=2 RUST_LOG=info \
-    timeout 90 "$BIN" \
+    timeout 180 "$BIN" \
     --screenshot-dir "$TMP" \
     --ui-scale 2 || status=$?
 
 if [[ "$status" -ne 0 ]]; then
     if [[ "$status" -eq 124 ]]; then
-        echo "screenshots: the app timed out after 90s" >&2
+        echo "screenshots: the app timed out after 180s" >&2
     else
         echo "screenshots: the app exited with status $status" >&2
     fi
@@ -98,6 +98,7 @@ fi
 python3 "$ROOT/scripts/check_screenshots.py" "$TMP"
 
 mkdir -p "$OUT"
-cp "$TMP/perseid-main.png" "$TMP/perseid-memory.png" "$OUT/"
-echo "Updated $OUT/perseid-main.png"
-echo "Updated $OUT/perseid-memory.png"
+for png in "$TMP"/*.png; do
+    cp "$png" "$OUT/"
+    echo "Updated $OUT/$(basename "$png")"
+done

@@ -13,12 +13,28 @@ use std::time::{Duration, SystemTime};
 
 use crate::proxy::{CapturedBody, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
 
-/// Default cap on captured request/response body bytes retained by history.
+/// Fallback cap when the platform does not report physical memory.
+pub const FALLBACK_HISTORY_BYTES: usize = 256 * 1024 * 1024;
+
+/// Never hand the history less than this, even on a tiny reported machine.
+pub const MIN_HISTORY_BYTES: usize = 64 * 1024 * 1024;
+
+/// Default total captured request/response body budget: half of physical RAM.
 ///
 /// The exchange-count limit alone allowed a worst case of roughly 4 GiB with
 /// 1 MiB per body and 2,000 exchanges. This budget bounds the bodies themselves;
 /// exchange metadata and display caches add a small amount on top.
-pub const DEFAULT_HISTORY_BYTES: usize = 256 * 1024 * 1024;
+pub fn default_history_bytes() -> usize {
+    crate::memory::physical_memory_bytes()
+        .map(history_budget_for)
+        .unwrap_or(FALLBACK_HISTORY_BYTES)
+}
+
+/// Split a machine's physical memory in half, with a small floor for unusual
+/// or malformed reports. Kept separate so the arithmetic is testable.
+fn history_budget_for(physical_bytes: u64) -> usize {
+    usize::try_from((physical_bytes / 2).max(MIN_HISTORY_BYTES as u64)).unwrap_or(usize::MAX)
+}
 
 /// Where an exchange is in its lifecycle.
 #[derive(Debug)]
@@ -186,6 +202,11 @@ impl History {
     /// Captured request/response body bytes currently retained.
     pub fn retained_bytes(&self) -> usize {
         self.retained_bytes
+    }
+
+    /// Total retained-body budget for this history.
+    pub fn byte_limit(&self) -> usize {
+        self.byte_limit
     }
 
     pub fn clear(&mut self) {
@@ -380,8 +401,15 @@ mod tests {
     }
 
     #[test]
+    fn history_budget_is_half_of_physical_memory_with_a_floor() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(history_budget_for(8 * GIB), 4 * GIB as usize);
+        assert_eq!(history_budget_for(64 * 1024 * 1024), MIN_HISTORY_BYTES);
+    }
+
+    #[test]
     fn folds_events_into_items() {
-        let mut history = History::new(10, DEFAULT_HISTORY_BYTES);
+        let mut history = History::new(10, FALLBACK_HISTORY_BYTES);
         history.apply(started(1, "GET"));
         assert_eq!(history.len(), 1);
         assert_eq!(history.in_flight(), 1);
@@ -408,7 +436,7 @@ mod tests {
 
     #[test]
     fn connect_tunnels_do_not_create_rows_or_consume_request_numbers() {
-        let mut history = History::new(10, DEFAULT_HISTORY_BYTES);
+        let mut history = History::new(10, FALLBACK_HISTORY_BYTES);
         history.apply(connect_started(1));
         history.apply(ProxyEvent::ResponseHead {
             id: 1,
@@ -443,7 +471,7 @@ mod tests {
 
     #[test]
     fn evicts_oldest_beyond_limit() {
-        let mut history = History::new(2, DEFAULT_HISTORY_BYTES);
+        let mut history = History::new(2, FALLBACK_HISTORY_BYTES);
         for id in 1..=5 {
             history.apply(started(id, "GET"));
         }
@@ -457,7 +485,7 @@ mod tests {
 
     #[test]
     fn finisher_after_eviction_is_ignored() {
-        let mut history = History::new(1, DEFAULT_HISTORY_BYTES);
+        let mut history = History::new(1, FALLBACK_HISTORY_BYTES);
         history.apply(started(1, "GET"));
         history.apply(started(2, "GET"));
         history.apply(finished(1));
@@ -501,7 +529,7 @@ mod tests {
 
     #[test]
     fn interrupts_in_flight_rows_and_accepts_late_finish() {
-        let mut history = History::new(10, DEFAULT_HISTORY_BYTES);
+        let mut history = History::new(10, FALLBACK_HISTORY_BYTES);
         history.apply(started(1, "GET"));
         history.apply(started(2, "GET"));
 

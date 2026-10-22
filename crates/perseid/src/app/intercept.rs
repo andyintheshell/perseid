@@ -8,16 +8,19 @@
 
 use std::collections::BTreeSet;
 
-use crate::highlight;
-use crate::proxy::{CapturedBody, InterceptError, InterceptItem, InterceptKey, InterceptKind};
-use egui::{Align, Label, TextEdit};
+use crate::proxy::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
+use egui::{Align, Label};
 use egui_extras::{Column, TableBuilder};
 
+use super::message_view::{message_editor, message_tabs, message_text, message_view_text};
 use super::util::request_info_url;
-use super::widgets::empty_state;
+use super::widgets::{empty_state, table_frame};
 use super::*;
 
 const INTERCEPT_EDITOR_ID: &str = "perseid.proxy.intercept.editor";
+/// Keep interception message editor state separate from history entries, which
+/// can use the same exchange id.
+const INTERCEPT_MESSAGE_ID: u64 = 1 << 63;
 
 /// One held message together with the user's in-progress edits.
 pub(super) struct InterceptEntry {
@@ -31,7 +34,7 @@ impl InterceptEntry {
         Self { item, draft }
     }
 
-    fn key(&self) -> InterceptKey {
+    pub(super) fn key(&self) -> InterceptKey {
         self.item.key()
     }
 }
@@ -41,7 +44,12 @@ pub(super) struct InterceptDraft {
     pub head: String,
     pub body: String,
     pub body_editable: bool,
-    pub binary_preview: Option<String>,
+    pub view: MessageView,
+    /// Complete Raw buffer, including the body when it is editable.
+    pub raw: String,
+    /// Read-only Pretty/Hex representations rebuilt after Raw edits.
+    pub views: MessageViews,
+    pub views_dirty: bool,
     pub error: Option<String>,
 }
 
@@ -49,24 +57,59 @@ impl InterceptDraft {
     fn from_item(item: &InterceptItem) -> Self {
         let body = item.body();
         let body_editable = body.is_some() && item.body_is_text();
-        let (body_text, binary_preview) = match body {
-            Some(bytes) if body_editable => (String::from_utf8_lossy(bytes).into_owned(), None),
-            Some(bytes) => (
-                String::new(),
-                Some(view::format_binary_preview(&CapturedBody::from_bytes(
-                    bytes.to_vec(),
-                ))),
-            ),
-            None => (String::new(), None),
+        let body_text = if body_editable {
+            String::from_utf8_lossy(body.unwrap_or_default()).into_owned()
+        } else {
+            String::new()
         };
+        let head = view::canonicalize_editor_head(item.head());
+        let raw = if body_editable {
+            format!("{head}{body_text}")
+        } else {
+            head.clone()
+        };
+        let views = view::editor_views(&head, body.unwrap_or_default());
 
         Self {
-            head: item.head().to_string(),
+            head,
             body: body_text,
             body_editable,
-            binary_preview,
+            view: MessageView::Pretty,
+            raw,
+            views,
+            views_dirty: false,
             error: None,
         }
+    }
+
+    /// Split an edited Raw message back into the head and body that forwarding
+    /// expects. Pretty/Hex formatting is deferred until those views are opened
+    /// so typing in a large body does not reformat it on every keystroke.
+    fn sync_from_raw(&mut self) {
+        let normalized = self.raw.replace("\r\n", "\n");
+        if let Some(index) = normalized.find("\n\n") {
+            self.head = normalized[..index + 2].to_string();
+            self.body = normalized[index + 2..].to_string();
+        } else {
+            self.head = normalized;
+            self.body.clear();
+        }
+        self.views_dirty = true;
+        self.error = None;
+    }
+
+    /// Rebuild the bounded Pretty/Hex previews after a Raw edit.
+    fn refresh_views(&mut self, binary_body: &[u8]) {
+        if !self.views_dirty {
+            return;
+        }
+        let body = if self.body_editable {
+            self.body.as_bytes()
+        } else {
+            binary_body
+        };
+        self.views = view::editor_views(&self.head, body);
+        self.views_dirty = false;
     }
 }
 
@@ -133,51 +176,11 @@ impl PerseidApp {
         } else {
             self.intercept_selected.len()
         };
-        let listener = self
-            .proxy
-            .as_ref()
-            .map(Proxy::local_addr)
-            .unwrap_or(self.listen);
 
         egui::Frame::NONE
             .fill(theme::SURFACE)
-            .inner_margin(egui::Margin::symmetric(12, 6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Intercept")
-                            .size(17.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    if pending > 0 {
-                        ui.colored_label(theme::AMBER, format!("{pending} held"));
-                    }
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            self.capture_toggle(ui);
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(listener.to_string())
-                                    .monospace()
-                                    .small()
-                                    .color(theme::TEXT_MUTED),
-                            );
-                            if self.proxy.is_some() {
-                                ui.colored_label(theme::GREEN, "listening");
-                            } else {
-                                ui.colored_label(theme::RED, "not running");
-                                if ui.button("Retry").clicked() {
-                                    let notify = self.notify.clone();
-                                    self.start_proxy(notify);
-                                }
-                            }
-                        },
-                    );
-                });
-                ui.add_space(5.0);
-
                 // Burp's Intercept tab has one master on/off control. Requests
                 // are held by default; responses are a separate, opt-in rule
                 // set and stay off until explicitly enabled here.
@@ -189,7 +192,7 @@ impl PerseidApp {
                         } else {
                             "Intercept is off"
                         })
-                        .size(13.5)
+                        .size(12.0)
                         .strong()
                         .color(if on { Color32::WHITE } else { theme::TEXT }),
                     )
@@ -206,8 +209,8 @@ impl PerseidApp {
                             theme::BORDER
                         },
                     ))
-                    .corner_radius(5.0)
-                    .min_size(egui::vec2(136.0, 30.0));
+                    .corner_radius(3.0)
+                    .min_size(egui::vec2(112.0, 24.0));
                     if ui
                         .add(toggle)
                         .on_hover_text(if on {
@@ -276,52 +279,37 @@ impl PerseidApp {
                     {
                         drop_all = true;
                     }
-                });
 
-                ui.add_space(4.0);
-                let decrypting = self.tls_intercept && self.tls_ca.is_some();
-                let holding_message = if self.intercept_enabled {
-                    if self.intercept_responses {
-                        if decrypting {
-                            "New HTTP and decrypted HTTPS requests and responses will wait here."
-                        } else {
-                            "New HTTP requests and responses will wait here. HTTPS stays an opaque CONNECT tunnel."
-                        }
-                    } else if decrypting {
-                        "New HTTP and decrypted HTTPS requests will wait here."
-                    } else {
-                        "New HTTP requests will wait here. HTTPS stays an opaque CONNECT tunnel."
+                    if pending > 0 {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.colored_label(theme::AMBER, format!("{pending} held"));
+                            },
+                        );
                     }
-                } else {
-                    "New HTTP traffic is forwarded automatically."
-                };
-                ui.label(
-                    RichText::new(holding_message)
-                        .small()
-                        .color(if self.intercept_enabled {
-                            theme::ACCENT_DARK
-                        } else {
-                            theme::TEXT_MUTED
-                        }),
-                );
-                let https_hint = if decrypting {
-                    "HTTPS is decrypted into ordinary HTTP messages."
-                } else {
-                    "HTTPS is CONNECT passthrough; enable decryption in Proxy > TLS."
-                };
-                ui.label(
-                    RichText::new(format!(
-                        "{https_hint} Bodies over {} are held for header edits only.",
-                        view::human_bytes(self.intercept_limit as u64)
-                    ))
-                    .small()
-                    .color(theme::TEXT_MUTED),
-                );
+                });
                 if let Some(error) = &self.proxy_error {
                     ui.label(RichText::new(error).small().color(theme::RED));
                 }
             });
 
+        let pending = self.intercept_queue.len();
+        if pending > 0 {
+            egui::Panel::bottom(INTERCEPT_EDITOR_ID)
+                .resizable(true)
+                .default_size(320.0)
+                .min_size(180.0)
+                .frame(
+                    egui::Frame::NONE
+                        .fill(theme::SURFACE)
+                        .inner_margin(egui::Margin::same(5)),
+                )
+                .show(ui, |ui| self.intercept_editor(ui));
+        }
+
+        // Decide after the editor has processed this frame's input so a click
+        // on Forward cannot forward the draft from before the last keystroke.
         if forward_selected {
             self.decide_intercept(true, false);
         }
@@ -333,20 +321,6 @@ impl PerseidApp {
         }
         if drop_all {
             self.decide_intercept(false, true);
-        }
-
-        let pending = self.intercept_queue.len();
-        if pending > 0 {
-            egui::Panel::bottom(INTERCEPT_EDITOR_ID)
-                .resizable(true)
-                .default_size(300.0)
-                .min_size(220.0)
-                .frame(
-                    egui::Frame::NONE
-                        .fill(theme::SURFACE)
-                        .inner_margin(egui::Margin::same(8)),
-                )
-                .show(ui, |ui| self.intercept_editor(ui));
         }
 
         let mut clicked = None;
@@ -402,111 +376,113 @@ impl PerseidApp {
         let selected = &self.intercept_selected;
         let queue = &self.intercept_queue;
 
-        let mut table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .sense(egui::Sense::click())
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::exact(74.0))
-            .column(Column::exact(54.0))
-            .column(Column::exact(78.0))
-            .column(Column::exact(70.0))
-            .column(Column::initial(500.0).at_least(180.0))
-            .column(Column::exact(78.0))
-            .column(Column::remainder().at_least(64.0));
+        table_frame(ui, |ui| {
+            let mut table = TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .sense(egui::Sense::click())
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::exact(64.0))
+                .column(Column::exact(44.0))
+                .column(Column::exact(68.0))
+                .column(Column::exact(56.0))
+                .column(Column::initial(500.0).at_least(180.0))
+                .column(Column::exact(68.0))
+                .column(Column::remainder().at_least(64.0));
 
-        if let Some(index) = scroll_to {
-            table = table.scroll_to_row(index, Some(Align::Center));
-        }
+            if let Some(index) = scroll_to {
+                table = table.scroll_to_row(index, Some(Align::Center));
+            }
 
-        table
-            .header(22.0, |mut header| {
-                for title in [
-                    "Time",
-                    "Type",
-                    "Direction",
-                    "Method",
-                    "URL",
-                    "Status code",
-                    "Length",
-                ] {
-                    header.col(|ui| {
-                        ui.label(
-                            RichText::new(title)
-                                .strong()
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
-                }
-            })
-            .body(|body| {
-                body.rows(22.0, rows, |mut row| {
-                    let index = row.index();
-                    let Some(entry) = queue.get(index) else {
-                        return;
-                    };
-                    let key = entry.key();
-                    let item = &entry.item;
-                    let request = item.request();
-                    let url = request_info_url(request);
-                    row.set_selected(selected.contains(&key));
-
-                    row.col(|ui| {
-                        ui.label(
-                            RichText::new(view::format_time(item.timestamp()))
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
-                    });
-                    row.col(|ui| {
-                        ui.label(RichText::new("HTTP").small().color(theme::TEXT_MUTED));
-                    });
-                    row.col(|ui| {
-                        let (direction, color) = match item.kind() {
-                            InterceptKind::Request => ("Request", theme::TEXT),
-                            InterceptKind::Response => ("Response", theme::ACCENT_DARK),
-                        };
-                        ui.label(RichText::new(direction).small().color(color));
-                    });
-                    row.col(|ui| {
-                        ui.label(RichText::new(&request.method).color(theme::TEXT));
-                    });
-                    row.col(|ui| {
-                        ui.add(Label::new(RichText::new(&url).color(theme::TEXT)).truncate())
-                            .on_hover_text(&url);
-                    });
-                    row.col(|ui| {
-                        let status = item.response_status();
-                        let text = status.map(|code| code.to_string()).unwrap_or_default();
-                        let color = status.map(status_color).unwrap_or(theme::TEXT_MUTED);
-                        ui.label(RichText::new(text).color(color));
-                    });
-                    row.col(|ui| {
-                        let length = match item.kind() {
-                            InterceptKind::Response => item
-                                .body()
-                                .map(|body| view::human_bytes(body.len() as u64))
-                                .unwrap_or_else(|| "—".to_string()),
-                            InterceptKind::Request => String::new(),
-                        };
-                        ui.label(RichText::new(length).small().color(theme::TEXT_MUTED));
-                    });
-
-                    let hover = match item.kind() {
-                        InterceptKind::Request => format!("{url}\nHeld request"),
-                        InterceptKind::Response => {
-                            format!(
-                                "{url}\nHeld response to {} {}",
-                                request.method, request.path
-                            )
-                        }
-                    };
-                    if row.response().on_hover_text(hover).clicked() {
-                        *clicked = Some((key, modifiers.command, modifiers.shift));
+            table
+                .header(18.0, |mut header| {
+                    for title in [
+                        "Time",
+                        "Type",
+                        "Direction",
+                        "Method",
+                        "URL",
+                        "Status code",
+                        "Length",
+                    ] {
+                        header.col(|ui| {
+                            ui.label(
+                                RichText::new(title)
+                                    .strong()
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
                     }
+                })
+                .body(|body| {
+                    body.rows(18.0, rows, |mut row| {
+                        let index = row.index();
+                        let Some(entry) = queue.get(index) else {
+                            return;
+                        };
+                        let key = entry.key();
+                        let item = &entry.item;
+                        let request = item.request();
+                        let url = request_info_url(request);
+                        row.set_selected(selected.contains(&key));
+
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(view::format_time(item.timestamp()))
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.label(RichText::new("HTTP").small().color(theme::TEXT_MUTED));
+                        });
+                        row.col(|ui| {
+                            let (direction, color) = match item.kind() {
+                                InterceptKind::Request => ("Request", theme::TEXT),
+                                InterceptKind::Response => ("Response", theme::ACCENT_DARK),
+                            };
+                            ui.label(RichText::new(direction).small().color(color));
+                        });
+                        row.col(|ui| {
+                            ui.label(RichText::new(&request.method).color(theme::TEXT));
+                        });
+                        row.col(|ui| {
+                            ui.add(Label::new(RichText::new(&url).color(theme::TEXT)).truncate())
+                                .on_hover_text(&url);
+                        });
+                        row.col(|ui| {
+                            let status = item.response_status();
+                            let text = status.map(|code| code.to_string()).unwrap_or_default();
+                            let color = status.map(status_color).unwrap_or(theme::TEXT_MUTED);
+                            ui.label(RichText::new(text).color(color));
+                        });
+                        row.col(|ui| {
+                            let length = match item.kind() {
+                                InterceptKind::Response => item
+                                    .body()
+                                    .map(|body| view::human_bytes(body.len() as u64))
+                                    .unwrap_or_else(|| "—".to_string()),
+                                InterceptKind::Request => String::new(),
+                            };
+                            ui.label(RichText::new(length).small().color(theme::TEXT_MUTED));
+                        });
+
+                        let hover = match item.kind() {
+                            InterceptKind::Request => format!("{url}\nHeld request"),
+                            InterceptKind::Response => {
+                                format!(
+                                    "{url}\nHeld response to {} {}",
+                                    request.method, request.path
+                                )
+                            }
+                        };
+                        if row.response().on_hover_text(hover).clicked() {
+                            *clicked = Some((key, modifiers.command, modifiers.shift));
+                        }
+                    });
                 });
-            });
+        });
     }
 
     fn active_intercept_index(&self) -> Option<usize> {
@@ -636,168 +612,98 @@ impl PerseidApp {
             return;
         };
 
-        egui::ScrollArea::vertical()
-            .id_salt("perseid.intercept.editor.scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let InterceptEntry { item, draft } = &mut self.intercept_queue[index];
-                let kind = item.kind();
-                let method = item.request().method.clone();
-                let path = item.request().path.clone();
-                let body_buffered = item.body().is_some();
-                let body_len = item.body().map(<[u8]>::len).unwrap_or(0);
-                let body_is_text = item.body_is_text();
-                let id = item.id();
-                let title = match kind {
-                    InterceptKind::Request => "Request",
-                    InterceptKind::Response => "Response",
-                };
-                let detail = match kind {
-                    InterceptKind::Request => format!("{method} {path}"),
-                    InterceptKind::Response => format!("response to {method} {path}"),
-                };
+        let InterceptEntry { item, draft } = &mut self.intercept_queue[index];
+        let kind = item.kind();
+        let method = item.request().method.clone();
+        let path = item.request().path.clone();
+        let body_buffered = item.body().is_some();
+        let body_len = item.body().map(<[u8]>::len).unwrap_or(0);
+        let body_is_text = item.body_is_text();
+        let head_has_body = head_declares_body(item.head());
+        let id = item.id() ^ INTERCEPT_MESSAGE_ID;
+        let pane = match kind {
+            InterceptKind::Request => MessagePane::Request,
+            InterceptKind::Response => MessagePane::Response,
+        };
+        let title = match kind {
+            InterceptKind::Request => "Request",
+            InterceptKind::Response => "Response",
+        };
+        let detail = match kind {
+            InterceptKind::Request => format!("{method} {path}"),
+            InterceptKind::Response => format!("response to {method} {path}"),
+        };
 
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(title)
-                            .size(15.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    ui.label(
-                        RichText::new(detail)
-                            .monospace()
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                    );
-                    if selected_count > 1 {
-                        ui.colored_label(
-                            theme::TEXT_MUTED,
-                            format!("{selected_count} selected"),
-                        );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(title).strong().color(theme::TEXT));
+            ui.label(
+                RichText::new(detail)
+                    .monospace()
+                    .small()
+                    .color(theme::TEXT_MUTED),
+            );
+            if selected_count > 1 {
+                ui.colored_label(theme::TEXT_MUTED, format!("{selected_count} selected"));
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(error) = &draft.error {
+                    ui.add(Label::new(RichText::new(error).small().color(theme::RED)).truncate())
+                        .on_hover_text(error);
+                }
+                let (body_status, body_color) = if body_buffered {
+                    let size = view::human_bytes(body_len as u64);
+                    if body_is_text && draft.view == MessageView::Raw {
+                        (format!("{size} · editable"), theme::TEXT_MUTED)
+                    } else if body_is_text {
+                        (format!("{size} · edit in Raw"), theme::TEXT_MUTED)
+                    } else {
+                        (
+                            format!("{size} · binary body, read-only (see Hex)"),
+                            theme::AMBER,
+                        )
                     }
-                });
-                ui.add_space(3.0);
-
-                let body_status = if body_buffered {
-                    format!(
-                        "Body: {} ({})",
-                        view::human_bytes(body_len as u64),
-                        if body_is_text {
-                            "editable text"
-                        } else {
-                            "binary, read-only"
-                        }
+                } else if head_has_body {
+                    (
+                        "body not buffered · header edits only".to_string(),
+                        theme::AMBER,
                     )
                 } else {
-                    "Body: not buffered because it is large or streaming; header edits only"
-                        .to_string()
+                    ("no body".to_string(), theme::TEXT_MUTED)
                 };
-                ui.label(
-                    RichText::new(body_status)
-                        .small()
-                        .color(if body_buffered {
-                            theme::TEXT_MUTED
-                        } else {
-                            theme::AMBER
-                        }),
-                );
-                ui.add_space(3.0);
-
-                let font = egui::FontId::monospace(highlight::MESSAGE_FONT_SIZE);
-                let mut head_layouter =
-                    |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-                        let job = highlight::message_job(buffer.as_str(), wrap_width, &font);
-                        ui.fonts_mut(|fonts| fonts.layout_job(job))
-                    };
-                let mut body_layouter =
-                    |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-                        let job = highlight::body_job(buffer.as_str(), wrap_width, &font);
-                        ui.fonts_mut(|fonts| fonts.layout_job(job))
-                    };
-
-                ui.label(RichText::new("Head").strong().color(theme::TEXT));
-                egui::Frame::NONE
-                    .fill(Color32::WHITE)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
-                    .corner_radius(4.0)
-                    .inner_margin(egui::Margin::same(6))
-                    .show(ui, |ui| {
-                        if ui
-                            .add(
-                                TextEdit::multiline(&mut draft.head)
-                                    .code_editor()
-                                    .font(egui::FontSelection::FontId(font.clone()))
-                                    .layouter(&mut head_layouter)
-                                    .desired_rows(7)
-                                    .desired_width(f32::INFINITY),
-                            )
-                            .changed()
-                        {
-                            draft.error = None;
-                        }
-                    });
-                ui.add_space(6.0);
-
-                ui.label(RichText::new("Body").strong().color(theme::TEXT));
-                if draft.body_editable {
-                    egui::Frame::NONE
-                        .fill(Color32::WHITE)
-                        .stroke(Stroke::new(1.0, theme::BORDER))
-                        .corner_radius(4.0)
-                        .inner_margin(egui::Margin::same(6))
-                        .show(ui, |ui| {
-                            if ui
-                                .add(
-                                    TextEdit::multiline(&mut draft.body)
-                                        .code_editor()
-                                        .font(egui::FontSelection::FontId(font.clone()))
-                                        .layouter(&mut body_layouter)
-                                        .desired_rows(9)
-                                        .desired_width(f32::INFINITY),
-                                )
-                                .changed()
-                            {
-                                draft.error = None;
-                            }
-                        });
-                } else if let Some(preview) = &draft.binary_preview {
-                    egui::Frame::NONE
-                        .fill(theme::SURFACE_TINT)
-                        .stroke(Stroke::new(1.0, theme::BORDER))
-                        .corner_radius(4.0)
-                        .inner_margin(egui::Margin::same(6))
-                        .show(ui, |ui| {
-                            egui::ScrollArea::both()
-                                .id_salt(("perseid.intercept.binary", id, kind))
-                                .max_height(240.0)
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    ui.add(
-                                        Label::new(
-                                            RichText::new(preview).monospace().color(theme::TEXT),
-                                        )
-                                        .selectable(true)
-                                        .wrap_mode(egui::TextWrapMode::Extend),
-                                    );
-                                });
-                        });
-                } else {
-                    ui.label(
-                        RichText::new(
-                            "This body is not buffered. Forward the message with the original body, or edit the head.",
-                        )
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                    );
-                }
-
-                if let Some(error) = &draft.error {
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(error).small().color(theme::RED));
-                }
+                ui.label(RichText::new(body_status).small().color(body_color));
             });
+        });
+        ui.add_space(1.0);
+        message_tabs(ui, &mut draft.view);
+        ui.add_space(1.0);
+
+        let mode = draft.view;
+        if mode == MessageView::Raw {
+            if message_editor(ui, id, pane, mode, &mut draft.raw) {
+                draft.sync_from_raw();
+            }
+        } else {
+            draft.refresh_views(item.body().unwrap_or_default());
+            message_text(ui, id, pane, mode, message_view_text(&draft.views, mode));
+        }
     }
+}
+
+fn head_declares_body(head: &str) -> bool {
+    head.lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .any(|line| {
+            let Some((name, value)) = line.split_once(':') else {
+                return false;
+            };
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<u64>().is_ok_and(|len| len > 0)
+            } else {
+                name.trim().eq_ignore_ascii_case("transfer-encoding")
+            }
+        })
 }
 
 fn status_color(status: u16) -> Color32 {
@@ -807,5 +713,58 @@ fn status_color(status: u16) -> Color32 {
         theme::AMBER
     } else {
         theme::GREEN
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn draft_with_raw(raw: &str) -> InterceptDraft {
+        let head = "POST /items HTTP/1.1\nHost: example.com\n\n";
+        InterceptDraft {
+            head: head.to_string(),
+            body: "old".to_string(),
+            body_editable: true,
+            view: MessageView::Raw,
+            raw: raw.to_string(),
+            views: view::editor_views(head, b"old"),
+            views_dirty: false,
+            error: Some("stale error".to_string()),
+        }
+    }
+
+    #[test]
+    fn raw_edits_split_into_head_and_body_on_the_first_blank_line() {
+        let mut draft =
+            draft_with_raw("POST /changed HTTP/1.1\nHost: example.com\n\nnew body\nwith lines");
+        draft.sync_from_raw();
+
+        assert_eq!(draft.head, "POST /changed HTTP/1.1\nHost: example.com\n\n");
+        assert_eq!(draft.body, "new body\nwith lines");
+        assert!(draft.views_dirty, "formatting should be deferred");
+        assert!(draft.error.is_none());
+    }
+
+    #[test]
+    fn deferred_views_refresh_after_a_raw_edit() {
+        let mut draft = draft_with_raw("POST /items HTTP/1.1\nHost: example.com\n\nnew body");
+        draft.sync_from_raw();
+        draft.refresh_views(&[]);
+
+        assert!(!draft.views_dirty);
+        assert!(draft.views.raw.contains("new body"));
+    }
+
+    #[test]
+    fn head_body_status_distinguishes_empty_and_unbuffered_bodies() {
+        assert!(head_declares_body("POST / HTTP/1.1\nContent-Length: 3\n\n"));
+        assert!(!head_declares_body(
+            "POST / HTTP/1.1\nContent-Length: 0\n\n"
+        ));
+        assert!(head_declares_body(
+            "POST / HTTP/1.1\nTransfer-Encoding: chunked\n\n"
+        ));
+        assert!(!head_declares_body("GET / HTTP/1.1\nHost: example.com\n\n"));
     }
 }

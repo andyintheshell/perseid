@@ -87,6 +87,40 @@ pub fn heap_in_use() -> u64 {
     HEAP_IN_USE.load(Ordering::Relaxed) as u64
 }
 
+/// Physical memory installed on this machine, when the platform exposes it.
+///
+/// This is intentionally a one-shot startup query, not the free-memory figure:
+/// the history budget should stay stable for the whole session.
+#[cfg(unix)]
+pub fn physical_memory_bytes() -> Option<u64> {
+    // SAFETY: `sysconf` only reads process/platform limits and does not retain
+    // pointers.
+    let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if pages > 0 && page_size > 0 {
+        Some((pages as u64).saturating_mul(page_size as u64))
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+pub fn physical_memory_bytes() -> Option<u64> {
+    let mut kilobytes = 0u64;
+    // SAFETY: the pointer is valid for the duration of the call.
+    let ok = unsafe {
+        windows_sys::Win32::System::SystemInformation::GetPhysicallyInstalledSystemMemory(
+            &mut kilobytes,
+        )
+    };
+    (ok != 0 && kilobytes > 0).then_some(kilobytes.saturating_mul(1024))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn physical_memory_bytes() -> Option<u64> {
+    None
+}
+
 /// Peak bytes held by the process allocator since startup.
 pub fn heap_peak() -> u64 {
     HEAP_PEAK.load(Ordering::Relaxed) as u64

@@ -62,7 +62,7 @@ running, open:
 http://127.0.0.1:8080/
 ```
 
-or use **Proxy > TLS > Open certificate page**. This works even before the
+or use **Proxy > Proxy settings > Open certificate page**. This works even before the
 browser is configured to use the proxy, because the browser is connecting
 directly to Perseid's listener. Once the proxy is configured you can also use:
 
@@ -92,7 +92,7 @@ certutil -d sql:"$HOME/.pki/nssdb" -A -t "C,," -n "Perseid CA" \
   -i "$HOME/.local/share/perseid/perseid-ca.pem"
 ```
 
-Use the path shown in **Proxy > TLS** if you overrode the CA directory. Restart
+Use the path shown in **Proxy > Proxy settings** if you overrode the CA directory. Restart
 the browser after importing.
 
 On macOS and Windows, Chrome uses the system certificate store; import the
@@ -119,7 +119,7 @@ tunnels the proxy advertises `h2` and `http/1.1` through ALPN, preferring HTTP/2
 when the client supports it. The same preference is offered to HTTPS origins,
 with HTTP/1.1 as the fallback on both sides.
 
-Interception is on by default. Turn it off in **Proxy > TLS** for the current
+Interception is on by default. Turn it off in **Proxy > Proxy settings** for the current
 run, or start with:
 
 ```sh
@@ -133,7 +133,7 @@ off. Decryption and the toggle are per-run settings; the CA itself persists.
 
 Some hosts should never be decrypted: certificate-pinned applications, online
 banking, or non-HTTP TLS protocols that happen to use `CONNECT`. Add them under
-**Proxy > TLS > Pass-through hosts**, or start Perseid with one or more
+**Proxy > Proxy settings > Pass-through hosts**, or start Perseid with one or more
 `--tls-passthrough <HOST>` flags.
 
 Matching is the same as the scope list: a host matches its exact name, its
@@ -156,7 +156,7 @@ section below.
 
 ## Regenerate or remove the CA
 
-**Proxy > TLS > Regenerate** creates a new CA in place. Browsers that trusted the
+**Proxy > Proxy settings > Regenerate** creates a new CA in place. Browsers that trusted the
 old certificate will report an untrusted certificate until they import the new
 one.
 
@@ -175,7 +175,7 @@ Removal is deliberate. Do it in this order:
 
    - macOS and Windows: remove the certificate from the system certificate
      manager.
-3. Delete the CA files with **Proxy > TLS > Delete files**, or:
+3. Delete the CA files with **Proxy > Proxy settings > Delete files**, or:
 
    ```sh
    rm -f "${PERSEID_CA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/perseid}/perseid-ca.pem" \
@@ -204,11 +204,11 @@ next time it starts; that new authority is not trusted until you import it.
   does not proxy QUIC. Disable HTTP/3/QUIC in the browser if a site insists on
   it.
 - **No decrypted rows appear:** interception is off, no CA is loaded, or the
-  host is on the pass-through list. Check the status in **Proxy > TLS**.
+  host is on the pass-through list. Check the status in **Proxy > Proxy settings**.
 - **Traffic is captured but not editable:** only bodies within
   `--intercept-limit` are buffered; larger or streaming bodies are header-only.
 - **The CA could not be created at startup:** Perseid shows the error under
-  **Proxy > TLS**. Check that the data directory is writable, or point
+  **Proxy > Proxy settings**. Check that the data directory is writable, or point
   `--ca-dir` at a writable location, then retry.
 
 ## Safety

@@ -14,8 +14,10 @@ guarantees. Treat them as a sanity check and a reproducible baseline.
 All figures in the results table are process resident set size (RSS) from Linux
 `/proc/<pid>/status` (`VmRSS` and `VmHWM`). The status bar separately reports
 allocator heap in use in its **Memory** figure. The proxy was running, capture
-was enabled, and the default limits were used: 1 MiB per captured body and
-2,000 exchanges in history.
+was enabled, and the per-message capture limit and exchange count were the
+defaults: 1 MiB per captured body and 2,000 exchanges in history. The M0 runs
+predate the half-RAM history budget and used the former 256 MiB total-history
+default.
 
 | Scenario | Current RSS | Peak RSS | Notes |
 | --- | ---: | ---: | --- |
@@ -30,12 +32,14 @@ The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
 stayed under 109 MiB peak even though the wire body was 8 MiB, because capture
 stops at 1 MiB and the detail views render bounded previews.
 
-History also has a total retained-body budget. The default is 256 MiB across
-request and response bodies (`--history-bytes`), so a worst case of 2,000
-exchanges with two full 1 MiB bodies each cannot retain the full 4 GiB. The
-oldest exchanges are evicted when either the exchange count or the byte budget
-is reached. The M0 workload retained only 125 KiB, so this budget did not bind
-in the measurements above.
+History also has a total retained-body budget. The default is half of physical
+memory, measured once at startup, with a 256 MiB fallback if the platform does
+not report installed memory (`--history-bytes` overrides it). On the 5.3 GiB
+benchmark VM this resolves to about 2.65 GiB across request and response bodies,
+so a worst case of 2,000 exchanges with two full 1 MiB bodies each still cannot
+retain the full 4 GiB. The oldest exchanges are evicted when either the exchange
+count or the byte budget is reached. The M0 workload retained only 125 KiB, so
+this budget did not bind in the measurements above.
 
 ### Heap in use and resident memory
 
@@ -118,7 +122,7 @@ graphics drivers, desktop settings, and captured content.
 | Display | X11, 2880x1800 at 200% UI scale |
 | Window | 1280x820 logical points (2560x1640 physical pixels) |
 | Toolchain | rustc 1.95.0, release build |
-| Perseid limits | 1 MiB capture limit, 2,000 exchange history |
+| Perseid limits | 1 MiB capture limit, 2,000 exchange history, 256 MiB history budget (M0) |
 
 ## Method
 
@@ -129,7 +133,8 @@ cargo build --release -p perseid
 GDK_SCALE=2 QT_SCALE_FACTOR=2 ./target/release/perseid \
   --listen 127.0.0.1:8080 \
   --capture-limit 1048576 \
-  --history-limit 2000
+  --history-limit 2000 \
+  --history-bytes 268435456
 ```
 
 For an external reading, locate the process and read its resident memory:

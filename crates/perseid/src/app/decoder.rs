@@ -23,8 +23,8 @@ use crate::view;
 
 const DECODER_TOOLBAR_ID: &str = "perseid.decoder.toolbar";
 const DECODER_PANELS_ID: &str = "perseid.decoder.panels";
-const PANEL_HEIGHT: f32 = 142.0;
-const EDITOR_HEIGHT: f32 = 122.0;
+const PANEL_HEIGHT: f32 = 126.0;
+const EDITOR_HEIGHT: f32 = 104.0;
 const HEX_BYTES_PER_ROW: usize = 8;
 const HEX_PREVIEW_LIMIT: usize = 64 * 1024;
 
@@ -44,6 +44,26 @@ impl DecoderState {
         };
         state.reset();
         state
+    }
+
+    /// Seed the documentation screenshot with a small, readable pipeline.
+    #[cfg(feature = "screenshots")]
+    pub(super) fn seed_screenshot(&mut self) {
+        self.panels.clear();
+        let id = self.allocate_id();
+        self.panels.push(Panel::new(
+            id,
+            b"alice:correct horse battery staple".to_vec(),
+            Vec::new(),
+            None,
+        ));
+        self.apply(0, engine::Transform::Encode(engine::Codec::Base64), None);
+        self.apply(
+            1,
+            engine::Transform::Hash(engine::HashAlgorithm::Sha256),
+            None,
+        );
+        self.scroll_to_end = false;
     }
 
     pub(super) fn ui(&mut self, ui: &mut egui::Ui) {
@@ -84,16 +104,10 @@ impl DecoderState {
             .frame(
                 egui::Frame::NONE
                     .fill(theme::SURFACE)
-                    .inner_margin(egui::Margin::symmetric(12, 4)),
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Decoder")
-                            .size(15.0)
-                            .strong()
-                            .color(theme::TEXT),
-                    );
                     let layers = self.panels.len().saturating_sub(1);
                     ui.label(
                         RichText::new(if layers == 1 {
@@ -340,8 +354,8 @@ fn draw_panel(ui: &mut egui::Ui, panel: &mut Panel, index: usize) -> Option<Acti
     egui::Frame::NONE
         .fill(theme::SURFACE)
         .stroke(Stroke::new(1.0, theme::BORDER))
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::same(10))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::same(7))
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 let edited = ui
@@ -390,7 +404,7 @@ fn draw_editor(ui: &mut egui::Ui, panel: &mut Panel) -> bool {
         .fill(Color32::WHITE)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(4.0)
-        .inner_margin(egui::Margin::same(6))
+        .inner_margin(egui::Margin::same(4))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.set_min_height(EDITOR_HEIGHT);

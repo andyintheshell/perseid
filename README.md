@@ -46,10 +46,11 @@ The desktop application and its interception proxy are both part of the single
   using literal text or Rust regular expressions with capture references.
 - Burp-style workspace with **Target**, **Proxy**, **Intruder**, **Repeater**,
   and **Decoder** tabs in the familiar order, in a warm light theme.
-- Bounded in-memory history (exchange count and total captured-body bytes)
-  with one row per HTTP request, filtering, a scope view filter, and keyboard
-  navigation (`j`/`k`, arrows, `Home`/`End`, `Ctrl`+`F`). `CONNECT` transport
-  tunnels do not clutter the table; decrypted HTTPS requests appear directly.
+- Bounded in-memory history (exchange count and total captured-body bytes,
+  defaulting to half of physical memory) with one row per HTTP request,
+  filtering, a scope view filter, and keyboard navigation (`j`/`k`, arrows,
+  `Home`/`End`, `Ctrl`+`F`). `CONNECT` transport tunnels do not clutter the
+  table; decrypted HTTPS requests appear directly.
 - Live **Memory** indicator in the status bar with allocator memory in use;
   click it for the current and peak values and a rolling graph.
 - Request/response tabs with Burp's Pretty, Raw, and Hex views, plus size and
@@ -97,7 +98,7 @@ cargo run -p perseid
 The proxy listens on `127.0.0.1:8080` and the Perseid window opens. Perseid
 creates its local CA on first launch, opens a certificate setup window, and
 intercepts HTTPS by default. Open `http://127.0.0.1:8080/` directly, or use
-**Proxy > TLS > Open certificate page**, to download and install the certificate
+**Proxy > Proxy settings > Open certificate page**, to download and install the certificate
 in your browser. Then point the browser — or an extension such as FoxyProxy —
 at `127.0.0.1:8080` for HTTP and HTTPS. To hold HTTP (and decrypted HTTPS) traffic, open **Proxy > Intercept**
 and click **Intercept is off** once to turn interception on. Full trust and
@@ -114,6 +115,7 @@ Detailed setup, CLI flags, HiDPI behavior, and current limitations:
 | Document | Contents |
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Build, run, proxy setup, options, limitations |
+| [Screenshots](docs/screenshots.md) | Full-window preview of every UI tab |
 | [HTTPS interception](docs/tls.md) | Automatic local CA, certificate page, browser trust and removal, pass-through hosts |
 | [Design](docs/design.md) | Principles, architecture, technology, performance |
 | [Performance and memory](docs/performance.md) | M0 measurements, idle RSS breakdown, and method |

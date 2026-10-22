@@ -14,10 +14,19 @@ import sys
 from pathlib import Path
 
 # name -> (expected width, minimum height, maximum height)
-EXPECTED = {
-    "perseid-main.png": (1620, 900, 1200),
-    "perseid-memory.png": (970, 400, 900),
-}
+FULL_WINDOW_SCENES = [
+    "perseid-main.png",
+    "perseid-target-site-map.png",
+    "perseid-target-scope.png",
+    "perseid-proxy-intercept.png",
+    "perseid-proxy-match-replace.png",
+    "perseid-proxy-tls.png",
+    "perseid-intruder.png",
+    "perseid-repeater.png",
+    "perseid-decoder.png",
+]
+EXPECTED = {name: (1620, 900, 1200) for name in FULL_WINDOW_SCENES}
+EXPECTED["perseid-memory.png"] = (970, 400, 900)
 MIN_BYTES = 10_000
 
 
