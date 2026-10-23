@@ -113,6 +113,9 @@ const SEARCH_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::F,
 );
+#[cfg(target_os = "macos")]
+const FULL_SCREEN_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND), Key::F);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum MainTab {
@@ -174,6 +177,31 @@ enum WindowControl {
     Minimize,
     Maximize,
     Close,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowControlAction {
+    Fullscreen(bool),
+    Maximized(bool),
+}
+
+fn window_control_action(
+    is_macos: bool,
+    fullscreen: bool,
+    maximized: bool,
+    option_held: bool,
+) -> WindowControlAction {
+    if !is_macos {
+        return WindowControlAction::Maximized(!maximized);
+    }
+
+    if fullscreen {
+        WindowControlAction::Fullscreen(false)
+    } else if option_held {
+        WindowControlAction::Maximized(!maximized)
+    } else {
+        WindowControlAction::Fullscreen(true)
+    }
 }
 
 pub struct PerseidApp {
@@ -277,7 +305,12 @@ struct WebSocketDetailCache {
 }
 
 /// Draw one custom title-bar window control.
-fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) -> egui::Response {
+fn window_control(
+    ui: &mut egui::Ui,
+    control: WindowControl,
+    maximized: bool,
+    fullscreen: bool,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(26.0, 22.0), egui::Sense::click());
     let hovered = response.hovered();
     let (fill, color) = match control {
@@ -301,7 +334,7 @@ fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) ->
                 stroke,
             );
         }
-        WindowControl::Maximize if maximized => {
+        WindowControl::Maximize if maximized || fullscreen => {
             let back = egui::Rect::from_min_size(
                 egui::pos2(center.x - 2.0, center.y - 4.0),
                 egui::vec2(6.0, 6.0),
@@ -341,6 +374,15 @@ fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) ->
     response
         .on_hover_text(match control {
             WindowControl::Minimize => "Minimize",
+            WindowControl::Maximize if cfg!(target_os = "macos") && fullscreen => {
+                "Exit Full Screen"
+            }
+            WindowControl::Maximize if cfg!(target_os = "macos") && maximized => {
+                "Enter Full Screen (Option-click to Restore)"
+            }
+            WindowControl::Maximize if cfg!(target_os = "macos") => {
+                "Enter Full Screen (Option-click to Zoom)"
+            }
             WindowControl::Maximize if maximized => "Restore",
             WindowControl::Maximize => "Maximize",
             WindowControl::Close => "Close",
@@ -868,6 +910,12 @@ impl PerseidApp {
     fn keyboard(&mut self, ctx: &egui::Context) {
         self.zoom_shortcuts(ctx);
 
+        #[cfg(target_os = "macos")]
+        if ctx.input_mut(|input| input.consume_shortcut(&FULL_SCREEN_SHORTCUT)) {
+            let fullscreen = ctx.input(|input| input.viewport().fullscreen.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+        }
+
         if ctx.input_mut(|input| input.consume_shortcut(&SEARCH_SHORTCUT)) {
             self.search.focus_or_open();
         }
@@ -1001,9 +1049,12 @@ impl PerseidApp {
     }
 
     fn title_bar(&mut self, ui: &mut egui::Ui) {
-        let maximized = ui
-            .ctx()
-            .input(|input| input.viewport().maximized.unwrap_or(false));
+        let (maximized, fullscreen) = ui.ctx().input(|input| {
+            (
+                input.viewport().maximized.unwrap_or(false),
+                input.viewport().fullscreen.unwrap_or(false),
+            )
+        });
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
@@ -1071,6 +1122,24 @@ impl PerseidApp {
                         self.set_ui_scale(&ctx, self.base_ui_scale);
                     }
 
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.separator();
+                        let fullscreen =
+                            ctx.input(|input| input.viewport().fullscreen.unwrap_or(false));
+                        let label = if fullscreen {
+                            "Exit Full Screen"
+                        } else {
+                            "Enter Full Screen"
+                        };
+                        let fullscreen_button = egui::Button::new(label)
+                            .shortcut_text(ctx.format_shortcut(&FULL_SCREEN_SHORTCUT));
+                        if ui.add(fullscreen_button).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+                            ui.close();
+                        }
+                    }
+
                     ui.separator();
                     ui.weak(format!(
                         "UI scale: {:.0}% (system {:.0}%)",
@@ -1113,14 +1182,31 @@ impl PerseidApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if window_control(ui, WindowControl::Close, maximized).clicked() {
+                if window_control(ui, WindowControl::Close, maximized, fullscreen).clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                if window_control(ui, WindowControl::Maximize, maximized).clicked() {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                let maximize_button =
+                    window_control(ui, WindowControl::Maximize, maximized, fullscreen);
+                if maximize_button.clicked() {
+                    let option_held =
+                        cfg!(target_os = "macos") && ui.input(|input| input.modifiers.alt);
+                    match window_control_action(
+                        cfg!(target_os = "macos"),
+                        fullscreen,
+                        maximized,
+                        option_held,
+                    ) {
+                        WindowControlAction::Fullscreen(fullscreen) => {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
+                        }
+                        WindowControlAction::Maximized(maximized) => {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::Maximized(maximized));
+                        }
+                    }
                 }
-                if window_control(ui, WindowControl::Minimize, maximized).clicked() {
+                if window_control(ui, WindowControl::Minimize, maximized, fullscreen).clicked() {
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
@@ -1284,6 +1370,13 @@ impl PerseidApp {
     /// The window is undecorated so the menu can share the title-bar row with
     /// the window controls. Draw its resize border ourselves.
     fn resize_handles(&self, ui: &mut egui::Ui) {
+        if ui
+            .ctx()
+            .input(|input| input.viewport().fullscreen.unwrap_or(false))
+        {
+            return;
+        }
+
         let rect = ui.ctx().content_rect();
         let edge = 4.0;
         let corner = 10.0;
@@ -1540,5 +1633,45 @@ mod tests {
         assert_eq!(moved_row_index(5, Some(2), -10), Some(0));
         assert_eq!(moved_row_index(5, Some(0), -1), Some(0));
         assert_eq!(moved_row_index(5, Some(4), 1), Some(4));
+    }
+
+    #[test]
+    fn macos_green_control_enters_fullscreen_and_option_click_zooms() {
+        assert_eq!(
+            window_control_action(true, false, false, false),
+            WindowControlAction::Fullscreen(true)
+        );
+        assert_eq!(
+            window_control_action(true, false, false, true),
+            WindowControlAction::Maximized(true)
+        );
+        assert_eq!(
+            window_control_action(true, false, true, true),
+            WindowControlAction::Maximized(false)
+        );
+    }
+
+    #[test]
+    fn macos_green_control_exits_fullscreen() {
+        assert_eq!(
+            window_control_action(true, true, false, false),
+            WindowControlAction::Fullscreen(false)
+        );
+        assert_eq!(
+            window_control_action(true, true, false, true),
+            WindowControlAction::Fullscreen(false)
+        );
+    }
+
+    #[test]
+    fn other_platforms_keep_maximize_restore_behavior() {
+        assert_eq!(
+            window_control_action(false, false, false, false),
+            WindowControlAction::Maximized(true)
+        );
+        assert_eq!(
+            window_control_action(false, true, true, true),
+            WindowControlAction::Maximized(false)
+        );
     }
 }
