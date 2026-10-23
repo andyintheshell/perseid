@@ -106,7 +106,21 @@ pub fn run() -> eframe::Result {
         // The menu shares the title-bar row with the window controls, Burp
         // style. The app draws the drag area and resize border itself.
         .with_decorations(false);
-    if let Some(icon) = branding::window_icon() {
+    #[cfg(target_os = "macos")]
+    let running_from_app_bundle = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .is_some_and(branding::is_macos_app_bundle_executable);
+    #[cfg(not(target_os = "macos"))]
+    let running_from_app_bundle = false;
+
+    if running_from_app_bundle {
+        // eframe applies a supplied icon to NSApp at runtime, overriding the
+        // packaged .icns and macOS's native rounded-corner mask. Use its
+        // explicit OS-default sentinel; leaving the icon unset makes eframe
+        // substitute its own default icon instead.
+        viewport = viewport.with_icon(egui::IconData::default());
+    } else if let Some(icon) = branding::window_icon() {
         viewport = viewport.with_icon(icon);
     } else {
         log::warn!("could not decode the window icon");
