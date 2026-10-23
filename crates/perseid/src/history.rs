@@ -37,7 +37,7 @@ fn history_budget_for(physical_bytes: u64) -> usize {
 }
 
 /// Where an exchange is in its lifecycle.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Phase {
     InFlight,
     Finished {
@@ -47,7 +47,7 @@ pub enum Phase {
 }
 
 /// One request/response exchange as shown in the history table.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HistoryItem {
     pub id: u64,
     /// One-based request index shown in the table. This is separate from the
@@ -222,6 +222,28 @@ impl History {
         self.evicted = 0;
         self.in_flight = 0;
         self.next_number = 1;
+        self.revision += 1;
+    }
+
+    /// Replace the cache with records loaded from a project.
+    ///
+    /// The caller decides the load budget; this method preserves row numbers
+    /// and does not evict records on insertion.
+    pub fn load(&mut self, items: Vec<HistoryItem>) {
+        self.items.clear();
+        self.order.clear();
+        self.retained_bytes = 0;
+        self.in_flight = 0;
+        self.next_number = 1;
+        for item in items {
+            self.next_number = self.next_number.max(item.number.saturating_add(1));
+            if item.is_in_flight() {
+                self.in_flight += 1;
+            }
+            self.retained_bytes = self.retained_bytes.saturating_add(item_body_bytes(&item));
+            self.order.push_back(item.id);
+            self.items.insert(item.id, item);
+        }
         self.revision += 1;
     }
 
@@ -455,7 +477,7 @@ mod tests {
         );
         assert_eq!(
             history.retained_bytes(),
-            history.iter().map(item_body_bytes).sum()
+            history.iter().map(item_body_bytes).sum::<usize>()
         );
         assert_eq!(history.len(), history.iter().count());
     }

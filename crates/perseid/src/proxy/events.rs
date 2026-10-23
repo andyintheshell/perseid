@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 pub type HeaderList = Vec<(String, String)>;
 
 /// The request line and headers as received from the client.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RequestInfo {
     /// Request method (`GET`, `POST`, `CONNECT`, ...).
     pub method: String,
@@ -34,7 +34,7 @@ pub struct RequestInfo {
 }
 
 /// Status line and headers of an upstream response.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResponseHead {
     /// HTTP version of the upstream response, e.g. `HTTP/1.1` or `HTTP/2`.
     pub version: String,
@@ -134,6 +134,23 @@ impl CapturedBody {
             total,
             truncated: false,
             complete: true,
+        }
+    }
+
+    /// Restore a body from a stored snapshot. The metadata is authoritative:
+    /// `data` may be empty when the caller loaded only a row summary.
+    pub(crate) fn from_stored_parts(
+        data: Vec<u8>,
+        total: u64,
+        truncated: bool,
+        complete: bool,
+    ) -> Self {
+        let total = total.max(data.len() as u64);
+        Self {
+            data,
+            total,
+            truncated,
+            complete,
         }
     }
 

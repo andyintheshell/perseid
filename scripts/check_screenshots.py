@@ -16,6 +16,8 @@ from pathlib import Path
 # name -> (expected width, minimum height, maximum height)
 FULL_WINDOW_SCENES = [
     "perseid-main.png",
+    "perseid-project.png",
+    "perseid-project-dialog.png",
     "perseid-proxy-websockets.png",
     "perseid-target-site-map.png",
     "perseid-target-scope.png",

@@ -13,7 +13,7 @@ use crate::proxy::{
 };
 
 /// One complete text or binary WebSocket message.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WebSocketMessageItem {
     /// Unique event ID used by the UI selection.
     pub id: u64,
@@ -81,6 +81,23 @@ impl WebSocketHistory {
         self.retained_bytes = 0;
         self.evicted = 0;
         self.next_number = 1;
+        self.revision += 1;
+    }
+
+    /// Replace the cache with messages loaded from a project.
+    pub fn load(&mut self, items: Vec<WebSocketMessageItem>) {
+        self.items.clear();
+        self.order.clear();
+        self.retained_bytes = 0;
+        self.next_number = 1;
+        for item in items {
+            self.next_number = self.next_number.max(item.number.saturating_add(1));
+            self.retained_bytes = self
+                .retained_bytes
+                .saturating_add(item.payload.data().len());
+            self.order.push_back(item.id);
+            self.items.insert(item.id, item);
+        }
         self.revision += 1;
     }
 

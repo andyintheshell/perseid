@@ -11,7 +11,7 @@ The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
-[History](#proxy--http-history) · [Search](#search) ·
+[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) ·
 [WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
 [Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
 [Comparer](#comparer) · [Comparer result](#comparer-result) · [Memory](#memory-usage)
@@ -22,6 +22,21 @@ The request and response editors open side by side, with the parsed Inspector
 on the right and per-exchange Notes behind its rail tab.
 
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
+
+## Projects
+
+Perseid starts with a temporary in-memory project (`Untitled (temporary)` in
+the status bar). **File > Save Project As…** moves it into a single `.perseid`
+file; **Open Project…** switches to an existing one, and **Save Project
+Copy…** snapshots it into a new file. Once saved, captures and workbench state
+commit automatically, and the status bar shows the open project.
+
+![File menu with project commands over the HTTP history](images/perseid-project.png)
+
+The path is entered directly in the save dialog; the destination is created
+exclusively and only becomes the open project once the copy is complete.
+
+![Save Project As dialog with a destination path](images/perseid-project-dialog.png)
 
 ## Search
 
