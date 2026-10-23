@@ -197,8 +197,9 @@ not a macOS screenshot command; macOS contributors can use the workflow artifact
 The screenshots contain synthetic demo traffic, never captured traffic. The
 separate [Screenshots workflow](.github/workflows/screenshots.yml) runs the
 same script on UI changes, verifies the PNGs, uploads them as artifacts, and
-posts or updates a pull-request comment containing the full-window preview of
-every tab. The pull-request workflow always starts and uses a small
+posts or updates a pull-request comment with one link to the generated Markdown
+gallery page; it no longer embeds every image in the PR thread. Forks can use
+the workflow artifact. The pull-request workflow always starts and uses a small
 change-detection job to skip the screenshot build when no relevant paths
 changed. That keeps a skipped run from leaving a required check pending.
 
@@ -207,7 +208,8 @@ changed. That keeps a skipped run from leaving a required check pending.
 | Path | Contents |
 | --- | --- |
 | `crates/perseid/src/proxy/` | Embedded proxy: listener, forwarding, CONNECT tunnels, capture, events, and the direct Repeater client. |
-| `crates/perseid/src/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
+| `crates/perseid/src/project/` | redb project schema, records, writer, queries, and Save As/Copy transfer. |
+| `crates/perseid/src/app/` | egui desktop modules: project UI, history views, tools, theme, and keyboard handling. |
 | `crates/perseid/tests/` | End-to-end proxy and Repeater tests. |
 | `crates/perseid/examples/` | Headless proxy smoke-test example. |
 | `docs/` | [User guides and technical references](docs/README.md). |
@@ -231,7 +233,8 @@ through the bounded channel.
   distinguish desktop from library defaults, and do not advertise untested
   platforms or historical benchmarks as current release guarantees.
 - Use synthetic examples. Preserve warnings about CA trust, sensitive traffic,
-  in-memory state, and Repeater bypassing proxy scope.
+  temporary versus saved project state, plaintext project files, and Repeater
+  bypassing proxy scope.
 - Keep `Cargo.lock` in use with `--locked` in reproducible build/run examples.
   Do not change dependency versions just to update documentation.
 
@@ -241,10 +244,10 @@ through the bounded channel.
   practical.
 - Add or update tests for proxy, history, and scope behavior.
 - For UI changes, include a screenshot. Every UI tab must be represented; the
-  Screenshots workflow posts or updates a comment with all tab previews for
-  same-repository pull requests. If that automatic comment is unavailable
-  (for example, on a fork), link the workflow artifact or attach the previews
-  to the pull request yourself.
+  Screenshots workflow posts or updates a comment with one link to the full
+  gallery for same-repository pull requests. If that automatic comment is
+  unavailable (for example, on a fork), link the workflow artifact or attach
+  the previews to the pull request yourself.
 - Update the [roadmap](docs/roadmap.md), [parity matrix](docs/burp-parity.md),
   or user docs when a change affects them.
 

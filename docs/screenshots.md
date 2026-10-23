@@ -4,9 +4,10 @@
 [Getting started](getting-started.md)
 
 These full-window scenes are generated deterministically by
-`scripts/screenshots.sh`. The same images are uploaded by CI and posted to
-same-repository pull requests so every UI tab is reviewed together; forks can
-use workflow artifacts. Traffic and credentials in these scenes are synthetic.
+`scripts/screenshots.sh`. CI uploads the images as an artifact. Same-repository
+pull requests get one comment linking to a generated Markdown gallery page on
+the preview branch; the images are not embedded in the PR thread. Forks can use
+workflow artifacts. Traffic and credentials in these scenes are synthetic.
 The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.

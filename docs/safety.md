@@ -19,10 +19,14 @@ aids, not permission to test an arbitrary host.
   have a specific reason and understand the exposure.
 - Captured request and response bodies are capped by `--capture-limit`
   (1 MiB per message by default).
-- History is bounded by `--history-limit` (2000 exchanges by default) and
-  `--history-bytes` (half of physical memory by default, with a 256 MiB
-  fallback when the platform does not report installed memory). The oldest
-  exchanges are evicted when either bound is reached.
+- The HTTP and WebSocket history **UI caches** each accept up to
+  `--history-limit` (2000 entries by default) and receive the configured
+  `--history-bytes` budget (half of physical memory by default, with a
+  256 MiB fallback if installed memory is unavailable). These settings do not
+  cap the project store. The temporary in-memory redb project currently retains
+  accepted captures without aggregate eviction, so RAM can grow with traffic.
+  In a saved project, stored history remains until explicitly cleared and can
+  grow until the disk fills.
 - The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
   once by default. Excess connections are closed; excess CONNECT requests get
   a 503 response. Both limits are library configuration, not browser settings.
@@ -64,26 +68,47 @@ aids, not permission to test an arbitrary host.
 
 ## Data handling
 
-For now, captured history, held interception messages, Intruder and Repeater
-results, and Decoder panels live in memory only and are not restored after exit. Dropping
-the proxy handle or closing the application releases held messages and aborts
-their exchanges. There is no traffic database, file export, or background
-upload. Clipboard copying is an explicit user action. In a normal desktop run,
-the app persists the TLS CA store—certificate, private key, and generation/lock
-metadata—described below; the developer screenshot feature also writes synthetic PNGs.
+Perseid has two project modes:
 
-In-memory storage is not secure erasure: OS swap, crash reports, clipboard
-history, terminal logs, and screenshots can retain copies. Capture only what
-you are authorized to handle, on a machine you trust, and redact shared output.
-Retention limits are not a hard cap on the whole process's memory use.
+- **Temporary (default):** captured history and supported workbench state stay
+  in an in-memory redb project. Accepted captures currently have no aggregate
+  retention cap; the UI's `--history-limit`/`--history-bytes` cache bounds do
+  not prevent project-store RAM from growing. Data is discarded on exit unless
+  you use **File > Save Project As…**. **New Project** warns before discarding;
+  opening another project does not ask whether to save the temporary one.
+- **Persistent:** **Save Project As…** or **Open Project…** uses one
+  user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
+  supported workspace inputs are committed automatically. **Save Project
+  Copy…** creates another file. There is no encryption at rest, and no
+  configurable disk-retention limit; `--history-limit` and `--history-bytes`
+  bound the UI snapshot/cache, not the saved file. Clear history to remove
+  stored captures.
 
-When persistent history and exports are added:
+Saved workbench state includes scope, match/replace rules, Repeater request tabs,
+Intruder request/payload settings, Decoder panel contents, and Comparer input
+items. It does not include Inspector notes, Repeater responses, Intruder results,
+computed Comparer results, search state, or active network/interception tasks.
+Opening a project loads only a bounded newest-first history snapshot today;
+older records remain in the file but are not yet pageable or searchable from the
+UI. The project does not include the local TLS CA private key.
 
-- Data stays local unless the user explicitly exports it.
-- Stored traffic can be searched and deleted from the application.
-- Sanitized exports should be the default; raw evidence remains an explicit
-  choice.
-- Sensitive captures should be clearly marked with their retention limits.
+New project files are created owner-only (`0600`) on Unix; Windows uses the
+user's normal filesystem ACLs. This is access control, not encryption. Project
+files can contain cookies, bearer tokens, credentials, personal data, and
+binary uploads. Do not share them unless you have reviewed and intended to share
+their contents. Clipboard copying is explicit. There is no background upload or
+telemetry.
+
+Only committed transactions are expected to survive a crash. Capture events can
+be dropped before storage commits; the project status reports capture loss when
+detected. A forced termination cannot resume in-flight network requests. On
+normal exit the app flushes the project writer, but temporary project contents
+are always at risk of exit.
+
+RAM retention limits are not a hard cap on whole-process memory. OS swap, crash
+reports, clipboard history, terminal logs, and screenshots can retain copies.
+Capture only data you are authorized to handle, on a machine you trust, and
+redact shared output.
 
 ## TLS interception
 

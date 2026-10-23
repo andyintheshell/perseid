@@ -35,8 +35,9 @@ browser required.**
   interception, replay, payload fuzzing, decoding, and comparison in one app.
 - **Native and cross-platform.** Built in Rust with egui; CI tests Linux,
   Apple Silicon macOS, and Windows. No JVM or embedded browser.
-- **Explicit resource controls.** Configurable capture and in-memory history
-  limits, bounded Intruder concurrency, and a live heap-memory indicator.
+- **Explicit resource controls.** Configurable per-message capture and
+  in-memory UI-cache limits, bounded Intruder concurrency, and a live
+  heap-memory indicator. Saved project history remains on disk until cleared.
 - **Open development.** Source available under MIT or Apache-2.0; feedback,
   bug reports, and focused contributions are welcome.
 
@@ -45,7 +46,8 @@ browser required.**
 | Tool | Available today |
 | --- | --- |
 | **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; host/path site map; Pretty, Raw, and Hex message views; gzip, deflate, and Brotli decoding. |
-| **Search** | Cross-history search of request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted Pretty/Raw/Hex results. |
+| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and supported workbench state. Older saved history is stored but not yet pageable in the UI. |
+| **Search** | Search the currently loaded HTTP-history snapshot's request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted Pretty/Raw/Hex results. Older saved rows are not searched yet. |
 | **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
 | **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
 | **WebSocket history** | Capture and inspect text and binary frames for `ws://` and decrypted `wss://` connections; no message editing or replay yet. |
@@ -68,6 +70,9 @@ The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
 macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
 are unsigned; the macOS app is ad-hoc signed but not notarized. See the
 [platform requirements](docs/getting-started.md#requirements) before installing.
+The currently published `0.1.0` crate and release predate project persistence;
+the current `0.2.0` workspace on `main` includes the first persistence support.
+Until `0.2.0` is published, build from a source checkout to use projects.
 
 ### Install from crates.io
 
@@ -110,9 +115,17 @@ cargo run -p perseid --locked
 Perseid is already usable for hands-on HTTP security testing, but there are
 important boundaries:
 
-- **No persistent projects yet.** History, Intruder and Repeater results,
-  Decoder chains, Comparer items/results, scope, and rewrite settings live in
-  memory. The local TLS CA *is* persisted across launches.
+- **Project persistence is an initial slice.** `.perseid` files save captured
+  HTTP/WebSocket history and supported workspace inputs, but the UI only loads
+  a bounded newest-first history snapshot; older stored rows are not pageable or
+  searchable yet. Files are not encrypted, migrations and recent-projects are
+  not implemented, and temporary-project contents are lost on exit unless saved.
+  The temporary in-memory redb store also lacks an aggregate retention cap, so
+  RAM use can grow with captured traffic; `--history-*` flags only bound the UI
+  cache.
+- **Not all tool state is persisted.** Repeater responses, Intruder results,
+  Inspector notes, computed Comparer results, and transient selections are not
+  restored. The local TLS CA is stored separately from project files.
 - **No WebSocket editing or replay yet.** WebSocket frames can be captured and
   inspected, but not intercepted, modified, or resent.
 - **Not an automated scanner.** There is no crawler, automated vulnerability

@@ -60,12 +60,35 @@ public interface just to work around a local port conflict.
    For curl, `--noproxy "" --proxy http://127.0.0.1:8080` forces the proxy path,
    including for a loopback target.
 4. Clear the history filter and disable **Filter views to the scope** temporarily.
-5. Check eviction and dropped-event counters in the status bar.
+5. Check UI-cache eviction and dropped-event counters in the status bar. Cache
+   eviction removes a row from the current view; it does not delete that record
+   from a saved project. The temporary project store can grow beyond these cache
+   limits until history is cleared or the app exits.
 
-The site map uses retained history, not active crawling. HTTPS pass-through
-tunnels have no visible decrypted requests, and `CONNECT` transport tunnels do
-not get their own history rows. Repeater and Intruder exchanges are also
-separate from Proxy history by design.
+The site map uses the currently loaded history snapshot, not active crawling.
+HTTPS pass-through tunnels have no visible decrypted requests, and `CONNECT`
+transport tunnels do not get their own history rows. Repeater and Intruder
+exchanges are also separate from Proxy history by design.
+
+## A project does not open or appears to be missing history
+
+- **Check the path and permissions.** Project dialogs take a path directly and
+  do not provide a native file picker. Save As and Save Copy require a new path;
+  they will not overwrite an existing file.
+- **Check the version.** The published `0.1.0` release predates project files;
+  use the current `0.2.0` development build to open `.perseid` projects. Newer or
+  unsupported schema versions are rejected rather than silently rewritten.
+- **History limits do not delete old saved records.** Opening a project loads a
+  bounded newest-first snapshot controlled by `--history-limit` and
+  `--history-bytes`. Older records remain in the file but are not pageable or
+  searchable in the current UI. **Clear history** is destructive and removes
+  stored captures from the active project.
+- **Check the project status widget** for the last persistence error or capture
+  loss. If a saved write failed, do not assume the newest changes reached disk;
+  address the reported path/permission/disk-space issue before closing.
+
+See [Projects and persistence](workbench.md#projects-and-persistence) for the
+current workflow and saved-state coverage.
 
 ## Pages hang with messages awaiting interception
 
@@ -138,7 +161,8 @@ These limits are independent of proxy history limits:
   budget. The startup error reports the accepted maximum in bytes.
 
 There are no CLI flags to raise the fixed pending-work budgets. Increasing
-`--history-bytes` changes history retention, not Repeater admission. See
+`--history-bytes` changes the UI history-cache budget, not Repeater admission or
+the total project-store size. See
 [Repeater](workbench.md#repeater) for the complete behavior.
 
 ## Intruder will not start an attack

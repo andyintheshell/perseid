@@ -37,6 +37,11 @@ cargo install perseid --locked
 perseid
 ```
 
+The currently published crates.io version is `0.1.0`; it predates project
+persistence. Persistent projects are in the current `0.2.0` workspace on `main`
+and will be included when that version is published. Use a source checkout below
+to try them now.
+
 ### Download a prebuilt binary
 
 Choose a platform package from
@@ -199,8 +204,8 @@ cargo run -p perseid --locked -- --listen 127.0.0.1:8081 --ui-scale 1.5
 | `--listen <ADDR>` | `127.0.0.1:8080` | Proxy listen address; keep it on loopback. |
 | `--capture-limit <BYTES>` | `1048576` (1 MiB) | Body bytes retained per request/response. |
 | `--intercept-limit <BYTES>` | `1048576` (1 MiB) | Maximum body size eligible for buffering/editing or rewriting. |
-| `--history-limit <N>` | `2000` | Maximum number of retained exchanges. |
-| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Retained history-body budget, not a process-memory limit. |
+| `--history-limit <N>` | `2000` | Maximum number of HTTP exchanges or WebSocket messages held in each UI history cache / loaded project snapshot. Does not cap total project storage. |
+| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Per-cache in-memory UI budget for HTTP and WebSocket history. In persistent projects this bounds the opened snapshot, not disk retention; it does not cap temporary redb storage either. |
 | `--no-proxy` | Off | Open the UI without starting the proxy. |
 | `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA store lives; use the active certificate/key paths shown in the UI. |
 | `--no-tls-intercept` | Off | Keep HTTPS tunnels opaque; the CA is still prepared. |
@@ -226,11 +231,17 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-This is a prototype: history, attack results, Comparer items, and workspace
-settings are not saved. WebSocket messages can be captured and inspected, but
-not edited or replayed; HTTP/3/QUIC and Sequencer are absent. See
-[limits and persistence](workbench.md#limits-and-persistence) and the
-[capability matrix](burp-parity.md) before relying on a particular workflow.
+The current `0.2.0` workspace supports saved projects, but the first UI
+integration opens only a bounded newest-first snapshot of stored history; older
+records stay in the project file but cannot yet be paged or searched from the
+app. Temporary projects currently retain accepted captures in an in-memory
+redb store without an aggregate eviction cap, so RAM can grow with traffic.
+Project files are not encrypted and schema migrations are not implemented.
+WebSocket messages can be captured and inspected, but not edited or replayed;
+HTTP/3/QUIC and Sequencer are absent. The published `0.1.0` release does not yet
+include project persistence. See [limits and persistence](workbench.md#limits-and-persistence)
+and the [capability matrix](burp-parity.md) before relying on a particular
+workflow.
 
 ## HiDPI displays
 
