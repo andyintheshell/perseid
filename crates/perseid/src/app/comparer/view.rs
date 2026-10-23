@@ -1,236 +1,47 @@
-//! Comparer: two item lists over one shared collection, plus a result window.
-//!
-//! The item tables deliberately show the same collection twice. Burp's
-//! Comparer works this way: send an item once, then select any two rows—one in
-//! each table—to compare them. Paste, Load, Remove, and Clear therefore all
-//! operate on the shared list.
-//!
-//! The comparison itself lives in [`crate::comparer`]. This module builds the
-//! item list, sends history messages here, and renders the result with paired
-//! text or hex panes. Text and hex views are virtualized by line so a large
-//! captured message does not have to be laid out as one galley.
-
-use std::ops::Range;
-use std::path::PathBuf;
+//! Comparer rendering: the item tables, controls, and result window.
 
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Button, Color32, FontId, Key, Label, Layout, Margin, Rect, RichText, ScrollArea,
+    Align, Align2, Button, Color32, FontId, Key, Label, Layout, Margin, RichText, ScrollArea,
     Sense, Stroke, TextEdit, TextFormat, TextStyle, Vec2,
 };
 use egui_extras::{Column, TableBuilder};
 
-use super::*;
+use super::highlight::{
+    ADDED_BG, CompareResult, DELETED_BG, HEX_BYTES_PER_ROW, Highlight, MODIFIED_BG,
+    change_background,
+};
+#[cfg(feature = "screenshots")]
+use super::state::ComparableItem;
+use super::state::{
+    ComparerState, Feedback, LoadDialog, PasteState, ResultView, read_comparer_file,
+};
+use crate::app::widgets;
 use crate::comparer as engine;
-use crate::comparer::{ChangeKind, CompareMode, DiffSpan, DisplayText, MAX_ITEM_BYTES, MAX_ITEMS};
+use crate::comparer::{ChangeKind, CompareMode};
 use crate::theme;
 use crate::view;
 
 const ITEM_TABLE_ROW_HEIGHT: f32 = 19.0;
-const PREVIEW_BYTES: usize = 220;
 const CONTROLS_WIDTH: f32 = 108.0;
 const RESULT_WINDOW_ID: &str = "perseid.comparer.result";
-const HEX_BYTES_PER_ROW: usize = 16;
-const MODIFIED_BG: Color32 = Color32::from_rgb(0xcf, 0xe3, 0xf7);
-const DELETED_BG: Color32 = Color32::from_rgb(0xf8, 0xd8, 0xd2);
-const ADDED_BG: Color32 = Color32::from_rgb(0xd7, 0xf0, 0xdc);
 
-/// One entry in the shared item collection.
-struct ComparableItem {
-    data: Vec<u8>,
-}
-
-impl ComparableItem {
-    fn new(data: Vec<u8>) -> Self {
-        Self { data }
-    }
-
-    fn preview(&self) -> String {
-        let mut out = String::with_capacity(PREVIEW_BYTES + 1);
-        for &byte in self.data.iter().take(PREVIEW_BYTES) {
-            let character = match byte {
-                b'\r' | b'\n' | b'\t' => ' ',
-                0x20..=0x7e => char::from(byte),
-                _ => '·',
-            };
-            out.push(character);
-        }
-        if self.data.len() > PREVIEW_BYTES {
-            out.push('…');
-        }
-        out
-    }
-}
-
-struct Feedback {
-    error: bool,
-    text: String,
-}
-
-struct LoadDialog {
-    target: usize,
-    path: String,
-    error: Option<String>,
-}
-
-struct PasteState {
-    target: usize,
-    frames_left: u8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ResultView {
-    Text,
-    Hex,
-}
-
-#[derive(Clone, Debug)]
-struct Highlight {
-    range: Range<usize>,
-    kind: ChangeKind,
-}
-
-struct CompareResult {
-    old_index: usize,
-    new_index: usize,
-    /// Title shown in the result window.
-    title: String,
-    old_data: Vec<u8>,
-    new_data: Vec<u8>,
-    old_text: DisplayText,
-    new_text: DisplayText,
-    text_highlights: [Vec<Vec<Highlight>>; 2],
-    byte_kinds: [Vec<Option<ChangeKind>>; 2],
-    spans: Vec<DiffSpan>,
-    differences: usize,
-}
-
-impl CompareResult {
-    fn new(
-        mode: CompareMode,
-        old_index: usize,
-        new_index: usize,
-        old_data: Vec<u8>,
-        new_data: Vec<u8>,
-        comparison: engine::Comparison,
-    ) -> Self {
-        let old_text = DisplayText::new(&old_data);
-        let new_text = DisplayText::new(&new_data);
-        let text_highlights = [
-            build_text_highlights(&old_text, &comparison.spans, 0),
-            build_text_highlights(&new_text, &comparison.spans, 1),
-        ];
-        let byte_kinds = [
-            build_byte_kinds(old_data.len(), &comparison.spans, 0),
-            build_byte_kinds(new_data.len(), &comparison.spans, 1),
-        ];
-        let difference_word = if comparison.differences == 1 {
-            "difference"
-        } else {
-            "differences"
-        };
-        let title = format!(
-            "{} compare of #{} and #{} ({} {difference_word})",
-            mode.label(),
-            old_index + 1,
-            new_index + 1,
-            comparison.differences
-        );
-        Self {
-            old_index,
-            new_index,
-            title,
-            old_data,
-            new_data,
-            old_text,
-            new_text,
-            text_highlights,
-            byte_kinds,
-            spans: comparison.spans,
-            differences: comparison.differences,
-        }
-    }
-
-    fn data(&self, side: usize) -> &[u8] {
-        if side == 0 {
-            &self.old_data
-        } else {
-            &self.new_data
-        }
-    }
-
-    fn display(&self, side: usize) -> &DisplayText {
-        if side == 0 {
-            &self.old_text
-        } else {
-            &self.new_text
-        }
-    }
-
-    fn text_highlights(&self, side: usize) -> &[Vec<Highlight>] {
-        &self.text_highlights[side]
-    }
-
-    fn byte_kinds(&self, side: usize) -> &[Option<ChangeKind>] {
-        &self.byte_kinds[side]
-    }
-
-    fn side_label(&self, side: usize) -> String {
-        format!(
-            "#{}",
-            if side == 0 {
-                self.old_index + 1
-            } else {
-                self.new_index + 1
-            }
-        )
-    }
-}
-
-/// State for the Comparer tab and its result window.
-pub(super) struct ComparerState {
-    items: Vec<ComparableItem>,
-    selected: [Option<usize>; 2],
-    active: usize,
-    feedback: Option<Feedback>,
-    load: Option<LoadDialog>,
-    paste: Option<PasteState>,
-    result: Option<CompareResult>,
-    result_open: bool,
-    result_views: [ResultView; 2],
-    sync_views: bool,
-    diff_cursor: usize,
-    result_scroll: [Vec2; 2],
-    result_pane_rects: [Option<Rect>; 2],
-    result_row_height: f32,
+#[derive(Clone, Copy)]
+enum ControlAction {
+    Paste,
+    Load,
+    Remove,
+    Clear,
+    Compare(CompareMode),
 }
 
 impl ComparerState {
-    pub(super) fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            selected: [None, None],
-            active: 0,
-            feedback: None,
-            load: None,
-            paste: None,
-            result: None,
-            result_open: false,
-            result_views: [ResultView::Text, ResultView::Text],
-            sync_views: false,
-            diff_cursor: 0,
-            result_scroll: [Vec2::ZERO, Vec2::ZERO],
-            result_pane_rects: [None, None],
-            result_row_height: 14.0,
-        }
-    }
-
     pub(super) fn ui(&mut self, ui: &mut egui::Ui) {
         widgets::page_pad(ui, |ui| self.page(ui));
     }
 
     /// Consume a clipboard paste requested by the Paste button.
-    pub(super) fn handle_input(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn handle_input(&mut self, ctx: &egui::Context) {
         let Some(mut pending) = self.paste.take() else {
             return;
         };
@@ -504,92 +315,6 @@ impl ComparerState {
         ctx.request_repaint();
     }
 
-    fn insert_item(&mut self, data: Vec<u8>, target: usize) -> Result<usize, String> {
-        if data.len() > MAX_ITEM_BYTES {
-            return Err(format!(
-                "item is {}; the Comparer accepts items up to {}",
-                view::human_bytes(data.len() as u64),
-                view::human_bytes(MAX_ITEM_BYTES as u64)
-            ));
-        }
-        if self.items.len() >= MAX_ITEMS {
-            return Err(format!(
-                "the Comparer holds at most {MAX_ITEMS} items; remove one before adding another"
-            ));
-        }
-        self.items.push(ComparableItem::new(data));
-        let index = self.items.len() - 1;
-        self.selected[target] = Some(index);
-        self.active = target;
-        self.feedback = None;
-        Ok(index)
-    }
-
-    fn remove_active(&mut self) {
-        let Some(index) = self.selected[self.active] else {
-            return;
-        };
-        if index >= self.items.len() {
-            self.selected = [None, None];
-            return;
-        }
-        self.items.remove(index);
-        for selected in &mut self.selected {
-            *selected = match *selected {
-                Some(value) if value == index => None,
-                Some(value) if value > index => Some(value - 1),
-                other => other,
-            };
-        }
-    }
-
-    fn clear_items(&mut self) {
-        self.items.clear();
-        self.selected = [None, None];
-        self.result = None;
-        self.result_open = false;
-        self.feedback = None;
-    }
-
-    fn compare(&mut self, mode: CompareMode) {
-        let (Some(old_index), Some(new_index)) = (self.selected[0], self.selected[1]) else {
-            self.feedback = Some(Feedback {
-                error: true,
-                text: "select one item in each table before comparing".to_string(),
-            });
-            return;
-        };
-        let (Some(old), Some(new)) = (self.items.get(old_index), self.items.get(new_index)) else {
-            self.selected = [None, None];
-            return;
-        };
-        match engine::compare(mode, &old.data, &new.data) {
-            Ok(comparison) => {
-                let result = CompareResult::new(
-                    mode,
-                    old_index,
-                    new_index,
-                    old.data.clone(),
-                    new.data.clone(),
-                    comparison,
-                );
-                self.result = Some(result);
-                self.result_open = true;
-                self.diff_cursor = 0;
-                self.result_views = [ResultView::Text, ResultView::Text];
-                self.result_scroll = [Vec2::ZERO, Vec2::ZERO];
-                self.result_pane_rects = [None, None];
-                self.feedback = None;
-            }
-            Err(error) => {
-                self.feedback = Some(Feedback {
-                    error: true,
-                    text: error.to_string(),
-                });
-            }
-        }
-    }
-
     pub(super) fn result_window(&mut self, ctx: &egui::Context) {
         if !self.result_open {
             return;
@@ -605,7 +330,7 @@ impl ComparerState {
         };
 
         let mut open = true;
-        let title = result.title.clone();
+        let title = result.title().to_string();
         egui::Window::new(title)
             .id(egui::Id::unique(RESULT_WINDOW_ID))
             .open(&mut open)
@@ -664,8 +389,8 @@ impl ComparerState {
             ui.label(
                 RichText::new(format!(
                     "{} / {} differences",
-                    self.diff_cursor.saturating_add(1).min(result.differences),
-                    result.differences
+                    self.diff_cursor.saturating_add(1).min(result.differences()),
+                    result.differences()
                 ))
                 .small()
                 .color(theme::TEXT_MUTED),
@@ -744,7 +469,7 @@ impl ComparerState {
                             .color(theme::TEXT),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let can_move = result.differences > 0;
+                        let can_move = result.differences() > 0;
                         if ui
                             .add_enabled(can_move, Button::new(">").small())
                             .on_hover_text("Next difference")
@@ -869,25 +594,6 @@ impl ComparerState {
         ui.ctx().request_repaint();
     }
 
-    fn navigate_result(&mut self, result: &CompareResult, direction: i32, row_height: f32) {
-        if result.spans.is_empty() {
-            return;
-        }
-        let length = result.spans.len();
-        if direction > 0 {
-            self.diff_cursor = (self.diff_cursor + 1) % length;
-        } else {
-            self.diff_cursor = (self.diff_cursor + length - 1) % length;
-        }
-        let span = &result.spans[self.diff_cursor];
-        self.result_scroll[0].y =
-            visible_line(result.display(0), &span.old, self.result_views[0]) as f32 * row_height;
-        self.result_scroll[1].y =
-            visible_line(result.display(1), &span.new, self.result_views[1]) as f32 * row_height;
-        self.result_scroll[0].y = (self.result_scroll[0].y - row_height * 2.0).max(0.0);
-        self.result_scroll[1].y = (self.result_scroll[1].y - row_height * 2.0).max(0.0);
-    }
-
     pub(super) fn load_window(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.load.take() else {
             return;
@@ -958,7 +664,7 @@ impl ComparerState {
     }
 
     #[cfg(feature = "screenshots")]
-    pub(super) fn seed_screenshot(&mut self) {
+    pub(in crate::app) fn seed_screenshot(&mut self) {
         self.items.clear();
         self.items.push(ComparableItem::new(
             b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-US,en;q=0.9\r\nAccept-Encoding: gzip, deflate, br\r\nUpgrade-Insecure-Requests: 1\r\nSec-Fetch-Dest: document\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Site: none\r\nSec-Fetch-User: ?1\r\nIf-Modified-Since: Wed, 21 Oct 2026 19:59:02 GMT\r\nPriority: u=0, i\r\nTe: trailers\r\nConnection: keep-alive\r\n\r\n"
@@ -981,135 +687,8 @@ impl ComparerState {
     }
 
     #[cfg(feature = "screenshots")]
-    pub(super) fn open_screenshot_result(&mut self) {
+    pub(in crate::app) fn open_screenshot_result(&mut self) {
         self.compare(CompareMode::Words);
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ControlAction {
-    Paste,
-    Load,
-    Remove,
-    Clear,
-    Compare(CompareMode),
-}
-
-impl PerseidApp {
-    pub(super) fn comparer_view(&mut self, ui: &mut egui::Ui) {
-        self.comparer.ui(ui);
-    }
-
-    pub(super) fn comparer_windows(&mut self, ctx: &egui::Context) {
-        self.comparer.result_window(ctx);
-        self.comparer.load_window(ctx);
-    }
-
-    /// Add the selected history message to the shared Comparer collection.
-    /// Requests target table 1 and responses target table 2, so the common
-    /// request/response comparison is a two-click operation.
-    pub(super) fn send_selected_to_comparer(&mut self, pane: MessagePane) {
-        let Some(item) = self
-            .selected
-            .and_then(|id| self.history.get(id))
-            .filter(|item| !item.is_tunnel())
-        else {
-            return;
-        };
-        let target = match pane {
-            MessagePane::Request => 0,
-            MessagePane::Response => 1,
-        };
-        let raw = match pane {
-            MessagePane::Request => view::request_views(item).raw,
-            MessagePane::Response => {
-                if item.response.is_none() {
-                    return;
-                }
-                view::response_views(item).raw
-            }
-        };
-        if let Err(error) = self.comparer.insert_item(raw.into_bytes(), target) {
-            self.comparer.feedback = Some(Feedback {
-                error: true,
-                text: error,
-            });
-        }
-    }
-}
-
-fn read_comparer_file(path: &str) -> Result<Vec<u8>, String> {
-    if path.is_empty() {
-        return Err("enter a file path".to_string());
-    }
-    let path = PathBuf::from(path);
-    let metadata = std::fs::metadata(&path)
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    if metadata.len() > MAX_ITEM_BYTES as u64 {
-        return Err(format!(
-            "file is {}; the Comparer accepts items up to {}",
-            view::human_bytes(metadata.len()),
-            view::human_bytes(MAX_ITEM_BYTES as u64)
-        ));
-    }
-    std::fs::read(&path).map_err(|error| format!("could not read {}: {error}", path.display()))
-}
-
-fn build_text_highlights(
-    display: &DisplayText,
-    spans: &[DiffSpan],
-    side: usize,
-) -> Vec<Vec<Highlight>> {
-    let mut lines = vec![Vec::new(); display.line_count()];
-    for span in spans {
-        let raw = if side == 0 { &span.old } else { &span.new };
-        if raw.is_empty() {
-            continue;
-        }
-        let highlighted = display.display_range(raw.clone());
-        if highlighted.is_empty() {
-            continue;
-        }
-        let first_line = display.line_for_display(highlighted.start);
-        let last_line = display.line_for_display(highlighted.end.saturating_sub(1));
-        for (line, line_highlights) in lines
-            .iter_mut()
-            .enumerate()
-            .take(last_line + 1)
-            .skip(first_line)
-        {
-            let line_range = display.line_range(line);
-            let start = highlighted.start.max(line_range.start);
-            let end = highlighted.end.min(line_range.end);
-            if start < end {
-                line_highlights.push(Highlight {
-                    range: start - line_range.start..end - line_range.start,
-                    kind: span.kind,
-                });
-            }
-        }
-    }
-    for line in &mut lines {
-        line.sort_by_key(|highlight| highlight.range.start);
-    }
-    lines
-}
-
-fn build_byte_kinds(length: usize, spans: &[DiffSpan], side: usize) -> Vec<Option<ChangeKind>> {
-    let mut kinds = vec![None; length];
-    for span in spans {
-        let raw = if side == 0 { &span.old } else { &span.new };
-        if raw.start < raw.end && raw.end <= length {
-            kinds[raw.clone()].fill(Some(span.kind));
-        }
-    }
-    kinds
-}
-
-fn visible_line(display: &DisplayText, raw: &Range<usize>, view: ResultView) -> usize {
-    match view {
-        ResultView::Text => display.line_for_raw(raw.start),
-        ResultView::Hex => raw.start / HEX_BYTES_PER_ROW,
     }
 }
 
@@ -1127,14 +706,6 @@ fn format(font: &FontId, color: Color32, background: Color32) -> TextFormat {
         color,
         background,
         ..Default::default()
-    }
-}
-
-fn change_background(kind: ChangeKind) -> Color32 {
-    match kind {
-        ChangeKind::Modified => MODIFIED_BG,
-        ChangeKind::Deleted => DELETED_BG,
-        ChangeKind::Added => ADDED_BG,
     }
 }
 
@@ -1223,104 +794,54 @@ fn legend_chip(ui: &mut egui::Ui, label: &str, color: Color32) {
         });
 }
 
-impl PerseidApp {
-    pub(super) fn comparer_workspace(&self) -> Vec<Vec<u8>> {
-        self.comparer
-            .items
-            .iter()
-            .map(|item| item.data.clone())
-            .collect()
-    }
-
-    pub(super) fn apply_comparer_workspace(&mut self, items: &[Vec<u8>]) {
-        let state = &mut self.comparer;
-        state.items = items
-            .iter()
-            .filter(|data| data.len() <= MAX_ITEM_BYTES)
-            .take(MAX_ITEMS)
-            .map(|data| ComparableItem::new(data.clone()))
-            .collect();
-        state.selected = [None, None];
-        state.active = 0;
-        state.feedback = None;
-        state.load = None;
-        state.paste = None;
-        state.result = None;
-        state.result_open = false;
-        state.result_views = [ResultView::Text, ResultView::Text];
-        state.sync_views = false;
-        state.diff_cursor = 0;
-        state.result_scroll = [Vec2::ZERO; 2];
-        state.result_pane_rects = [None, None];
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::comparer::ChangeKind;
 
-    fn result(mode: CompareMode, old: &[u8], new: &[u8]) -> CompareResult {
-        let comparison = engine::compare(mode, old, new).unwrap();
-        CompareResult::new(mode, 2, 4, old.to_vec(), new.to_vec(), comparison)
+    #[test]
+    fn text_line_job_preserves_text_and_highlights() {
+        let font = FontId::monospace(11.5);
+        let plain = text_line_job("abcd", &[], &font);
+        assert_eq!(plain.text, "abcd");
+
+        let highlights = [Highlight {
+            range: 1..3,
+            kind: ChangeKind::Modified,
+        }];
+        let job = text_line_job("abcd", &highlights, &font);
+        assert_eq!(job.text, "abcd");
+        assert_eq!(job.sections.len(), 3);
+        assert_eq!(job.sections[1].format.background, MODIFIED_BG);
+
+        // An empty line still gets one space so the row keeps its height.
+        assert_eq!(text_line_job("", &[], &font).text, " ");
     }
 
     #[test]
-    fn word_result_highlights_only_the_changed_word() {
-        let result = result(CompareMode::Words, b"GET / HTTP/1.1", b"POST / HTTP/1.1");
-        assert_eq!(result.differences, 1);
-        let line = &result.text_highlights[0][0];
-        assert_eq!(line.len(), 1);
-        assert_eq!(&result.old_text.as_str()[line[0].range.clone()], "GET");
-        let line = &result.text_highlights[1][0];
-        assert_eq!(&result.new_text.as_str()[line[0].range.clone()], "POST");
-    }
+    fn hex_line_job_formats_full_and_partial_rows() {
+        let font = FontId::monospace(11.5);
+        let kinds = [
+            None,
+            Some(ChangeKind::Added),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+        let job = hex_line_job(b"hello", &kinds, 0, &font);
+        assert!(job.text.starts_with("00000000  68 65 6c 6c 6f"));
+        assert!(job.text.contains("|hello"));
+        assert!(
+            job.sections
+                .iter()
+                .any(|section| section.format.background == ADDED_BG)
+        );
 
-    #[test]
-    fn byte_result_highlights_hex_bytes_and_text() {
-        let result = result(CompareMode::Bytes, b"cat", b"cut");
-        assert_eq!(result.byte_kinds[0][1], Some(ChangeKind::Modified));
-        assert_eq!(result.byte_kinds[1][1], Some(ChangeKind::Modified));
-        let line = &result.text_highlights[0][0];
-        assert_eq!(&result.old_text.as_str()[line[0].range.clone()], "a");
-    }
-
-    #[test]
-    fn result_titles_use_one_based_row_numbers() {
-        let result = result(CompareMode::Words, b"a", b"b");
-        assert_eq!(result.title, "Word compare of #3 and #5 (1 difference)");
-    }
-
-    #[test]
-    fn removing_an_item_adjusts_both_selections() {
-        let mut state = ComparerState::new();
-        state.insert_item(b"one".to_vec(), 0).unwrap();
-        state.insert_item(b"two".to_vec(), 1).unwrap();
-        state.insert_item(b"three".to_vec(), 0).unwrap();
-        assert_eq!(state.selected, [Some(2), Some(1)]);
-        state.active = 1;
-        state.remove_active();
-        assert_eq!(state.selected, [Some(1), None]);
-        state.active = 0;
-        state.remove_active();
-        assert_eq!(state.selected, [None, None]);
-        assert_eq!(state.items.len(), 1);
-    }
-
-    #[test]
-    fn clearing_items_closes_the_result() {
-        let mut state = ComparerState::new();
-        state.insert_item(b"one".to_vec(), 0).unwrap();
-        state.insert_item(b"two".to_vec(), 1).unwrap();
-        state.compare(CompareMode::Words);
-        assert!(state.result_open);
-        state.clear_items();
-        assert!(!state.result_open);
-        assert!(state.result.is_none());
-    }
-
-    #[test]
-    fn previews_stay_single_line_and_bounded() {
-        let item = ComparableItem::new(b"a\r\nb\x00c".to_vec());
-        assert_eq!(item.preview(), "a  b·c");
+        let job = hex_line_job(b"hello", &kinds, 1, &font);
+        assert!(job.text.starts_with("00000010"));
+        assert!(job.text.ends_with('|'));
     }
 }
