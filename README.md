@@ -44,6 +44,7 @@ browser required.**
 | Tool | Available today |
 | --- | --- |
 | **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; host/path site map; Pretty, Raw, and Hex message views; gzip, deflate, and Brotli decoding. |
+| **Search** | Cross-history search of request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted Pretty/Raw/Hex results. |
 | **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
 | **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
 | **WebSocket history** | Capture and inspect text and binary frames for `ws://` and decrypted `wss://` connections; no message editing or replay yet. |

@@ -5,7 +5,9 @@
 //! purpose-built highlighter keeps the dependency and binary-size cost low
 //! compared with pulling in a full TextMate-style highlighting engine.
 
-use egui::text::LayoutJob;
+use std::ops::Range;
+
+use egui::text::{ByteIndex, LayoutJob, LayoutSection};
 use egui::{Color32, FontId, TextFormat};
 
 use crate::theme;
@@ -126,6 +128,91 @@ pub fn message_job(text: &str, wrap_width: f32, font: &FontId) -> LayoutJob {
     layout_text(text, wrap_width, font, |line, index| {
         line_job(line, syntax.role(index), syntax.language, font)
     })
+}
+
+/// Paint background highlights over byte ranges in an already styled
+/// [`LayoutJob`].
+///
+/// Search results are matched against the exact text shown in the message
+/// editor, so the ranges are byte offsets into `job.text`. Splitting the
+/// existing sections preserves syntax colors and every byte of the source.
+pub fn paint_matches(job: &mut LayoutJob, ranges: &[Range<usize>], background: Color32) {
+    if ranges.is_empty() || job.sections.is_empty() {
+        return;
+    }
+
+    let mut next_range = 0;
+    let mut sections = Vec::with_capacity(job.sections.len() + ranges.len() * 2);
+
+    for section in job.sections.drain(..) {
+        let section_start = section.byte_range.start.0;
+        let section_end = section.byte_range.end.0;
+        let mut cursor = section_start;
+        let mut first_part = true;
+
+        while next_range < ranges.len() && ranges[next_range].end <= section_start {
+            next_range += 1;
+        }
+
+        let mut range_index = next_range;
+        while range_index < ranges.len() && ranges[range_index].start < section_end {
+            let range = &ranges[range_index];
+            let match_start = range.start.max(section_start);
+            let match_end = range.end.min(section_end);
+
+            if cursor < match_start {
+                sections.push(LayoutSection {
+                    leading_space: if first_part {
+                        section.leading_space
+                    } else {
+                        0.0
+                    },
+                    byte_range: ByteIndex(cursor)..ByteIndex(match_start),
+                    format: section.format.clone(),
+                });
+                first_part = false;
+            }
+
+            if match_start < match_end {
+                let mut format = section.format.clone();
+                format.background = background;
+                sections.push(LayoutSection {
+                    leading_space: if first_part {
+                        section.leading_space
+                    } else {
+                        0.0
+                    },
+                    byte_range: ByteIndex(match_start)..ByteIndex(match_end),
+                    format,
+                });
+                first_part = false;
+            }
+
+            cursor = cursor.max(match_end);
+            if range.end > section_end {
+                // The remaining part of this match belongs to the next
+                // section, so do not advance past it.
+                break;
+            }
+            range_index += 1;
+        }
+
+        if cursor < section_end {
+            sections.push(LayoutSection {
+                leading_space: if first_part {
+                    section.leading_space
+                } else {
+                    0.0
+                },
+                byte_range: ByteIndex(cursor)..ByteIndex(section_end),
+                format: section.format,
+            });
+        }
+
+        next_range = range_index;
+    }
+
+    job.sections = sections;
 }
 
 fn layout_text(
@@ -567,6 +654,29 @@ mod tests {
             let job = message_job(text, 120.0, &font);
             assert_eq!(job.text, text);
         }
+    }
+
+    #[test]
+    fn match_highlights_split_existing_sections_without_changing_text() {
+        let font = FontId::monospace(MESSAGE_FONT_SIZE);
+        let mut job = LayoutJob::default();
+        job.append("GET / ", 0.0, plain_format(&font));
+        job.append("permission", 0.0, plain_format(&font));
+        job.append(" now", 0.0, plain_format(&font));
+        let text = job.text.clone();
+        let background = theme::ACCENT_SOFT;
+
+        let ranges = std::iter::once(6..16).collect::<Vec<_>>();
+        paint_matches(&mut job, &ranges, background);
+
+        assert_eq!(job.text, text);
+        let highlighted: String = job
+            .sections
+            .iter()
+            .filter(|section| section.format.background == background)
+            .map(|section| &job.text[section.byte_range.start.0..section.byte_range.end.0])
+            .collect();
+        assert_eq!(highlighted, "permission");
     }
 
     #[test]

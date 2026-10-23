@@ -42,7 +42,7 @@ concurrency remain explicit, user-controlled safety settings.
 
 Status values: **Working** (usable today), **Partial** (foundation exists),
 **Planned** (assigned to a milestone), **Deviation** (intentional difference),
-**Beyond CE** (a planned Perseid extra), **Non-goal** (explicitly outside parity).
+**Beyond CE** (a Perseid extra beyond Burp CE), **Non-goal** (explicitly outside parity).
 
 | Capability | Burp CE | Perseid | Status | Milestone |
 | --- | --- | --- | --- | --- |
@@ -54,6 +54,7 @@ Status values: **Working** (usable today), **Partial** (foundation exists),
 | Compressed body inspection | Yes | Bounded gzip, deflate, and Brotli decoding in Pretty, Raw, and Hex; wire bytes still forwarded | Working | — |
 | Session history | Yes | In-memory, bounded | Partial | M3 |
 | History filtering | Yes | Text filter plus scope view filter | Partial | M3 |
+| Search captured traffic | No (Pro only) | Global search over request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted detail with Inspector | Beyond CE | — |
 | Memory usage display | Yes | Allocator memory in use and peak, rolling graph | Working | — |
 | HTTPS interception with a local CA | Yes | Automatic local CA, HTTPS interception on by default, local certificate page, pass-through hosts, manual trust setup | Working | — |
 | HTTP/2 proxying | Yes | h2 over TLS via ALPN, h2c prior knowledge on the listener | Working | — |
@@ -99,6 +100,13 @@ exchange for the session. Like Burp, the proxy removes unsupported
 `Accept-Encoding` codings before forwarding. Interception and body rules still
 operate on the wire representation, and forwarding keeps the original response
 encoding. Scope enforcement is opt-in, and an empty scope allows every host.
+
+Search is a Perseid extra relative to Burp CE: the top-toolbar magnifier opens
+a floating search window over retained HTTP history. It can search request and
+response heads and decoded bodies, with case-sensitive, regex, negative-match,
+in-scope-only, and dynamic-update options. Results open in Pretty/Raw/Hex with
+match highlighting and the Inspector/Notes rail. WebSocket and Repeater traffic
+are outside this search because they use separate stores.
 
 Intruder follows Burp's marker-and-payload model. A raw request can be seeded
 from history or edited in place, values are wrapped in `$$`, and one payload
