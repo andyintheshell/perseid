@@ -111,7 +111,7 @@ important boundaries:
 Burp Suite Community manual-toolkit parity is a
 [direction](docs/burp-parity.md), **not a claim of current feature parity**.
 Burp Suite and Burp Suite Community Edition are trademarks of PortSwigger Ltd.
-Perseid is independently developed, includes no PortSwigger code or branding,
+Perseid is independently developed, contains no PortSwigger software or logos,
 and is not affiliated with, sponsored by, or endorsed by PortSwigger Ltd.
 References to Burp are for comparison only.
 

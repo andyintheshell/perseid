@@ -39,8 +39,8 @@ The `perseid` package provides both the desktop application and the
 
 WebSocket editing and replay, persistent projects, and automated scanning are
 not implemented. Burp Suite and Burp Suite Community Edition are trademarks of
-PortSwigger Ltd. Perseid is independently developed, includes no PortSwigger
-code or branding, and is not affiliated with, sponsored by, or endorsed by
+PortSwigger Ltd. Perseid is independently developed, contains no PortSwigger
+software or logos, and is not affiliated with, sponsored by, or endorsed by
 PortSwigger Ltd. References to Burp are for comparison only.
 
 ## Install and run the desktop app
