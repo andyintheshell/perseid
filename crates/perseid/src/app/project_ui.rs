@@ -237,6 +237,22 @@ impl ProjectUi {
         });
     }
 
+    /// Documentation screenshots reset transient project UI between scenes.
+    #[cfg(feature = "screenshots")]
+    pub(super) fn reset_for_screenshot(&mut self) {
+        self.dialog = None;
+        self.file_menu_forced_open = false;
+    }
+
+    /// Documentation screenshots: show the Save As dialog with a demo path.
+    #[cfg(feature = "screenshots")]
+    pub(super) fn show_save_dialog_for_screenshot(&mut self) {
+        self.open_dialog(
+            ProjectDialogKind::SaveAs,
+            Some(Path::new("/home/user/assessments/demo-shop.perseid")),
+        );
+    }
+
     fn dialog(&mut self, ctx: &egui::Context) -> Option<ProjectDialogAction> {
         let dialog = self.dialog.as_ref()?;
         let kind = dialog.kind;
@@ -534,8 +550,15 @@ impl PerseidApp {
             }
         });
         #[cfg(feature = "screenshots")]
-        if self.project.file_menu_forced_open {
-            egui::Popup::open_id(ui.ctx(), response.response.id.with("popup"));
+        {
+            // Keep the menu open only for its own scene. Popup state would
+            // otherwise leak into every later screenshot.
+            let popup_id = response.response.id.with("popup");
+            if self.project.file_menu_forced_open {
+                egui::Popup::open_id(ui.ctx(), popup_id);
+            } else {
+                egui::Popup::close_id(ui.ctx(), popup_id);
+            }
         }
         let _ = response;
     }
