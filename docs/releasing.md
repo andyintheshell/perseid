@@ -28,8 +28,9 @@ also need real-device smoke testing before we treat them as supported downloads.
    and determines all asset names.
 2. Merge the reviewed `main` branch into the protected `release` branch and push
    it. For the first release, create `release` from the updated `main` after this
-   setup pull request has landed. The release workflow also supports manual
-   dispatch, but its build jobs only run when the selected branch is `release`.
+   setup pull request has landed. Manual dispatch can preflight the builders on
+   another branch without publishing; dispatching on `release` will create or
+   update the draft as usual.
 3. Wait for all five native build jobs and the draft job to finish. The draft is
    not public until someone publishes it. On a failed build, fix the issue on
    `main`, merge the fix into `release`, and push again.
@@ -88,7 +89,7 @@ generated `packager.json` is ignored as well.
 # Linux
 cargo build --release --locked -p perseid
 python scripts/generate-packager-config.py --os linux
-cargo packager --release --config packager.json
+cargo packager --release
 python scripts/collect-release.py --os linux --arch x64  # or arm64
 
 # macOS (builds both Rust targets and creates a universal DMG)
