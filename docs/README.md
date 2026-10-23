@@ -27,6 +27,7 @@ use a local lab or another target you are explicitly authorized to test.
 | [Troubleshooting](troubleshooting.md) | Why is traffic missing, held, rejected, or failing TLS? What should go in a bug report? |
 | [Safety and privacy](safety.md) | What is retained? What does scope enforce? What happens to credentials and CA keys? |
 | [Screenshots](screenshots.md) | What does each tool look like? |
+| [Releasing](releasing.md) | How are platform packages built, reviewed, and published? |
 
 ## Project and technical references
 
@@ -50,5 +51,9 @@ parallel on Linux, GitHub-hosted Apple Silicon macOS, and Windows with MSVC.
 The Linux screenshot workflow remains a separate Xvfb job. Cross-platform CI
 does not provide signed installers or validate every desktop/graphics setup.
 
-See [requirements](getting-started.md#requirements) before assuming that an OS
-mentioned in a path or keyboard example has full release support.
+The release workflow can build packages into a draft GitHub Release (Windows is
+unsigned; macOS is ad-hoc signed but not notarized). It does not validate every
+desktop or graphics setup. See the [release guide](releasing.md) before treating
+draft packages as supported downloads, and check
+[requirements](getting-started.md#requirements) for the currently tested
+platforms.
