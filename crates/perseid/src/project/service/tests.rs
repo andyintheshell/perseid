@@ -1,0 +1,560 @@
+use std::time::SystemTime;
+
+use crate::proxy::{
+    CapturedBody, ExchangeEnd, ExchangeResult, RequestInfo, ResponseHead, WebSocketConnectionInfo,
+    WebSocketDirection, WebSocketOpcode,
+};
+
+use super::*;
+
+const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A unique path under the system temporary directory, removed on drop.
+struct TempProject {
+    path: PathBuf,
+}
+
+impl TempProject {
+    fn new(label: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("perseid-{label}-{}.perseid", uuid::Uuid::new_v4()));
+        Self { path }
+    }
+}
+
+impl Drop for TempProject {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn timestamp(offset_ms: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(1_700_000_000_000 + offset_ms)
+}
+
+fn started(wire_id: u64, method: &str) -> ProxyEvent {
+    ProxyEvent::Started {
+        id: wire_id,
+        timestamp: timestamp(wire_id),
+        request: RequestInfo {
+            method: method.to_string(),
+            uri: "http://example.com/api?x=1".to_string(),
+            scheme: "http".to_string(),
+            host: "example.com".to_string(),
+            path: "/api?x=1".to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: vec![("host".to_string(), "example.com".to_string())],
+        },
+    }
+}
+
+fn response_head(wire_id: u64, status: u16) -> ProxyEvent {
+    ProxyEvent::ResponseHead {
+        id: wire_id,
+        head: ResponseHead {
+            version: "HTTP/1.1".to_string(),
+            status,
+            reason: String::new(),
+            headers: vec![("content-type".to_string(), "text/plain".to_string())],
+        },
+    }
+}
+
+fn finished(wire_id: u64, request: &[u8], response: &[u8]) -> ProxyEvent {
+    ProxyEvent::Finished {
+        id: wire_id,
+        end: ExchangeEnd {
+            duration: Duration::from_millis(7),
+            request_body: CapturedBody::from_bytes(request.to_vec()),
+            result: ExchangeResult::Response {
+                body: CapturedBody::from_bytes(response.to_vec()),
+            },
+        },
+    }
+}
+
+fn ws_message(wire_id: u64, wire_connection_id: u64, payload: &[u8]) -> ProxyEvent {
+    ProxyEvent::WebSocketMessage {
+        id: wire_id,
+        timestamp: timestamp(wire_id),
+        connection: WebSocketConnectionInfo {
+            id: wire_connection_id,
+            url: "wss://example.com/socket".to_string(),
+            host: "example.com".to_string(),
+            tls: true,
+            listener_port: 8080,
+            protocol: Some("chat".to_string()),
+        },
+        direction: WebSocketDirection::ToClient,
+        opcode: WebSocketOpcode::Text,
+        payload: CapturedBody::from_bytes(payload.to_vec()),
+    }
+}
+
+fn wait<T>(receiver: Receiver<Result<T>>) -> Result<T> {
+    receiver
+        .recv_timeout(REPLY_TIMEOUT)
+        .expect("project writer dropped the reply channel")
+}
+
+fn capture_all(project: &ProjectHandle, events: &[ProxyEvent]) -> Vec<u64> {
+    events
+        .iter()
+        .filter_map(|event| project.capture(event).event)
+        .map(|event| event.id())
+        .collect()
+}
+
+#[test]
+fn temporary_project_assigns_distinct_ids() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let event = started(1, "GET");
+    let first = project.capture(&event).event.expect("normalized event");
+    let second = project
+        .capture(&event)
+        .event
+        .expect("duplicate normalized event");
+    assert_ne!(first.id(), second.id());
+    project.shutdown();
+}
+
+#[test]
+fn capture_round_trip_persists_http_and_websocket() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+
+    let ids = capture_all(
+        &project,
+        &[
+            started(42, "POST"),
+            response_head(42, 201),
+            finished(42, b"request-body", b"response-body"),
+        ],
+    );
+    assert_eq!(ids, vec![1, 1, 1]);
+    let http_id = ids[0];
+
+    let first_ws = project
+        .capture(&ws_message(100, 7, b"hello"))
+        .event
+        .expect("normalized websocket message");
+    let second_ws = project
+        .capture(&ws_message(101, 7, b"again"))
+        .event
+        .expect("normalized websocket message");
+    let ProxyEvent::WebSocketMessage {
+        id: ws_id,
+        connection,
+        ..
+    } = &first_ws
+    else {
+        panic!("expected a websocket event");
+    };
+    assert_eq!(connection.id, 1, "wire connection IDs are project-local");
+    assert_eq!(second_ws.id(), ws_id + 1);
+    let ProxyEvent::WebSocketMessage {
+        connection: second, ..
+    } = &second_ws
+    else {
+        panic!("expected a websocket event");
+    };
+    assert_eq!(second.id, connection.id);
+
+    let receipt = wait(project.flush()).expect("flush");
+    assert_eq!(receipt.http_count, 1);
+    assert_eq!(receipt.ws_count, 2);
+
+    let http = project
+        .get_http(http_id)
+        .expect("read HTTP record")
+        .expect("stored HTTP record");
+    assert_eq!(http.id, http_id);
+    assert_eq!(http.number, 1);
+    assert_eq!(http.request.method, "POST");
+    assert_eq!(http.status(), Some(201));
+    assert_eq!(http.request_body.data(), b"request-body");
+    assert_eq!(
+        http.response_body().expect("response body").data(),
+        b"response-body"
+    );
+    assert_eq!(http.duration(), Some(Duration::from_millis(7)));
+    assert!(!http.is_in_flight());
+
+    let ws = project
+        .get_ws(*ws_id)
+        .expect("read websocket record")
+        .expect("stored websocket record");
+    assert_eq!(ws.id, *ws_id);
+    assert_eq!(ws.payload.data(), b"hello");
+    assert_eq!(ws.connection.id, connection.id);
+    assert_eq!(ws.connection.url, "wss://example.com/socket");
+    assert_eq!(ws.direction, WebSocketDirection::ToClient);
+    assert_eq!(ws.opcode, WebSocketOpcode::Text);
+
+    let status = project.status();
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.ws_count, 2);
+    assert_eq!(status.mode, ProjectMode::Temporary);
+}
+
+#[test]
+fn save_as_switches_to_a_persistent_project_that_reopens() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(
+        &project,
+        &[
+            started(5, "GET"),
+            response_head(5, 200),
+            finished(5, b"", b"ok"),
+            ws_message(6, 3, b"message"),
+        ],
+    );
+    let http_id = ids[0];
+
+    let mut workspace = WorkspaceState::default();
+    workspace.scope.enabled = true;
+    workspace.scope.enforce = true;
+    workspace.scope.hosts = vec!["*.example.com".to_string()];
+    assert!(project.set_workspace(workspace.clone()));
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("save-as");
+    wait(project.save_as(file.path.clone())).expect("save as");
+    let status = project.status();
+    assert_eq!(status.mode.path(), Some(file.path.as_path()));
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.ws_count, 1);
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open project");
+    assert_eq!(opened.http_total, 1);
+    assert_eq!(opened.ws_total, 1);
+    assert_eq!(opened.http.len(), 1);
+    assert_eq!(opened.ws.len(), 1);
+    assert_eq!(opened.http[0].id, http_id);
+    assert_eq!(opened.http[0].status(), Some(200));
+    assert_eq!(opened.workspace, workspace);
+    assert_eq!(
+        reopened.status().mode.path(),
+        Some(file.path.as_path()),
+        "opening switches the writer to the project file"
+    );
+
+    let persisted = reopened
+        .get_http(http_id)
+        .expect("read persisted HTTP record")
+        .expect("persisted HTTP record");
+    assert_eq!(
+        persisted.response_body().expect("response body").data(),
+        b"ok"
+    );
+}
+
+#[test]
+fn save_copy_leaves_the_source_open_and_creates_a_reopenable_file() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(&project, &[started(9, "GET"), finished(9, b"", b"copy")]);
+    let http_id = ids[0];
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("save-copy");
+    wait(project.save_copy(file.path.clone())).expect("save copy");
+
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    assert!(project.status().mode.path().is_none());
+    let source = project
+        .get_http(http_id)
+        .expect("read source record")
+        .expect("source record");
+    assert_eq!(
+        source.response_body().expect("response body").data(),
+        b"copy"
+    );
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open copy");
+    assert_eq!(opened.http_total, 1);
+    assert_eq!(opened.http[0].id, http_id);
+}
+
+#[test]
+fn save_as_refuses_to_replace_an_existing_file() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let file = TempProject::new("existing");
+    std::fs::write(&file.path, b"do not replace me").expect("write existing file");
+
+    let error = wait(project.save_as(file.path.clone())).expect_err("save must be refused");
+    assert!(matches!(
+        error,
+        ProjectError::DestinationExists(ref path) if path == &file.path
+    ));
+    assert_eq!(
+        std::fs::read(&file.path).expect("read existing file"),
+        b"do not replace me"
+    );
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    assert!(project.get_http(1).expect("read project").is_none());
+}
+
+#[test]
+fn open_rejects_invalid_files_without_switching_projects() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(&project, &[started(11, "GET"), finished(11, b"", b"kept")]);
+    let http_id = ids[0];
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("junk");
+    std::fs::write(&file.path, b"this is not a redb database").expect("write junk");
+    wait(project.open(file.path.clone(), 100, 1024 * 1024)).expect_err("opening junk must fail");
+
+    let status = project.status();
+    assert_eq!(status.mode, ProjectMode::Temporary);
+    assert_eq!(status.http_count, 1);
+    let kept = project
+        .get_http(http_id)
+        .expect("read current project")
+        .expect("current project still open");
+    assert_eq!(kept.response_body().expect("response body").data(), b"kept");
+}
+
+#[test]
+fn open_rejects_an_interrupted_creation() {
+    let file = TempProject::new("incomplete");
+    let meta = ProjectMeta::new(new_project_id());
+    let db = super::super::backend::create_initializing(&file.path, &meta)
+        .expect("create initializing project");
+    drop(db);
+
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let error = wait(project.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("incomplete projects must be rejected");
+    assert!(matches!(
+        error,
+        ProjectError::IncompleteProject(ref path) if path == &file.path
+    ));
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+}
+
+#[test]
+fn open_rejects_a_newer_schema_version() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let file = TempProject::new("future-schema");
+    wait(project.save_as(file.path.clone())).expect("save as");
+    drop(project);
+
+    // Bump the schema version behind the service's back.
+    {
+        let db = super::super::backend::open_file(&file.path).expect("open raw project");
+        let tx = db.begin_write().expect("begin write");
+        {
+            let mut table = tx.open_table(schema::META).expect("meta table");
+            table
+                .insert(
+                    schema::KEY_SCHEMA_VERSION,
+                    (schema::SCHEMA_VERSION + 1).to_string().as_bytes(),
+                )
+                .expect("bump schema version");
+        }
+        tx.commit().expect("commit");
+    }
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let error = wait(reopened.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("a newer schema must be rejected");
+    assert!(matches!(
+        error,
+        ProjectError::FutureSchema { found, supported }
+            if found == schema::SCHEMA_VERSION + 1 && supported == schema::SCHEMA_VERSION
+    ));
+    assert_eq!(reopened.status().mode, ProjectMode::Temporary);
+}
+
+#[test]
+fn open_repairs_exchanges_left_in_flight() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(&project, &[started(21, "GET")]);
+    let http_id = ids[0];
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("in-flight");
+    wait(project.save_as(file.path.clone())).expect("save as");
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open project");
+    assert_eq!(opened.http_total, 1);
+    let item = &opened.http[0];
+    assert_eq!(item.id, http_id);
+    assert!(!item.is_in_flight());
+    assert_eq!(
+        item.error(),
+        Some("application terminated before exchange completed")
+    );
+    assert_eq!(reopened.status().event_loss_count, 1);
+}
+
+#[test]
+fn clearing_history_is_persisted() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(
+        &project,
+        &[
+            started(31, "GET"),
+            finished(31, b"", b"http"),
+            ws_message(32, 2, b"ws"),
+        ],
+    );
+    let http_id = ids[0];
+    let ws_id = ids[2];
+    wait(project.flush()).expect("flush");
+
+    let http_receipt = wait(project.clear_http()).expect("clear HTTP history");
+    assert_eq!(http_receipt.http_count, 0);
+    assert!(project.get_http(http_id).expect("read HTTP").is_none());
+    assert_eq!(project.status().http_count, 0);
+
+    let ws_receipt = wait(project.clear_ws()).expect("clear WebSocket history");
+    assert_eq!(ws_receipt.ws_count, 0);
+    assert!(project.get_ws(ws_id).expect("read WebSocket").is_none());
+    assert_eq!(project.status().ws_count, 0);
+
+    let file = TempProject::new("cleared");
+    wait(project.save_as(file.path.clone())).expect("save as");
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open project");
+    assert_eq!(opened.http_total, 0);
+    assert_eq!(opened.ws_total, 0);
+    assert!(opened.http.is_empty());
+    assert!(opened.ws.is_empty());
+}
+
+#[test]
+fn cleared_ids_are_not_reused() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(&project, &[started(41, "GET"), finished(41, b"", b"one")]);
+    let first_id = ids[0];
+    wait(project.flush()).expect("flush");
+    wait(project.clear_http()).expect("clear HTTP history");
+
+    let new_id = capture_all(&project, &[started(42, "GET"), finished(42, b"", b"two")])[0];
+    assert!(
+        new_id > first_id,
+        "clearing a project must not reuse durable IDs"
+    );
+    wait(project.flush()).expect("flush");
+    assert!(project.get_http(first_id).expect("read old ID").is_none());
+    assert_eq!(
+        project
+            .get_http(new_id)
+            .expect("read new HTTP record")
+            .expect("new record")
+            .response_body()
+            .expect("response body")
+            .data(),
+        b"two"
+    );
+    assert_eq!(project.status().http_count, 1);
+}
+
+#[test]
+fn workspace_is_persisted_without_switching_projects() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let mut workspace = WorkspaceState::default();
+    workspace.scope.enabled = true;
+    workspace.scope.hosts = vec!["example.com".to_string()];
+    assert!(project.set_workspace(workspace.clone()));
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("workspace");
+    wait(project.save_copy(file.path.clone())).expect("save copy");
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open copy");
+    assert_eq!(opened.workspace, workspace);
+}
+
+#[test]
+fn connect_requests_are_not_captured() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let outcome = project.capture(&started(70, "CONNECT"));
+    assert!(outcome.event.is_none());
+
+    wait(project.flush()).expect("flush");
+    assert_eq!(project.status().http_count, 0);
+}
+
+#[test]
+fn unmapped_response_events_are_returned_without_storage() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+
+    let head = response_head(999, 200);
+    let returned = project.capture(&head).event.expect("returned head");
+    assert_eq!(returned.id(), 999);
+
+    let finished = finished(999, b"", b"");
+    let returned = project.capture(&finished).event.expect("returned finish");
+    assert_eq!(returned.id(), 999);
+
+    wait(project.flush()).expect("flush");
+    let status = project.status();
+    assert_eq!(status.http_count, 0);
+    assert_eq!(status.event_loss_count, 0);
+}
+
+#[test]
+fn a_stopped_writer_rejects_new_workspace_snapshots() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    project.shutdown();
+    assert!(!project.set_workspace(WorkspaceState::default()));
+}
+
+#[test]
+fn project_mode_reports_its_file_path() {
+    assert_eq!(ProjectMode::Temporary.path(), None);
+    let path = PathBuf::from("/tmp/example.perseid");
+    assert_eq!(
+        ProjectMode::Persistent { path: path.clone() }.path(),
+        Some(path.as_path())
+    );
+}
+
+#[test]
+fn open_rejects_migrating_and_unknown_states() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let file = TempProject::new("bad-state");
+    wait(project.save_as(file.path.clone())).expect("save as");
+    drop(project);
+
+    let set_state = |state: &str| {
+        let db = super::super::backend::open_file(&file.path).expect("open raw project");
+        let tx = db.begin_write().expect("begin write");
+        {
+            let mut table = tx.open_table(schema::META).expect("meta table");
+            table
+                .insert(schema::KEY_STATE, state.as_bytes())
+                .expect("set project state");
+        }
+        tx.commit().expect("commit");
+    };
+
+    set_state(schema::STATE_MIGRATING);
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let error = wait(reopened.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("a migrating project must be rejected");
+    assert!(
+        matches!(error, ProjectError::InvalidProject(ref message) if message.contains("migrating"))
+    );
+    assert_eq!(reopened.status().mode, ProjectMode::Temporary);
+
+    set_state("future-state");
+    let error = wait(reopened.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("an unknown state must be rejected");
+    assert!(
+        matches!(error, ProjectError::InvalidProject(ref message) if message.contains("unknown project state"))
+    );
+    assert_eq!(reopened.status().mode, ProjectMode::Temporary);
+}
