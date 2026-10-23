@@ -1,7 +1,8 @@
 # Perseid
 
-[Project home](../../README.md) · [Documentation](../../docs/README.md) ·
-[Contributing](../../CONTRIBUTING.md)
+[Project home](https://github.com/andyintheshell/perseid) ·
+[Documentation](https://github.com/andyintheshell/perseid/tree/main/docs) ·
+[Contributing](https://github.com/andyintheshell/perseid/blob/main/CONTRIBUTING.md)
 
 The single `perseid` package contains the native egui desktop workbench and
 its embedded HTTP/1.1/HTTP/2 interception proxy with WebSocket capture. Rust
@@ -17,8 +18,8 @@ From the repository root:
 cargo run -p perseid --locked
 ```
 
-See [Getting started](../../docs/getting-started.md) for platform dependencies,
-Homebrew setup, CLI flags, and a local-target walkthrough.
+See [Getting started](https://github.com/andyintheshell/perseid/blob/main/docs/getting-started.md)
+for platform dependencies, Homebrew setup, CLI flags, and a local-target walkthrough.
 
 ## Use the proxy from Rust
 
@@ -65,13 +66,15 @@ Repeater admission includes queued requests, active work, and unread results.
 positions and four attack types, run up to 32 requests concurrently, and deliver
 bounded result events. Oversized requests and capture configurations are
 rejected separately. See the
-[workbench limits](../../docs/workbench.md#repeater) for the count/byte budgets.
+[workbench limits](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#repeater)
+for the count/byte budgets.
 
 Loaded CA certificate/key pairs are checked for a match. The desktop app owns
-the [generation-based CA store](../../docs/tls.md#where-the-ca-lives); the proxy
-API itself still has no filesystem policy or automatic trust installation.
+the [generation-based CA store](https://github.com/andyintheshell/perseid/blob/main/docs/tls.md#where-the-ca-lives);
+the proxy API itself still has no filesystem policy or automatic trust installation.
 
-For a runnable event-consumer example, see [headless.rs](examples/headless.rs):
+For a runnable event-consumer example, see
+[headless.rs](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/examples/headless.rs):
 
 ```sh
 cargo run -p perseid --example headless --locked
@@ -85,8 +88,9 @@ the checkout you are using.
 ## Safety and license
 
 Use only on explicitly authorized targets. Captured traffic and CA keys are
-sensitive; read [Safety and privacy](../../docs/safety.md) and the
-[security policy](../../SECURITY.md).
+sensitive; read
+[Safety and privacy](https://github.com/andyintheshell/perseid/blob/main/docs/safety.md)
+and the [security policy](https://github.com/andyintheshell/perseid/blob/main/SECURITY.md).
 
 Dual-licensed under MIT or Apache-2.0, at your option.
 
