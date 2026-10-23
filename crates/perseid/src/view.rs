@@ -479,7 +479,7 @@ fn push_headers(out: &mut String, headers: &[(String, String)]) {
 /// Header names arrive lowercased from the HTTP stack. Present them in the
 /// title-case form used by browsers and Burp's message editor. This only
 /// affects the displayed message; forwarding always uses the captured bytes.
-fn display_header_name(name: &str) -> String {
+pub(crate) fn display_header_name(name: &str) -> String {
     if let Some(canonical) = canonical_header_name(name) {
         return canonical.to_owned();
     }

@@ -114,7 +114,10 @@ impl PerseidApp {
 
         egui::Panel::bottom(PROXY_DETAIL_ID)
             .resizable(true)
-            .default_size(300.0)
+            // Burp's history detail takes close to half of the workspace.
+            // Computing it from the available height keeps that proportion on
+            // both compact and large windows.
+            .default_size((ui.available_height() * 0.45).max(240.0))
             .min_size(220.0)
             .frame(
                 egui::Frame::NONE
@@ -782,6 +785,7 @@ impl PerseidApp {
             id,
             request: view::request_views(item),
             response: view::response_views(item),
+            inspector: super::inspector::InspectorModel::from_history(item),
         });
     }
 
@@ -815,10 +819,14 @@ impl PerseidApp {
 
         // Burp's default message-editor layout is horizontal: request and
         // response are both visible, each with its own Pretty/Raw/Hex tabs.
-        // Keep the splitter resizable so wide messages still have room.
+        // The Inspector occupies a side panel on the right, with its own
+        // vertical tab rail. Keep the splitter resizable so wide messages
+        // still have room.
         let mut request_view = self.request_view;
         let mut response_view = self.response_view;
         let default_width = (ui.available_width() * 0.5).max(220.0);
+
+        super::inspector::side_panel(ui, &mut self.inspector, id, &cache.inspector);
 
         egui::Panel::left(PROXY_REQUEST_ID)
             .resizable(true)

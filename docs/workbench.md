@@ -103,6 +103,20 @@ rolling graph. This is not process RSS or a hard memory ceiling; see
 Select a history row to open the request and response side by side. Drag the
 divider to resize the panes.
 
+The **Inspector** rail on the right is open by default. It parses the selected
+exchange into collapsible sections, starting with all sections closed:
+
+- **Request**: attributes, query parameters, URL-encoded body parameters,
+  cookies, and headers.
+- **Response**: attributes, cookies, and headers.
+
+Click a section header to open it, or use the header icons to expand or collapse
+all non-empty sections. Query, form, and percent-encoded cookie values are
+decoded for display; the message editor continues to show the representation
+being forwarded. The Inspector reflects the captured exchange and does not
+rewrite it. Its width is draggable. The **Notes** tab stores a note per exchange
+for the current session; clearing history also clears the notes.
+
 | View | Representation |
 | --- | --- |
 | **Pretty** | JSON indentation, HTML/XML layout, and one field per URL-encoded form entry; otherwise readable text. |

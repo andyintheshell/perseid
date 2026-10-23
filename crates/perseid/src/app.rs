@@ -15,6 +15,7 @@
 
 mod comparer;
 mod decoder;
+mod inspector;
 mod intercept;
 mod intruder;
 mod message_view;
@@ -209,6 +210,7 @@ pub struct PerseidApp {
     target_section: TargetSection,
     request_view: MessageView,
     response_view: MessageView,
+    inspector: inspector::InspectorState,
     /// Direct replay engine, started on the first Send so a proxy-off run can
     /// still use Repeater.
     repeater: Option<Repeater>,
@@ -256,6 +258,7 @@ struct DetailCache {
     id: u64,
     request: MessageViews,
     response: MessageViews,
+    inspector: inspector::InspectorModel,
 }
 
 /// Formatted Pretty/Raw/Hex views for one selected WebSocket message.
@@ -448,6 +451,7 @@ impl PerseidApp {
             target_section: TargetSection::default(),
             request_view: MessageView::default(),
             response_view: MessageView::default(),
+            inspector: inspector::InspectorState::default(),
             repeater: None,
             repeater_tabs: Vec::new(),
             repeater_active: 0,
@@ -778,6 +782,7 @@ impl PerseidApp {
         self.history.clear();
         self.selected = None;
         self.detail = None;
+        self.inspector.clear_notes();
         self.invalidate_views();
     }
 

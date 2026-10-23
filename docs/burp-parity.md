@@ -92,10 +92,13 @@ indents JSON and HTML/XML and lays out URL-encoded forms one field per line;
 Pretty and Raw add line numbers, syntax highlighting, and Burp-style title-cased
 header names. All three views decode gzip, deflate, and Brotli bodies, mirroring
 Burp's default unpacking. The request and response panes use Burp's horizontal
-side-by-side layout. Like Burp, the proxy removes unsupported `Accept-Encoding`
-codings before forwarding. Interception and body rules still operate on the wire
-representation, and forwarding keeps the original response encoding. Scope
-enforcement is opt-in, and an empty scope allows every host.
+side-by-side layout, and the history detail has a right-hand Inspector/Notes
+rail. The Inspector parses the selected exchange into collapsible request and
+response attributes, parameters, cookies, and headers; notes are kept per
+exchange for the session. Like Burp, the proxy removes unsupported
+`Accept-Encoding` codings before forwarding. Interception and body rules still
+operate on the wire representation, and forwarding keeps the original response
+encoding. Scope enforcement is opt-in, and an empty scope allows every host.
 
 Intruder follows Burp's marker-and-payload model. A raw request can be seeded
 from history or edited in place, values are wrapped in `$$`, and one payload
