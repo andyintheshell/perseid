@@ -1223,6 +1223,38 @@ fn legend_chip(ui: &mut egui::Ui, label: &str, color: Color32) {
         });
 }
 
+impl PerseidApp {
+    pub(super) fn comparer_workspace(&self) -> Vec<Vec<u8>> {
+        self.comparer
+            .items
+            .iter()
+            .map(|item| item.data.clone())
+            .collect()
+    }
+
+    pub(super) fn apply_comparer_workspace(&mut self, items: &[Vec<u8>]) {
+        let state = &mut self.comparer;
+        state.items = items
+            .iter()
+            .filter(|data| data.len() <= MAX_ITEM_BYTES)
+            .take(MAX_ITEMS)
+            .map(|data| ComparableItem::new(data.clone()))
+            .collect();
+        state.selected = [None, None];
+        state.active = 0;
+        state.feedback = None;
+        state.load = None;
+        state.paste = None;
+        state.result = None;
+        state.result_open = false;
+        state.result_views = [ResultView::Text, ResultView::Text];
+        state.sync_views = false;
+        state.diff_cursor = 0;
+        state.result_scroll = [Vec2::ZERO; 2];
+        state.result_pane_rects = [None, None];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

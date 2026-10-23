@@ -19,6 +19,7 @@ mod inspector;
 mod intercept;
 mod intruder;
 mod message_view;
+mod project_ui;
 mod proxy;
 mod repeater;
 mod rules;
@@ -228,6 +229,7 @@ pub struct PerseidApp {
     intruder: intruder::IntruderState,
     decoder: decoder::DecoderState,
     comparer: comparer::ComparerState,
+    project: project_ui::ProjectUi,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
     scope_enabled: bool,
@@ -467,6 +469,7 @@ impl PerseidApp {
             intruder: intruder::IntruderState::new(),
             decoder: decoder::DecoderState::new(),
             comparer: comparer::ComparerState::new(),
+            project: project_ui::ProjectUi::new(args.history_limit, args.history_bytes),
             site_map: None,
             scope: BTreeSet::new(),
             scope_enabled: false,
@@ -642,6 +645,19 @@ impl PerseidApp {
                     queue_drained = true;
                     break;
                 };
+                // Give the project first refusal: it assigns stable IDs and
+                // queues the normalized event for the writer. The UI applies
+                // the returned event so its rows and the file agree.
+                let event = match self.project.handle() {
+                    Some(handle) => {
+                        let outcome = handle.capture(&event);
+                        let Some(event) = outcome.event else {
+                            continue;
+                        };
+                        event
+                    }
+                    None => event,
+                };
                 let id = event.id();
                 selected_changed |= selected == Some(id) || websocket_selected == Some(id);
                 match event {
@@ -655,9 +671,17 @@ impl PerseidApp {
             }
             if queue_drained && dropped > self.dropped_seen {
                 self.dropped_seen = dropped;
-                selected_changed |= self.history.interrupt_in_flight(
+                let interrupted = self.history.interrupt_in_flight(
                     "capture events were dropped; the exchange result is unavailable",
-                ) > 0;
+                );
+                selected_changed |= interrupted > 0;
+                if interrupted > 0
+                    && let Some(handle) = self.project.handle()
+                {
+                    handle.interrupt_in_flight(
+                        "capture events were dropped; the exchange result is unavailable",
+                    );
+                }
             }
             if !queue_drained || proxy.dropped_events() > self.dropped_seen {
                 ctx.request_repaint();
@@ -684,6 +708,9 @@ impl PerseidApp {
             self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
             self.history
                 .interrupt_in_flight("proxy stopped before the exchange finished");
+            if let Some(handle) = self.project.handle() {
+                handle.interrupt_in_flight("proxy stopped before the exchange finished");
+            }
             selected_changed = true;
             self.clear_intercept_queue();
         }
@@ -792,6 +819,7 @@ impl PerseidApp {
         self.inspector.clear_notes();
         self.search.clear_history();
         self.invalidate_views();
+        self.project.clear_http_history();
     }
 
     fn clear_websocket_history(&mut self) {
@@ -799,6 +827,7 @@ impl PerseidApp {
         self.websocket_selected = None;
         self.websocket_detail = None;
         self.invalidate_views();
+        self.project.clear_ws_history();
     }
 
     fn selected_row_index(&self) -> Option<usize> {
@@ -1030,6 +1059,7 @@ impl PerseidApp {
                 widgets.active.bg_stroke = Stroke::NONE;
                 widgets.active.fg_stroke = Stroke::new(1.0, theme::TEXT);
 
+                self.project_menu(ui);
                 ui.menu_button("Perseid", |ui| {
                     if ui.button("About Perseid").clicked() {
                         self.about_open = true;
@@ -1195,6 +1225,8 @@ impl PerseidApp {
                 view::human_bytes(self.history.retained_bytes() as u64),
                 view::human_bytes(self.history.byte_limit() as u64)
             ));
+
+            self.project_status_widget(ui);
 
             let in_flight = self.history.in_flight();
             if in_flight > 0 {
@@ -1378,6 +1410,7 @@ impl eframe::App for PerseidApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
+        self.poll_project();
         self.drain_events(&ctx);
         self.comparer.handle_input(&ctx);
         self.keyboard(&ctx);
@@ -1419,6 +1452,7 @@ impl eframe::App for PerseidApp {
         self.memory_window(&ctx);
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
+        self.project_windows(&ctx);
         self.comparer_windows(&ctx);
         self.search_window(&ctx);
         self.resize_handles(ui);
@@ -1435,6 +1469,10 @@ impl eframe::App for PerseidApp {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
         ctx.request_repaint_after(self.memory.time_until_next_sample());
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.shutdown_project();
     }
 }
 

@@ -16,6 +16,7 @@ use egui::TextEdit;
 use super::message_view::message_text;
 use super::widgets::{empty_state, message_mode_tab, section_tab};
 use super::*;
+use crate::project::RepeaterWorkspace;
 use crate::view::{self, MessageViews};
 
 const REPEATER_TABS_ID: &str = "perseid.repeater.tabs";
@@ -731,6 +732,40 @@ fn repeater_status_color(status: u16) -> Color32 {
         4 => theme::AMBER,
         5 => theme::RED,
         _ => theme::GRAY,
+    }
+}
+
+impl PerseidApp {
+    pub(super) fn repeater_workspace(&self) -> Vec<RepeaterWorkspace> {
+        self.repeater_tabs
+            .iter()
+            .map(|tab| RepeaterWorkspace {
+                id: tab.id,
+                title: tab.title.clone(),
+                scheme: tab.scheme.clone(),
+                host: tab.host.clone(),
+                request: tab.request.clone(),
+                note: tab.note.clone(),
+            })
+            .collect()
+    }
+
+    pub(super) fn apply_repeater_workspace(&mut self, tabs: &[RepeaterWorkspace]) {
+        self.repeater_tabs.clear();
+        self.repeater_active = 0;
+        let mut next_id = 1;
+        for workspace in tabs {
+            let id = workspace.id.max(next_id);
+            next_id = id.saturating_add(1).max(next_id.saturating_add(1));
+            let mut tab = RepeaterTab::new(id);
+            tab.title = workspace.title.clone();
+            tab.scheme = workspace.scheme.clone();
+            tab.host = workspace.host.clone();
+            tab.request = workspace.request.clone();
+            tab.note = workspace.note.clone();
+            self.repeater_tabs.push(tab);
+        }
+        self.repeater_next_tab = next_id;
     }
 }
 
