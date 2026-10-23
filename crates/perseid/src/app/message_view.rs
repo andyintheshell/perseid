@@ -6,6 +6,7 @@
 //! remain read-only. Hex uses a virtualized row list because a large dump is
 //! too expensive to lay out as one galley.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use egui::text_selection::LabelSelectionState;
@@ -123,7 +124,24 @@ pub(super) fn message_text_labeled(
     copy_label: &str,
 ) {
     let mut readonly = text;
-    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label);
+    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label, None);
+}
+
+/// Render read-only message text with search-match backgrounds.
+pub(super) fn message_text_with_matches(
+    ui: &mut egui::Ui,
+    id: u64,
+    pane: MessagePane,
+    mode: MessageView,
+    text: &str,
+    matches: &[Range<usize>],
+) {
+    let copy_label = match pane {
+        MessagePane::Request => "Copy request",
+        MessagePane::Response => "Copy response",
+    };
+    let mut readonly = text;
+    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label, Some(matches));
 }
 
 /// Render the shared message frame with an editable text buffer.
@@ -141,7 +159,7 @@ pub(super) fn message_editor(
         MessagePane::Request => "Copy request",
         MessagePane::Response => "Copy response",
     };
-    message_frame(ui, id, pane, mode, text, copy_label)
+    message_frame(ui, id, pane, mode, text, copy_label, None)
 }
 
 fn message_frame(
@@ -151,6 +169,7 @@ fn message_frame(
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
     copy_label: &str,
+    matches: Option<&[Range<usize>]>,
 ) -> bool {
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
@@ -171,7 +190,7 @@ fn message_frame(
                 // proportional to the visible page rather than the whole dump.
                 message_hex(ui, id, pane, mode, text.as_str());
             } else {
-                let output = message_numbered(ui, id, pane, mode, text);
+                let output = message_numbered(ui, id, pane, mode, text, matches);
                 selection = output.selection;
                 changed = output.changed;
             }
@@ -236,6 +255,7 @@ fn message_numbered(
     pane: MessagePane,
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
+    matches: Option<&[Range<usize>]>,
 ) -> NumberedOutput {
     let line_count = text.as_str().lines().count() + usize::from(text.as_str().ends_with('\n'));
     let font = message_font();
@@ -261,7 +281,10 @@ fn message_numbered(
         bottom: 0,
     });
     let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-        let job = highlight::message_job(buffer.as_str(), wrap_width, &font);
+        let mut job = highlight::message_job(buffer.as_str(), wrap_width, &font);
+        if let Some(matches) = matches {
+            highlight::paint_matches(&mut job, matches, theme::SEARCH_MATCH);
+        }
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
@@ -549,7 +572,14 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let mut readonly = text;
-            let _ = message_numbered(ui, 1, MessagePane::Request, MessageView::Raw, &mut readonly);
+            let _ = message_numbered(
+                ui,
+                1,
+                MessagePane::Request,
+                MessageView::Raw,
+                &mut readonly,
+                None,
+            );
         });
         let commands = output.platform_output.commands.clone();
         output.drop_without_applying_deltas();
@@ -675,6 +705,7 @@ mod tests {
                                 MessagePane::Request,
                                 MessageView::Raw,
                                 &mut readonly,
+                                None,
                             );
                         },
                     );

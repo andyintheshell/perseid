@@ -41,6 +41,51 @@ pub(super) fn main_tab_button(ui: &mut egui::Ui, selected: bool, label: &str) ->
     tab_button(ui, selected, label, MAIN_TAB_STYLE, false)
 }
 
+/// The magnifying-glass toolbar button that opens Search.
+pub(super) fn search_button(ui: &mut egui::Ui, selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered();
+        let fill = if selected {
+            theme::ACCENT_SOFT
+        } else if hovered {
+            theme::ACCENT_WASH
+        } else {
+            Color32::TRANSPARENT
+        };
+        if fill != Color32::TRANSPARENT {
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(4), fill);
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                egui::CornerRadius::same(4),
+                Stroke::new(1.0, theme::ACCENT_DARK),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        let color = if selected {
+            theme::ACCENT_DARK
+        } else {
+            theme::TEXT_MUTED
+        };
+        let center = rect.center() + egui::vec2(-1.5, -1.5);
+        ui.painter()
+            .circle_stroke(center, 4.4, Stroke::new(1.6, color));
+        ui.painter().line_segment(
+            [center + egui::vec2(3.2, 3.2), center + egui::vec2(6.4, 6.4)],
+            Stroke::new(1.8, color),
+        );
+    }
+
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, "Search")
+    });
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 pub(super) fn section_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
     tab_button(ui, selected, label, SECTION_TAB_STYLE, false)
 }

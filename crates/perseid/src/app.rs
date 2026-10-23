@@ -4,13 +4,13 @@
 //! Target, Proxy, Intruder, Repeater, Decoder, and Comparer. Proxy history,
 //! editable interception, the Target site map, scope enforcement,
 //! match/replace rules, the direct Repeater, Intruder's payload attacks,
-//! Decoder's encode/decode/hash chain, and Comparer's word/byte diffs are
-//! live.
+//! Decoder's encode/decode/hash chain, Comparer's word/byte diffs, and the
+//! global Search window are live.
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
 //! [`comparer`], [`decoder`], [`intercept`], [`intruder`], [`proxy`],
-//! [`repeater`], [`rules`], [`target`], [`windows`], [`widgets`],
+//! [`repeater`], [`rules`], [`search`], [`target`], [`windows`], [`widgets`],
 //! [`message_view`], [`util`], and [`scale`].
 
 mod comparer;
@@ -25,6 +25,7 @@ mod rules;
 mod scale;
 #[cfg(feature = "screenshots")]
 mod screenshots;
+mod search;
 mod target;
 mod tls;
 mod util;
@@ -57,7 +58,7 @@ use crate::websocket_history::WebSocketHistory;
 
 use self::scale::{desktop_scale_override, resize_initial_window, resolve_ui_scale, stepped_scale};
 use self::util::{matches_filter, websocket_matches_filter};
-use self::widgets::main_tab_button;
+use self::widgets::{main_tab_button, search_button};
 
 /// Bound on events applied per frame so a flood cannot stall rendering.
 const MAX_EVENTS_PER_FRAME: usize = 1024;
@@ -105,6 +106,10 @@ const TAB_DECODER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new
 const TAB_COMPARER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::C,
+);
+const SEARCH_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    Key::F,
 );
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -211,6 +216,7 @@ pub struct PerseidApp {
     request_view: MessageView,
     response_view: MessageView,
     inspector: inspector::InspectorState,
+    search: search::SearchState,
     /// Direct replay engine, started on the first Send so a proxy-off run can
     /// still use Repeater.
     repeater: Option<Repeater>,
@@ -452,6 +458,7 @@ impl PerseidApp {
             request_view: MessageView::default(),
             response_view: MessageView::default(),
             inspector: inspector::InspectorState::default(),
+            search: search::SearchState::default(),
             repeater: None,
             repeater_tabs: Vec::new(),
             repeater_active: 0,
@@ -783,6 +790,7 @@ impl PerseidApp {
         self.selected = None;
         self.detail = None;
         self.inspector.clear_notes();
+        self.search.clear_history();
         self.invalidate_views();
     }
 
@@ -852,6 +860,10 @@ impl PerseidApp {
 
     fn keyboard(&mut self, ctx: &egui::Context) {
         self.zoom_shortcuts(ctx);
+
+        if ctx.input_mut(|input| input.consume_shortcut(&SEARCH_SHORTCUT)) {
+            self.search.focus_or_open();
+        }
 
         let (target, proxy, intruder, repeater, decoder, comparer) = ctx.input_mut(|input| {
             (
@@ -1120,6 +1132,7 @@ impl PerseidApp {
             ui.ctx().format_shortcut(&TAB_DECODER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_COMPARER_SHORTCUT),
         ];
+        let search_shortcut = ui.ctx().format_shortcut(&SEARCH_SHORTCUT);
         ui.horizontal(|ui| {
             for (index, (tab, label)) in MainTab::ALL.iter().enumerate() {
                 let response = main_tab_button(ui, self.main_tab == *tab, label)
@@ -1131,6 +1144,13 @@ impl PerseidApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if search_button(ui, self.search.open)
+                    .on_hover_text(format!("Search ({search_shortcut})"))
+                    .clicked()
+                {
+                    self.search.toggle();
+                }
+                ui.separator();
                 self.capture_toggle(ui);
                 ui.separator();
                 if let Some(proxy) = &self.proxy {
@@ -1400,6 +1420,7 @@ impl eframe::App for PerseidApp {
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
         self.comparer_windows(&ctx);
+        self.search_window(&ctx);
         self.resize_handles(ui);
 
         #[cfg(feature = "screenshots")]

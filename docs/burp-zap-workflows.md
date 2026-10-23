@@ -181,7 +181,7 @@ Status values: **Working** means the workflow is usable end to end today;
 
 | Workflow | Burp CE rank | ZAP rank | Perseid today | Priority |
 | --- | --- | --- | --- | --- |
-| Proxy capture and HTTP history | 1 | 2 | **Working**, with a bounded in-memory history, metadata filter, and scope filter; no persistence or body search. | Maintain and harden |
+| Proxy capture and HTTP history | 1 | 2 | **Working**, with a bounded in-memory history, metadata filter, scope filter, and a global body/regex Search window; no persistence. | Maintain and harden |
 | Repeater / manual request editor | 2 | 4 | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. No WebSocket replay, saved tabs, or persistence; replay bypasses proxy scope and rewriting. | Maintain; WebSocket in M4 |
 | Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, and binary bodies are limited; WebSocket messages are captured in history but cannot be held or edited. | Maintain |
 | Target scope and site map | 4 | 3 | **Partial**: scope filtering and blocking work; the site map is built from captured history only. No crawl, parameter discovery, annotations, or persisted scope. | Maintain; improve with search |
@@ -194,7 +194,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Comparer / diff | 9 | 12 | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. In-memory only. | Maintain |
 | WebSocket testing | 10 | 11 | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. No message interception, editing, replay, or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | 11 | 8 | **Partial**: clipboard copy of a request, response, or selection; no save, export, HAR, curl, or report generation. | **P2 — after parity** |
-| Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: bounded in-memory history plus a metadata substring filter; no SQLite store, body search, annotations, or saved settings. | **P0 — M3** |
+| Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: bounded in-memory history with a metadata filter and a global body/regex Search window; no SQLite store, annotations, or saved settings. | **P0 — M3** |
 | Sequencer / token analysis | 12 | 13 | **Missing**: no token sampling or randomness analysis. | **P1 — M4** |
 | Extensions, scripts, and automation/API | 13 | 10 and 14 | **Missing**: no extension point, scripting layer, or automation API. Native extensions are post-parity. | **Post-parity** |
 

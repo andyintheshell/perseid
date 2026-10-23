@@ -1,5 +1,6 @@
 //! Formatting and rendering helpers for the history and detail views.
 
+use std::borrow::Cow;
 use std::time::{Duration, SystemTime};
 
 use egui::Color32;
@@ -264,6 +265,44 @@ pub fn response_views(item: &HistoryItem) -> MessageViews {
         pretty,
         raw,
         hex: hex_preview(&bytes),
+    }
+}
+
+/// The request head as shown by the message editor, including the request
+/// line and displayed headers.
+pub(crate) fn request_head(item: &HistoryItem) -> String {
+    let decoded = decode_request(item);
+    format_request_head_with(item, &decoded)
+}
+
+/// The response head as shown by the message editor, including the status
+/// line and displayed headers.
+pub(crate) fn response_head(item: &HistoryItem) -> String {
+    let decoded = decode_response(item);
+    format_response_head_with(item, &decoded)
+}
+
+/// Decoded request-body bytes for searching.
+///
+/// This follows the message editor's representation: supported content
+/// encodings are unpacked, while unsupported or malformed encodings fall back
+/// to the captured wire bytes. The returned bytes are borrowed when no
+/// decoding is needed, so a history-wide search does not copy every body.
+pub(crate) fn request_body_for_search(item: &HistoryItem) -> Cow<'_, [u8]> {
+    match decode_request(item) {
+        Ok(Some(decoded)) => Cow::Owned(decoded.bytes),
+        _ => Cow::Borrowed(item.request_body.data()),
+    }
+}
+
+/// Decoded response-body bytes for searching. See
+/// [`request_body_for_search`] for the representation rules.
+pub(crate) fn response_body_for_search(item: &HistoryItem) -> Cow<'_, [u8]> {
+    match decode_response(item) {
+        Ok(Some(decoded)) => Cow::Owned(decoded.bytes),
+        _ => item
+            .response_body()
+            .map_or(Cow::Borrowed(&[][..]), |body| Cow::Borrowed(body.data())),
     }
 }
 

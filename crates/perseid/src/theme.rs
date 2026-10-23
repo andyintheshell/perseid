@@ -31,6 +31,9 @@ pub const ACCENT_DARK: Color32 = Color32::from_rgb(0xad, 0x2f, 0x15);
 pub const ACCENT_SOFT: Color32 = Color32::from_rgb(0xff, 0xdd, 0xd3);
 pub const ACCENT_WASH: Color32 = Color32::from_rgb(0xff, 0xf3, 0xef);
 pub const SELECTED: Color32 = Color32::from_rgb(0xfb, 0xd9, 0xcd);
+/// Background for search matches in message text. Warm yellow keeps the
+/// syntax colors legible while matching Burp's highlight convention.
+pub const SEARCH_MATCH: Color32 = Color32::from_rgb(0xff, 0xe8, 0x94);
 pub const GREEN: Color32 = Color32::from_rgb(0x1e, 0x6a, 0x3e);
 pub const BLUE: Color32 = Color32::from_rgb(0x1d, 0x5d, 0x90);
 pub const AMBER: Color32 = Color32::from_rgb(0x86, 0x50, 0x00);
