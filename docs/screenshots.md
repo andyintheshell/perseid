@@ -11,10 +11,10 @@ The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
-[History](#proxy--http-history) · [WebSockets history](#proxy--websockets-history) ·
-[Intercept](#proxy--intercept) · [Intruder](#intruder) · [Repeater](#repeater) ·
-[Decoder](#decoder) · [Comparer](#comparer) · [Comparer result](#comparer-result) ·
-[Memory](#memory-usage)
+[History](#proxy--http-history) · [Search](#search) ·
+[WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
+[Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
+[Comparer](#comparer) · [Comparer result](#comparer-result) · [Memory](#memory-usage)
 
 ## Proxy > HTTP history
 
@@ -22,6 +22,14 @@ The request and response editors open side by side, with the parsed Inspector
 on the right and per-exchange Notes behind its rail tab.
 
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
+
+## Search
+
+The top-toolbar magnifier opens a floating search window over the HTTP
+history. Search request or response heads and decoded bodies, then inspect the
+selected result in Pretty, Raw, or Hex with matches highlighted.
+
+![Search window with a decoded JSON response and highlighted matches](images/perseid-search.png)
 
 ## Proxy > WebSockets history
 

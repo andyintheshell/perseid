@@ -19,7 +19,8 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | **Comparer** | Word- or byte-level diffs between any two requests, responses, or loaded messages. |
 
 See the [screenshot gallery](screenshots.md) for each tab. The app opens on
-**Proxy > HTTP history**.
+**Proxy > HTTP history**. The top-toolbar magnifier opens the cross-history
+[search window](#search-captured-traffic) without switching tabs.
 
 ## Target and scope
 
@@ -140,6 +141,50 @@ a **128-level nesting limit**. If formatting would exceed a budget, the view
 falls back to bounded Raw text rather than expanding indentation without limit.
 These body-formatting limits are separate from capture and decoded-preview
 limits and do not make the whole editor or process a fixed-size allocation.
+
+## Search captured traffic
+
+Click the magnifying glass at the right side of the top toolbar, or press
+`Ctrl`/`Cmd`+`Shift`+`F`, to open the floating **Search** window. Type a term
+and press **Go** or `Enter`. Search covers retained **Proxy history**, including
+decrypted HTTPS exchanges.
+
+Choose which parts of each exchange to examine:
+
+- **Request headers** searches the request line and displayed headers.
+- **Request body** searches the decoded request body.
+- **Response headers** searches the status line and displayed headers.
+- **Response body** searches the decoded response body.
+
+The request and response body locations are on by default, and the headers are
+included too. Supported gzip, deflate, and Brotli bodies are decoded before
+matching, so searching for readable response text works even when the captured
+wire body was compressed. Unsupported or malformed encodings fall back to the
+captured bytes, matching the message editor's representation.
+
+The options follow Burp's search model:
+
+- **Case sensitive** makes literal and regex matching case-sensitive.
+- **Regex** treats the query as a regular expression. Invalid expressions show
+  an error instead of running.
+- **Negative match** returns exchanges that do **not** match in any selected
+  location.
+- **In-scope only** restricts results to the host rules in **Target > Scope**.
+  An empty scope includes every host.
+- **Dynamic update** reruns the search as the query, options, or captured
+  history change. Leave it off to run only when you press Go or Enter.
+
+The results table shows the source, host, URL, status code, response length, and
+request time. Select a row to inspect its request or response below. The detail
+pane has **Pretty**, **Raw**, and **Hex** views and the same Inspector/Notes rail
+as the history detail. Matches in the selected view are highlighted, and the
+detail header reports the match count.
+
+Search is limited to what remains in the bounded in-memory HTTP history.
+WebSocket messages, Repeater traffic, and their responses are not included.
+Matching uses the decoded body representation; uncompressed retained bodies
+are searched in full, while decoded compressed previews are bounded by the
+same decoder limits as the message editor.
 
 ## Intercept and edit
 
@@ -373,6 +418,7 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Action | Shortcut |
 | --- | --- |
 | Target / Proxy / Intruder / Repeater / Decoder / Comparer | `Ctrl`+`Shift`+`T` / `P` / `I` / `R` / `D` / `C` |
+| Open Search and focus its query | `Ctrl`+`Shift`+`F` |
 | Focus the history filter | `Ctrl`+`F` |
 | Leave the filter | `Esc` |
 | Move through history, when not editing text | `j` / `k` or up/down arrows |

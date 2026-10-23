@@ -48,9 +48,11 @@
                     WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
         </File>
       </Component>
-      <Component Id="PerseidLicenses" Guid="*">
+      <Component Id="PerseidMITLicense" Guid="*">
         <File Id="PerseidMIT" Source="$(var.BinDir)\LICENSE-MIT" KeyPath="yes" />
-        <File Id="PerseidApache" Source="$(var.BinDir)\LICENSE-APACHE" />
+      </Component>
+      <Component Id="PerseidApacheLicense" Guid="*">
+        <File Id="PerseidApache" Source="$(var.BinDir)\LICENSE-APACHE" KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>

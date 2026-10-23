@@ -26,6 +26,7 @@ use super::decoder::DecoderState;
 use super::intercept::InterceptEntry;
 use super::intruder::IntruderState;
 use super::repeater::RepeaterTab;
+use super::search::SearchState;
 use super::*;
 use crate::history::History;
 use crate::websocket_history::WebSocketHistory;
@@ -59,6 +60,7 @@ const SCENE_FILES: &[&str] = &[
     "perseid-comparer.png",
     "perseid-comparer-result.png",
     "perseid-proxy-websockets.png",
+    "perseid-search.png",
 ];
 
 const CURL_UA: &str = "curl/8.22.0";
@@ -310,6 +312,7 @@ impl PerseidApp {
         self.intruder = IntruderState::new();
         self.decoder = DecoderState::new();
         self.comparer = ComparerState::new();
+        self.search = SearchState::default();
 
         match index {
             // Proxy > HTTP history (the README scene).
@@ -414,6 +417,13 @@ impl PerseidApp {
                 self.proxy_section = ProxySection::WebSocketsHistory;
                 self.websocket_selected = Some(23);
                 self.websocket_view = MessageView::Pretty;
+            }
+            // Search with a decoded response body selected.
+            12 => {
+                self.main_tab = MainTab::Proxy;
+                self.proxy_section = ProxySection::HttpHistory;
+                self.selected = Some(2);
+                self.search.seed_screenshot(&self.history, &self.scope);
             }
             _ => return Err(format!("unknown screenshot scene {index}")),
         }

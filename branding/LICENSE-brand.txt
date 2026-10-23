@@ -1,0 +1,24 @@
+Perseid brand assets: terms of use
+
+The Perseid name, wordmark, logos, icons, and related visual identity (the
+"Perseid Marks"), including the files under `branding/` and the embedded copies
+under `crates/perseid/assets/`, identify the official Perseid project. The
+Perseid Marks are reserved for this project and are not covered by the MIT OR
+Apache-2.0 license for the source code. Nothing in those licenses grants a
+right to use the Perseid Marks to brand another project.
+
+Permission
+
+You may use the Perseid Marks unchanged only to identify the official Perseid
+repository, application, documentation, and unmodified official builds.
+
+Forks and derivatives
+
+If you publish or distribute a fork, modified version, or derivative project,
+you must remove or replace the Perseid Marks and use your own name and branding.
+You may refer to Perseid in plain text to identify the upstream project, but do
+not imply that your work is official, affiliated with, endorsed by, or supported
+by the Perseid project.
+
+Other use requires prior written permission from the project maintainer. All
+other rights are reserved.
