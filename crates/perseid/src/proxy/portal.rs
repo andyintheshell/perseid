@@ -13,7 +13,7 @@ use http::{Method, Request, Response, StatusCode};
 use hyper::body::Incoming;
 
 use crate::proxy::server::Ctx;
-use crate::proxy::util::{ProxyBody, text_body, text_response};
+use crate::proxy::util::{ProxyBody, display_ip, text_body, text_response};
 
 const CERT_PATH: &str = "/perseid-ca.pem";
 const PORTAL_HOST: &str = "perseid";
@@ -182,12 +182,7 @@ ul{padding-left:22px}li{margin:4px 0}
 }
 
 fn display_listen(listen: SocketAddr) -> String {
-    match listen.ip() {
-        IpAddr::V4(ip) if ip.is_unspecified() => format!("127.0.0.1:{}", listen.port()),
-        IpAddr::V6(ip) if ip.is_unspecified() => format!("[::1]:{}", listen.port()),
-        IpAddr::V4(ip) => format!("{ip}:{}", listen.port()),
-        IpAddr::V6(ip) => format!("[{ip}]:{}", listen.port()),
-    }
+    format!("{}:{}", display_ip(listen.ip()), listen.port())
 }
 
 #[cfg(test)]

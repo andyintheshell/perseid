@@ -18,6 +18,7 @@ use egui::{
 
 use super::PerseidApp;
 use crate::decoder as engine;
+use crate::decoder::normalize_selection;
 use crate::project::DecoderPanelWorkspace;
 use crate::theme;
 use crate::view;
@@ -212,7 +213,7 @@ impl DecoderState {
             let Some(source) = self.panels.get(index) else {
                 return;
             };
-            let range = clamp_selection(source.data.len(), selection);
+            let range = normalize_selection(source.data.len(), selection);
             (
                 source.data[..range.start].to_vec(),
                 source.data[range.clone()].to_vec(),
@@ -765,15 +766,6 @@ fn char_range_to_byte_range(text: &str, start: usize, end: usize) -> Option<Rang
         .map(|(offset, _)| offset)
         .unwrap_or(text.len());
     (byte_start < byte_end).then_some(byte_start..byte_end)
-}
-
-fn clamp_selection(length: usize, selection: Option<Range<usize>>) -> Range<usize> {
-    match selection {
-        Some(range) if range.start < range.end && range.start < length => {
-            range.start.min(length)..range.end.min(length)
-        }
-        _ => 0..length,
-    }
 }
 
 fn text_layout_job(

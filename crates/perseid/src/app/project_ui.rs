@@ -751,9 +751,10 @@ impl PerseidApp {
 
     fn workspace_snapshot(&self) -> WorkspaceState {
         WorkspaceState {
-            version: 1,
+            version: WorkspaceState::CURRENT_VERSION,
             scope: ScopeWorkspace {
                 enabled: self.scope_enabled,
+                enforce: self.scope_enforce,
                 hosts: self.scope.iter().cloned().collect(),
             },
             match_replace: self.match_replace.iter().map(rule_workspace).collect(),
@@ -766,6 +767,7 @@ impl PerseidApp {
 
     fn apply_workspace(&mut self, workspace: &WorkspaceState) {
         self.scope_enabled = workspace.scope.enabled;
+        self.scope_enforce = workspace.scope.enforce;
         self.scope = workspace.scope.hosts.iter().cloned().collect();
         self.scope_input.clear();
         self.match_replace = workspace

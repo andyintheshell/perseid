@@ -319,6 +319,9 @@ fn workspace_version() -> u16 {
 pub struct ScopeWorkspace {
     #[serde(default)]
     pub enabled: bool,
+    /// Block out-of-scope traffic instead of only filtering the views.
+    #[serde(default)]
+    pub enforce: bool,
     #[serde(default)]
     pub hosts: Vec<String>,
 }

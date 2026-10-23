@@ -101,6 +101,11 @@ pub fn status_color(item: &HistoryItem) -> Color32 {
             theme::RED
         };
     };
+    status_class_color(status)
+}
+
+/// Color for an HTTP status code: 2xx green, 3xx blue, 4xx amber, 5xx red.
+pub fn status_class_color(status: u16) -> Color32 {
     match status / 100 {
         2 => theme::GREEN,
         3 => theme::BLUE,
@@ -125,6 +130,36 @@ type DecodeResult = Result<Option<decode::DecodedBody>, DecodeError>;
 pub fn format_request(item: &HistoryItem) -> String {
     let decoded = decode_request(item);
     format_request_with(item, &decoded)
+}
+
+/// Warning shown when a tool editor is seeded from a captured request body.
+///
+/// The note lists every way the seeded body can be incomplete — truncated at
+/// the capture limit, never finished, limited to a preview, or not text — so
+/// the operator reviews it before replaying. `action` completes the sentence,
+/// e.g. `"sending"` or `"starting an attack"`.
+pub fn seeded_body_note(body: &CapturedBody, action: &str) -> Option<String> {
+    let mut notes = Vec::new();
+    if body.is_truncated() {
+        notes.push("the captured request body was truncated at the capture limit");
+    }
+    if !body.is_complete() {
+        notes.push("the captured request body did not finish");
+    }
+    if body.data().len() > TEXT_PREVIEW_LIMIT {
+        notes.push("the editor contains a bounded body preview");
+    }
+    if !body.data().is_empty() && std::str::from_utf8(body.data()).is_err() {
+        notes.push(
+            "the captured body was encoded or binary; the editor uses a best-effort text view",
+        );
+    }
+    (!notes.is_empty()).then(|| {
+        format!(
+            "Seeded from history: {}. Review the body before {action}.",
+            notes.join("; ")
+        )
+    })
 }
 
 fn format_request_with(item: &HistoryItem, decoded: &DecodeResult) -> String {
@@ -1187,5 +1222,20 @@ mod tests {
         let views = websocket_message_views(&binary);
         assert!(views.pretty.starts_with("00000000  89 50 4e 47"));
         assert_eq!(views.pretty, views.hex);
+    }
+
+    #[test]
+    fn seeded_body_note_flags_incomplete_captured_bodies() {
+        let complete = CapturedBody::from_bytes(b"token=1".to_vec());
+        assert!(seeded_body_note(&complete, "sending").is_none());
+
+        let binary = CapturedBody::from_bytes(vec![0xff, 0x00, 0xfe]);
+        let note = seeded_body_note(&binary, "sending").expect("binary body needs a note");
+        assert!(note.starts_with("Seeded from history: "));
+        assert!(note.ends_with("Review the body before sending."));
+        assert!(note.contains("best-effort text view"));
+
+        let note = seeded_body_note(&binary, "starting an attack").expect("note");
+        assert!(note.ends_with("Review the body before starting an attack."));
     }
 }

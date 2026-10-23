@@ -128,6 +128,40 @@ on PRs that touch `crates/`, Rust build inputs, or the CodeQL workflow itself;
 it also runs on pushes to `main`, the weekly schedule, and manual dispatches.
 The path filter includes crate README changes, not just `.rs` files.
 
+## Testing and coverage
+
+Tests follow the standard Rust layout:
+
+- Unit tests live in the same file as the code they cover, in a
+  `#[cfg(test)] mod tests` module at the bottom. Most helpers and pure logic
+  are private, so same-file tests check them without widening the module API.
+- End-to-end tests live in `crates/perseid/tests/` and drive the public
+  `perseid::proxy` API over loopback sockets (history capture, interception,
+  scope, TLS, HTTP/2, WebSockets, Repeater, Intruder).
+- If a test module grows to dwarf the code it covers, it may move to a
+  `src/<module>/tests.rs` submodule, but same-file placement is the default.
+
+Extract selection math, formatters, parsers, and other pure helpers out of
+large `egui` draw functions so they can be unit-tested; painting itself is
+usually not worth testing. When adding behavior, cover the error and empty
+paths, not just the happy path.
+
+Coverage is measured by [Codecov](.github/workflows/coverage.yml) with
+`cargo llvm-cov` on every pull request and on `main`. The workflow measures
+the default feature set; `screenshots`-only code is compiled and exercised by
+the Screenshots workflow instead. To run the same measurement locally:
+
+```sh
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+```
+
+With rustup, add the matching `llvm-tools-preview` component first; with a
+distribution Rust package, install the distribution's LLVM tools. Coverage
+reports are a guide: new logic should come with tests in the same pull
+request, and a drop in coverage for the code you touched should be explained
+in the PR description.
+
 ## Dependencies
 
 `Cargo.lock` is tracked. It is the exact, reproducible resolution used by

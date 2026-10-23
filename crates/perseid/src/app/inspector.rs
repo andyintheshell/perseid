@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align2, FontId, RichText, Sense, Stroke, TextEdit};
 
+use crate::decoder::hex_value;
 use crate::history::HistoryItem;
 use crate::theme;
 use crate::view;
@@ -345,15 +346,6 @@ fn decode_encoded_value(value: &str) -> String {
         }
     }
     String::from_utf8_lossy(&decoded).into_owned()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 /// Draw the side-panel rail and, when open, its Inspector or Notes content.

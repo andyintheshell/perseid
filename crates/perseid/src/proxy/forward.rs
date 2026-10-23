@@ -43,6 +43,7 @@ use crate::proxy::util::{
 use crate::proxy::websocket;
 
 /// Cases where the proxy rejects a request before any upstream traffic happens.
+#[derive(Debug)]
 struct TargetError {
     status: StatusCode,
     message: String,
@@ -59,6 +60,7 @@ impl TargetError {
 
 /// A validated upstream target. Keeping the authority alongside the URI avoids
 /// later `expect`s on a value that originated in an untrusted request.
+#[derive(Debug)]
 struct Target {
     uri: Uri,
     authority: http::uri::Authority,
@@ -228,12 +230,7 @@ async fn handle_with(
     let needs_buffer =
         exchange.policy.intercept_requests() || exchange.policy.has_request_body_rules();
     if needs_buffer {
-        let can_buffer = match &body_source {
-            BodySource::Incoming(body) => {
-                can_buffer_request(&parts.headers, body, ctx.intercept_limit)
-            }
-            BodySource::Buffered(_) => true,
-        };
+        let can_buffer = fits_intercept_limit(&body_source, &parts.headers, ctx.intercept_limit);
         if can_buffer
             && let Err(message) =
                 buffer_body(&mut body_source, ctx.intercept_limit, "request").await
@@ -856,12 +853,7 @@ async fn relay(
 
     let needs_buffer = policy.intercept_responses() || policy.has_response_body_rules();
     if needs_buffer {
-        let can_buffer = match &body_source {
-            BodySource::Incoming(body) => {
-                can_buffer_response(&parts.headers, body, ctx.intercept_limit)
-            }
-            BodySource::Buffered(_) => true,
-        };
+        let can_buffer = fits_intercept_limit(&body_source, &parts.headers, ctx.intercept_limit);
         if can_buffer
             && let Err(message) =
                 buffer_body(&mut body_source, ctx.intercept_limit, "response").await
@@ -1155,7 +1147,7 @@ fn content_length(headers: &HeaderMap) -> Option<usize> {
     headers.get(CONTENT_LENGTH)?.to_str().ok()?.parse().ok()
 }
 
-fn can_buffer_request(headers: &HeaderMap, body: &Incoming, limit: usize) -> bool {
+fn can_buffer(headers: &HeaderMap, body: &Incoming, limit: usize) -> bool {
     // A message with transfer coding does not have a trustworthy byte length,
     // even if a Content-Length is also present.
     if headers.contains_key(TRANSFER_ENCODING) {
@@ -1167,14 +1159,13 @@ fn can_buffer_request(headers: &HeaderMap, body: &Incoming, limit: usize) -> boo
     body.is_end_stream()
 }
 
-fn can_buffer_response(headers: &HeaderMap, body: &Incoming, limit: usize) -> bool {
-    if headers.contains_key(TRANSFER_ENCODING) {
-        return false;
+/// Whether a body source can be buffered for interception or rewriting.
+/// Already-buffered bodies are always ready.
+fn fits_intercept_limit(source: &BodySource, headers: &HeaderMap, limit: usize) -> bool {
+    match source {
+        BodySource::Incoming(body) => can_buffer(headers, body, limit),
+        BodySource::Buffered(_) => true,
     }
-    if let Some(length) = content_length(headers) {
-        return length <= limit;
-    }
-    body.is_end_stream()
 }
 
 /// Read and buffer a body that is known to fit within `limit`.
@@ -1227,4 +1218,287 @@ fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
         source = cause.source();
     }
     message
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt;
+
+    use super::*;
+
+    fn request_parts(
+        method: Method,
+        version: Version,
+        headers: &[(&str, &'static str)],
+    ) -> http::request::Parts {
+        let mut builder = Request::builder().method(method).version(version);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        builder.body(()).expect("request builds").into_parts().0
+    }
+
+    #[test]
+    fn websocket_upgrade_requires_get_http11_and_both_tokens() {
+        let upgrading = [
+            ("connection", "keep-alive, Upgrade"),
+            ("upgrade", "websocket"),
+        ];
+        assert!(is_websocket_upgrade(&request_parts(
+            Method::GET,
+            Version::HTTP_11,
+            &upgrading
+        )));
+        assert!(!is_websocket_upgrade(&request_parts(
+            Method::POST,
+            Version::HTTP_11,
+            &upgrading
+        )));
+        assert!(!is_websocket_upgrade(&request_parts(
+            Method::GET,
+            Version::HTTP_2,
+            &upgrading
+        )));
+        let no_upgrade = [("connection", "keep-alive")];
+        assert!(!is_websocket_upgrade(&request_parts(
+            Method::GET,
+            Version::HTTP_11,
+            &no_upgrade
+        )));
+    }
+
+    #[test]
+    fn header_token_matching_ignores_case_and_spacing() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONNECTION,
+            HeaderValue::from_static("keep-alive,  UpGradE "),
+        );
+        assert!(header_has_token(&headers, CONNECTION, "upgrade"));
+        assert!(!header_has_token(&headers, CONNECTION, "close"));
+        assert!(!header_has_token(&headers, UPGRADE, "websocket"));
+    }
+
+    #[test]
+    fn header_token_scans_every_value_of_a_repeated_header() {
+        let mut headers = HeaderMap::new();
+        headers.append(CONNECTION, HeaderValue::from_static("keep-alive"));
+        headers.append(CONNECTION, HeaderValue::from_static("upgrade"));
+        assert!(header_has_token(&headers, CONNECTION, "upgrade"));
+    }
+
+    #[test]
+    fn websocket_upstream_headers_drop_hop_by_hop_and_host_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        headers.insert(CONNECTION, HeaderValue::from_static("keep-alive, Upgrade"));
+        headers.insert(UPGRADE, HeaderValue::from_static("websocket"));
+        headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("chat"));
+        headers.insert(
+            SEC_WEBSOCKET_EXTENSIONS,
+            HeaderValue::from_static("permessage-deflate"),
+        );
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("12"));
+        headers.insert(
+            "sec-websocket-key",
+            HeaderValue::from_static("dGhlIHNhbXBsZSBub25jZQ=="),
+        );
+        headers.insert("user-agent", HeaderValue::from_static("test"));
+
+        let upstream = websocket_upstream_headers(&headers);
+        assert_eq!(upstream.get(CONNECTION).expect("connection"), "Upgrade");
+        assert_eq!(upstream.get(UPGRADE).expect("upgrade"), "websocket");
+        assert!(upstream.get(HOST).is_none());
+        assert!(upstream.get(SEC_WEBSOCKET_EXTENSIONS).is_none());
+        assert!(upstream.get(CONTENT_LENGTH).is_none());
+        assert_eq!(
+            upstream.get(SEC_WEBSOCKET_PROTOCOL).expect("protocol"),
+            "chat"
+        );
+        assert_eq!(
+            upstream.get("sec-websocket-key").expect("key"),
+            "dGhlIHNhbXBsZSBub25jZQ=="
+        );
+        assert_eq!(upstream.get("user-agent").expect("user-agent"), "test");
+    }
+
+    #[test]
+    fn resolve_target_accepts_absolute_form_targets() {
+        let uri: Uri = "http://example.com:8080/a?b=c".parse().expect("uri");
+        let target =
+            resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None).expect("absolute form");
+        assert_eq!(target.uri, uri);
+        assert_eq!(target.authority.as_str(), "example.com:8080");
+    }
+
+    #[test]
+    fn resolve_target_rejects_unsupported_absolute_schemes() {
+        let uri: Uri = "ftp://example.com/file".parse().expect("uri");
+        let err = resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None)
+            .expect_err("scheme is not proxied");
+        assert_eq!(err.status, StatusCode::NOT_IMPLEMENTED);
+        assert!(err.message.contains("ftp"));
+    }
+
+    #[test]
+    fn resolve_target_builds_origin_form_targets_from_the_host_header() {
+        let uri: Uri = "/a/b?c=d".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com:8443"));
+        let target = resolve_target(&uri, &headers, ConnScheme::Https, None).expect("origin form");
+        assert_eq!(target.uri.to_string(), "https://example.com:8443/a/b?c=d");
+        assert_eq!(target.authority.as_str(), "example.com:8443");
+    }
+
+    #[test]
+    fn resolve_target_resolves_origin_form_against_the_connection_scheme() {
+        let uri: Uri = "/a".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        let target = resolve_target(&uri, &headers, ConnScheme::Http, None).expect("origin form");
+        assert_eq!(target.uri.to_string(), "http://example.com/a");
+    }
+
+    #[test]
+    fn resolve_target_uses_the_connect_authority_when_host_is_missing() {
+        let uri: Uri = "/".parse().expect("uri");
+        let target = resolve_target(
+            &uri,
+            &HeaderMap::new(),
+            ConnScheme::Https,
+            Some("example.com:443"),
+        )
+        .expect("fallback authority");
+        assert_eq!(target.uri.to_string(), "https://example.com:443/");
+        assert_eq!(target.authority.as_str(), "example.com:443");
+    }
+
+    #[test]
+    fn resolve_target_rejects_origin_form_without_a_host() {
+        let uri: Uri = "/a".parse().expect("uri");
+        let err = resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None)
+            .expect_err("no host is available");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn resolve_target_rejects_asterisk_and_authority_forms() {
+        let uri: Uri = "*".parse().expect("uri");
+        let err =
+            resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None).expect_err("asterisk");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("asterisk"));
+
+        let uri: Uri = "example.com:443".parse().expect("uri");
+        let err = resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None)
+            .expect_err("authority form");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn content_length_parses_valid_values_only() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(content_length(&headers), None);
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("42"));
+        assert_eq!(content_length(&headers), Some(42));
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("4 2"));
+        assert_eq!(content_length(&headers), None);
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("-1"));
+        assert_eq!(content_length(&headers), None);
+    }
+
+    #[test]
+    fn buffered_bodies_are_always_ready_for_interception() {
+        // A transfer-coded message cannot be size-checked while streaming, but
+        // an already-buffered body needs no such check.
+        let mut headers = HeaderMap::new();
+        headers.insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        let source = BodySource::Buffered(b"body".to_vec());
+        assert!(fits_intercept_limit(&source, &headers, 0));
+    }
+
+    /// An error with an optional cause, standing in for hyper-util's layered
+    /// client errors.
+    #[derive(Debug)]
+    struct ChainedError {
+        message: &'static str,
+        source: Option<Box<ChainedError>>,
+    }
+
+    impl fmt::Display for ChainedError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for ChainedError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.source
+                .as_deref()
+                .map(|cause| cause as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    #[test]
+    fn error_chain_flattens_every_source() {
+        let plain = ChainedError {
+            message: "tls failure",
+            source: None,
+        };
+        assert_eq!(error_chain(&plain), "tls failure");
+
+        let layered = ChainedError {
+            message: "client error (SendRequest)",
+            source: Some(Box::new(ChainedError {
+                message: "connection",
+                source: Some(Box::new(ChainedError {
+                    message: "tls failure",
+                    source: None,
+                })),
+            })),
+        };
+        assert_eq!(
+            error_chain(&layered),
+            "client error (SendRequest): connection: tls failure"
+        );
+    }
+
+    #[test]
+    fn request_info_keeps_the_wire_uri_and_takes_the_host_from_the_target() {
+        let raw: Uri = "http://example.com:8080/a?b=c".parse().expect("uri");
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(raw.clone())
+            .header("host", "example.com:8080")
+            .body(())
+            .expect("request");
+        let (parts, ()) = request.into_parts();
+        let target = resolve_target(&raw, &parts.headers, ConnScheme::Http, None).expect("target");
+        let info = build_request_info(&parts, &target, &raw, ConnScheme::Http);
+        assert_eq!(info.uri, "http://example.com:8080/a?b=c");
+        assert_eq!(info.scheme, "http");
+        assert_eq!(info.host, "example.com:8080");
+        assert_eq!(info.path, "/a?b=c");
+        assert_eq!(info.version, "HTTP/1.1");
+        assert_eq!(info.method, "GET");
+    }
+
+    #[test]
+    fn request_info_reports_the_connection_scheme_for_origin_form() {
+        let raw: Uri = "/a?b=c".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(raw.clone())
+            .body(())
+            .expect("request");
+        let (parts, ()) = request.into_parts();
+        let target = resolve_target(&raw, &headers, ConnScheme::Https, None).expect("target");
+        let info = build_request_info(&parts, &target, &raw, ConnScheme::Https);
+        assert_eq!(info.uri, "/a?b=c");
+        assert_eq!(info.scheme, "https");
+        assert_eq!(info.host, "example.com");
+        assert_eq!(info.path, "/a?b=c");
+    }
 }

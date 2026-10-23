@@ -1,6 +1,7 @@
 //! Small helpers shared by the forwarding and tunneling code.
 
 use std::convert::Infallible;
+use std::net::IpAddr;
 
 use bytes::Bytes;
 use http::header::{ACCEPT_ENCODING, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE};
@@ -142,6 +143,19 @@ pub(crate) fn display_host(authority: &http::uri::Authority) -> String {
     }
 }
 
+/// Host form of a bound address for URLs and setup pages.
+///
+/// A wildcard bind is shown as a loopback alias so the link stays usable from
+/// the local machine; IPv6 addresses are bracketed for URL embedding.
+pub(crate) fn display_ip(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(ip) if ip.is_unspecified() => "127.0.0.1".to_string(),
+        IpAddr::V6(ip) if ip.is_unspecified() => "[::1]".to_string(),
+        IpAddr::V4(ip) => ip.to_string(),
+        IpAddr::V6(ip) => format!("[{ip}]"),
+    }
+}
+
 fn boxed(body: impl Body<Data = Bytes, Error = Infallible> + Send + Sync + 'static) -> ProxyBody {
     body.map_err(|never| -> BoxError { match never {} }).boxed()
 }
@@ -227,5 +241,13 @@ mod tests {
         assert_eq!(display_host(&authority), "example.com");
         let authority: http::uri::Authority = "example.com:8080".parse().unwrap();
         assert_eq!(display_host(&authority), "example.com:8080");
+    }
+
+    #[test]
+    fn display_ip_maps_wildcard_binds_to_loopback_aliases() {
+        assert_eq!(display_ip("0.0.0.0".parse().unwrap()), "127.0.0.1");
+        assert_eq!(display_ip("::".parse().unwrap()), "[::1]");
+        assert_eq!(display_ip("192.168.1.5".parse().unwrap()), "192.168.1.5");
+        assert_eq!(display_ip("2001:db8::1".parse().unwrap()), "[2001:db8::1]");
     }
 }

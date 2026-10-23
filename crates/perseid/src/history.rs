@@ -228,11 +228,13 @@ impl History {
     /// Replace the cache with records loaded from a project.
     ///
     /// The caller decides the load budget; this method preserves row numbers
-    /// and does not evict records on insertion.
+    /// and does not evict records on insertion. Counters refer to the loaded
+    /// history only, so a previous session's eviction count is discarded.
     pub fn load(&mut self, items: Vec<HistoryItem>) {
         self.items.clear();
         self.order.clear();
         self.retained_bytes = 0;
+        self.evicted = 0;
         self.in_flight = 0;
         self.next_number = 1;
         for item in items {
@@ -326,6 +328,10 @@ impl History {
     }
 
     /// Fold one proxy event into the history. Returns the exchange id.
+    ///
+    /// Events that match no row (a late head or finisher for an evicted
+    /// exchange, for example) are ignored without bumping the revision, so
+    /// views do not re-filter for a no-op.
     pub fn apply(&mut self, event: ProxyEvent) -> u64 {
         let id = event.id();
         match event {
@@ -357,10 +363,12 @@ impl History {
                 self.order.push_back(id);
                 self.in_flight += 1;
                 self.evict_to_limits();
+                self.revision += 1;
             }
             ProxyEvent::ResponseHead { id, head } => {
                 if let Some(item) = self.items.get_mut(&id) {
                     item.response = Some(head);
+                    self.revision += 1;
                 }
             }
             ProxyEvent::Finished { id, end } => {
@@ -381,6 +389,7 @@ impl History {
                         self.in_flight -= 1;
                     }
                     self.evict_to_limits();
+                    self.revision += 1;
                 }
             }
             // WebSocket messages are folded into the separate
@@ -388,7 +397,6 @@ impl History {
             // HTTP revision.
             ProxyEvent::WebSocketMessage { .. } => return id,
         }
-        self.revision += 1;
         id
     }
 
@@ -467,6 +475,26 @@ mod tests {
                     body: CapturedBody::from_bytes(response),
                 },
             },
+        }
+    }
+
+    fn loaded_item(id: u64, number: u64) -> HistoryItem {
+        HistoryItem {
+            id,
+            number,
+            timestamp: SystemTime::now(),
+            request: RequestInfo {
+                method: "GET".to_string(),
+                uri: format!("http://example.com/{id}"),
+                scheme: "http".to_string(),
+                host: "example.com".to_string(),
+                path: format!("/{id}"),
+                version: "HTTP/1.1".to_string(),
+                headers: Vec::new(),
+            },
+            request_body: CapturedBody::default(),
+            response: None,
+            phase: Phase::InFlight,
         }
     }
 
@@ -638,6 +666,58 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history.in_flight(), 1);
         assert!(history.get(2).unwrap().is_in_flight());
+    }
+
+    #[test]
+    fn revision_ignores_events_without_a_matching_row() {
+        let mut history = History::new(10, FALLBACK_HISTORY_BYTES);
+        history.apply(started(1, "GET"));
+        let start_revision = history.revision();
+
+        history.apply(ProxyEvent::ResponseHead {
+            id: 99,
+            head: ResponseHead {
+                version: "HTTP/1.1".to_string(),
+                status: 404,
+                reason: "Not Found".to_string(),
+                headers: Vec::new(),
+            },
+        });
+        history.apply(finished(99));
+        assert_eq!(history.revision(), start_revision);
+
+        history.apply(ProxyEvent::ResponseHead {
+            id: 1,
+            head: ResponseHead {
+                version: "HTTP/1.1".to_string(),
+                status: 200,
+                reason: "OK".to_string(),
+                headers: Vec::new(),
+            },
+        });
+        assert!(history.revision() > start_revision);
+        let head_revision = history.revision();
+        history.apply(finished(1));
+        assert!(history.revision() > head_revision);
+    }
+
+    #[test]
+    fn load_discards_previous_counters_and_keeps_loaded_row_numbers() {
+        let mut history = History::new(2, FALLBACK_HISTORY_BYTES);
+        for id in 1..=4 {
+            history.apply(started(id, "GET"));
+        }
+        assert_eq!(history.evicted(), 2);
+
+        history.load(vec![loaded_item(10, 10), loaded_item(11, 11)]);
+        assert_eq!(history.evicted(), 0);
+        assert_eq!(history.in_flight(), 2);
+        assert_eq!(history.len(), 2);
+        assert_accounting(&history);
+
+        // Row numbers continue after the loaded records, not the old session.
+        history.apply(started(12, "GET"));
+        assert_eq!(history.get(12).unwrap().number, 12);
     }
 
     #[test]
