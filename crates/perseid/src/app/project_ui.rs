@@ -140,6 +140,9 @@ pub(super) struct ProjectUi {
     last_workspace_check: Instant,
     ui_limit: usize,
     ui_bytes: usize,
+    /// Documentation screenshots show the File menu open without input.
+    #[cfg(feature = "screenshots")]
+    pub(super) file_menu_forced_open: bool,
 }
 
 impl ProjectUi {
@@ -160,6 +163,8 @@ impl ProjectUi {
             last_workspace_check: Instant::now(),
             ui_limit,
             ui_bytes,
+            #[cfg(feature = "screenshots")]
+            file_menu_forced_open: false,
         };
         if ui.handle.is_none() {
             ui.notify_error("Persistence is unavailable for this session.");
@@ -503,7 +508,7 @@ fn rule_from_workspace(rule: &RuleWorkspace) -> MatchReplaceRule {
 impl PerseidApp {
     /// The File menu: project lifecycle commands live above Quit.
     pub(super) fn project_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("File", |ui| {
+        let response = ui.menu_button("File", |ui| {
             if ui.button("New Project").clicked() {
                 self.project.open_dialog(ProjectDialogKind::New, None);
                 ui.close();
@@ -528,6 +533,11 @@ impl PerseidApp {
                 ui.close();
             }
         });
+        #[cfg(feature = "screenshots")]
+        if self.project.file_menu_forced_open {
+            egui::Popup::open_id(ui.ctx(), response.response.id.with("popup"));
+        }
+        let _ = response;
     }
 
     fn current_project_path(&self) -> Option<PathBuf> {
@@ -889,7 +899,12 @@ mod tests {
 
     #[test]
     fn copy_default_uses_the_source_name() {
-        let path = default_project_path(Some(Path::new("/tmp/session.perseid")), true);
-        assert_eq!(path, "/tmp/session-copy.perseid");
+        let source = Path::new("/tmp/session.perseid");
+        let path = default_project_path(Some(source), true);
+        // Compare paths, not strings: Windows renders the separator differently.
+        assert_eq!(
+            PathBuf::from(path),
+            source.with_file_name("session-copy.perseid")
+        );
     }
 }

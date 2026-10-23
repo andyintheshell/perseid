@@ -49,6 +49,7 @@ const TIMEOUT: Duration = Duration::from_secs(150);
 /// `docs/screenshots.md`, and add a label in the Screenshots workflow.
 const SCENE_FILES: &[&str] = &[
     MAIN_FILE,
+    "perseid-project.png",
     "perseid-target-site-map.png",
     "perseid-target-scope.png",
     "perseid-proxy-intercept.png",
@@ -313,17 +314,23 @@ impl PerseidApp {
         self.decoder = DecoderState::new();
         self.comparer = ComparerState::new();
         self.search = SearchState::default();
+        self.project.file_menu_forced_open = false;
 
         match index {
             // Proxy > HTTP history (the README scene).
             0 => {}
-            // Target > Site map.
+            // Projects: the File menu open over the HTTP history, with the
+            // temporary-project status visible in the status bar.
             1 => {
+                self.project.file_menu_forced_open = true;
+            }
+            // Target > Site map.
+            2 => {
                 self.main_tab = MainTab::Target;
                 self.target_section = TargetSection::SiteMap;
             }
             // Target > Scope.
-            2 => {
+            3 => {
                 self.main_tab = MainTab::Target;
                 self.target_section = TargetSection::Scope;
                 self.scope_enabled = true;
@@ -332,13 +339,13 @@ impl PerseidApp {
                 self.scope.insert("127.0.0.1:8090".to_string());
             }
             // Proxy > Intercept with a small queue of held messages.
-            3 => {
+            4 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::Intercept;
                 self.seed_screenshot_intercepts();
             }
             // Proxy > Match/replace.
-            4 => {
+            5 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::MatchReplace;
                 self.match_replace = vec![
@@ -369,19 +376,19 @@ impl PerseidApp {
                 ];
             }
             // Proxy > TLS.
-            5 => {
+            6 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::Tls;
                 self.tls_intercept = true;
                 self.tls_passthrough.push("banking.example.com".to_string());
             }
             // Intruder with a populated template, payload set, and results.
-            6 => {
+            7 => {
                 self.main_tab = MainTab::Intruder;
                 self.intruder.seed_screenshot();
             }
             // Repeater with two seeded history requests.
-            7 => {
+            8 => {
                 self.main_tab = MainTab::Repeater;
                 for (tab_id, history_id) in [(1, 2), (2, 5)] {
                     let item = self.history.get(history_id).ok_or_else(|| {
@@ -396,30 +403,30 @@ impl PerseidApp {
                 }
             }
             // Decoder with Base64 and SHA-256 layers.
-            8 => {
+            9 => {
                 self.main_tab = MainTab::Decoder;
                 self.decoder.seed_screenshot();
             }
             // Comparer with a request and response selected.
-            9 => {
+            10 => {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
             }
             // Comparer result window for the same pair.
-            10 => {
+            11 => {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
                 self.comparer.open_screenshot_result();
             }
             // Proxy > WebSockets history with a JSON message selected.
-            11 => {
+            12 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::WebSocketsHistory;
                 self.websocket_selected = Some(23);
                 self.websocket_view = MessageView::Pretty;
             }
             // Search with a decoded response body selected.
-            12 => {
+            13 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::HttpHistory;
                 self.selected = Some(2);
