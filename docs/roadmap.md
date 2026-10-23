@@ -8,11 +8,10 @@ toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
 **Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
-milestones are complete. HTTP/HTTPS Intruder, Repeater, Decoder, Comparer, and
-WebSocket capture/history work, while persistent history and richer search
-remain. HTTP/2, WebSocket history, and Intruder arrived ahead of the protocol
-milestone. This is a sequence of capabilities, not a schedule or release
-promise.
+milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Decoder,
+Comparer, and WebSocket capture/history work; persistent history remains.
+HTTP/2, WebSocket history, and Intruder arrived ahead of the protocol milestone.
+This is a sequence of capabilities, not a schedule or release promise.
 
 ## Milestones
 
@@ -53,9 +52,11 @@ promise.
 - [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
   search, Repeater, Decoder, and response diff (Comparer).
 
-  *Status: in-memory history, basic filtering, editable HTTP/HTTPS Repeater,
-  Decoder, and Comparer work. Repeater has request tabs, history seeding, target
-  and virtual host control, direct replay, and Pretty/Raw/Hex responses;
+  *Status: searchable in-memory history, editable HTTP/HTTPS Repeater, Decoder,
+  and Comparer work. Search covers HTTP-history heads and decoded bodies with
+  case, regex, negative-match, in-scope, and live-update filters. Repeater has
+  request tabs, history seeding, target and virtual host control, direct replay,
+  and Pretty/Raw/Hex responses;
   WebSocket message interception/replay and saved tabs are not implemented.
   Decoder has stacked Text/Hex panels, Burp-compatible encode/decode menus, 31
   common hashes, Smart decode, and selection-aware transforms; SKEIN/TupleHash/
@@ -82,7 +83,9 @@ promise.
   documented parity audit.
 
   *Status: tests, rustfmt, clippy, CI, and the M0 memory baseline are in
-  place; packaging and the broader parity benchmarks are not.*
+  place, and cross-platform release packages are published. Clean-install
+  validation, crash recovery, accessibility, and broader parity benchmarks
+  remain.*
 
 - [ ] **After parity:** native extension point, passive and guided checks,
   import/export, integrations, and additional protocol coverage.
