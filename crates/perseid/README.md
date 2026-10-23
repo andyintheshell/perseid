@@ -2,7 +2,7 @@
 
 # Perseid
 
-**An open-source, Rust-native desktop workbench for manual HTTP(S) security testing.**
+**An open-source, Rust-native alternative to Burp Suite Community Edition for manual HTTP(S) security testing.**
 
 Intercept, inspect, modify, replay, and fuzz web traffic in one application.
 Perseid is built for security researchers, CTF players, and developers testing
@@ -38,8 +38,10 @@ The `perseid` package provides both the desktop application and the
 - Bounded capture/history resources and a live memory indicator.
 
 WebSocket editing and replay, persistent projects, and automated scanning are
-not implemented. Perseid is independently developed and is not affiliated with
-or endorsed by PortSwigger.
+not implemented. Burp Suite and Burp Suite Community Edition are trademarks of
+PortSwigger Ltd. Perseid is independently developed, includes no PortSwigger
+code or branding, and is not affiliated with, sponsored by, or endorsed by
+PortSwigger Ltd. References to Burp are for comparison only.
 
 ## Install and run the desktop app
 
@@ -98,6 +100,12 @@ Captured traffic and CA keys are sensitive; read
 [Safety and privacy](https://github.com/andyintheshell/perseid/blob/main/docs/safety.md)
 and the [security policy](https://github.com/andyintheshell/perseid/blob/main/SECURITY.md).
 
-Dual-licensed under [MIT](https://github.com/andyintheshell/perseid/blob/main/LICENSE-MIT)
-or [Apache-2.0](https://github.com/andyintheshell/perseid/blob/main/LICENSE-APACHE),
+The source code is dual-licensed under
+[MIT](https://github.com/andyintheshell/perseid/blob/main/LICENSE-MIT) or
+[Apache-2.0](https://github.com/andyintheshell/perseid/blob/main/LICENSE-APACHE),
 at your option. `SPDX-License-Identifier: MIT OR Apache-2.0`.
+
+The Perseid name, logos, and visual identity are project branding and are not
+covered by those source-code licenses. Forks and modified versions must remove
+or replace them and use their own branding. See the
+[Perseid brand terms](https://github.com/andyintheshell/perseid/blob/main/branding/LICENSE-brand.txt).
