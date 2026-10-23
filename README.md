@@ -4,57 +4,65 @@
 
 # Perseid
 
-**A lightweight web security workbench. Inspect, modify, replay.**
+**An open-source, Rust-native alternative to Burp Suite Community Edition.**
+
+Intercept, inspect, modify, replay, and fuzz HTTP traffic in a lightweight desktop
+workbench. Built for security researchers, CTF players, and developers testing
+applications they own or are authorized to assess. **No Java runtime or bundled
+browser required.**
 
 [![CI](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml)
 [![Rust 1.95+](https://img.shields.io/badge/Rust-1.95%2B-orange?logo=rust)](rust-toolchain.toml)
 [![Public alpha](https://img.shields.io/badge/status-public%20alpha-FF9915)](docs/roadmap.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-112D68)](#license)
 
-[Get started](docs/getting-started.md) · [User guide](docs/workbench.md) ·
-[Screenshots](docs/screenshots.md) · [Documentation](docs/README.md) ·
-[Roadmap](docs/roadmap.md)
-
-Perseid is a Rust-native desktop tool for web security learning, CTFs, and
-authorized application testing. Capture traffic from an external browser,
-inspect a request, change it, and send it again—without an embedded browser or
-a Java runtime. Captured bodies and in-memory history have configurable limits.
-
-> [!IMPORTANT]
-> **Public alpha—not a finished Burp replacement.** HTTP/HTTPS interception,
-> WebSocket capture and history, Intruder, Repeater, Decoder, and Comparer are
-> available for hands-on testing. WebSocket message
-> interception/editing/replay, Sequencer, and persistent projects are not
-> implemented. Expect rough edges, and report reproducible problems. See the
-> [capability matrix](docs/burp-parity.md) for the precise feature status.
+**[Get started](docs/getting-started.md)** · [Screenshots](docs/screenshots.md) ·
+[Feature comparison](docs/burp-parity.md) · [User guide](docs/workbench.md) ·
+[Contribute](CONTRIBUTING.md)
 
 [![Perseid HTTP history with side-by-side request and response views](docs/images/perseid-main.png)](docs/screenshots.md)
 
-## What you can do
+> [!IMPORTANT]
+> **Public alpha: the core manual-testing workflows work today.** Perseid is
+> actively developed, not yet a feature-complete or drop-in Burp replacement.
+> Expect rough edges, and see the [capability matrix](docs/burp-parity.md) for
+> an honest account of what is implemented and what is still planned.
 
-| Task | Available today |
+## Why Perseid?
+
+- **A familiar manual-testing workflow.** Go from a captured request to
+  interception, replay, payload fuzzing, decoding, and comparison in one app.
+- **Native and cross-platform.** Built in Rust with egui; CI tests Linux,
+  Apple Silicon macOS, and Windows. No JVM or embedded browser.
+- **Explicit resource controls.** Configurable capture and in-memory history
+  limits, bounded Intruder concurrency, and a live heap-memory indicator.
+- **Open development.** Source available under MIT or Apache-2.0; feedback,
+  bug reports, and focused contributions are welcome.
+
+## What works today
+
+| Tool | Available today |
 | --- | --- |
-| **Capture and inspect** | HTTP/1.1 and HTTP/2 proxy, filtered HTTP history, a WebSockets message history for `ws://` and decrypted `wss://`, a host/path site map, and Pretty/Raw/Hex message views with gzip, deflate, and Brotli decoding. |
-| **Intercept and edit** | Hold requests and optionally responses; edit heads and buffered text bodies; forward or drop selected messages or the whole queue. |
-| **Inspect HTTPS** | Automatically generated local CA, a certificate download page, and per-host TLS pass-through. You install and remove trust manually. |
-| **Replay a request** | Editable HTTP/HTTPS Repeater tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
-| **Fuzz a request** | Intruder positions marked with `$$`, editable payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb attacks, bounded concurrency, and request/response results. |
-| **Transform payloads** | Stacked Decoder panels, selection-aware encoding/decoding, 31 common hashes, and Smart decode for layered data. |
-| **Compare messages** | A shared item list seeded from history, files, or the clipboard; word- and byte-level diffs with paired Text/Hex views, navigation, and synchronized scrolling. |
-| **Control the session** | Opt-in proxy scope enforcement, literal/regex match-and-replace rules, capture/history limits, and a live heap-memory indicator. |
+| **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; host/path site map; Pretty, Raw, and Hex message views; gzip, deflate, and Brotli decoding. |
+| **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
+| **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
+| **WebSocket history** | Capture and inspect text and binary frames for `ws://` and decrypted `wss://` connections; no message editing or replay yet. |
+| **Repeater** | Editable HTTP/HTTPS requests, multiple tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
+| **Intruder** | `$$` payload positions, editable payload sets, Sniper, Battering ram, Pitchfork, and Cluster bomb modes, bounded concurrency, and response inspection. |
+| **Decoder** | Stacked encoding/decoding panels, selection-aware transforms, Smart decode, and 31 common hashes. |
+| **Comparer** | Text and hex comparison, word- and byte-level diffs, synchronized scrolling, and inputs from history, files, or the clipboard. |
+| **Scope & rewriting** | Opt-in proxy scope enforcement, literal/regex match-and-replace rules, and capture/history limits. |
 
-The workspace follows the familiar **Target → Proxy → Intruder → Repeater →
-Decoder → Comparer** order. The [user guide](docs/workbench.md) explains each
-tool and its limits; the [gallery](docs/screenshots.md) shows every tab.
+The interface follows **Target → Proxy → Intruder → Repeater → Decoder →
+Comparer**. See the [workbench guide](docs/workbench.md) for behavior and
+limitations, or browse the [screenshot gallery](docs/screenshots.md).
 
 ## Quick start
 
-You need **Rust 1.95 or newer** and a graphical desktop with OpenGL support.
-Linux, Apple Silicon macOS, and Windows are CI-tested. The Linux screenshot
-workflow also runs under Xvfb; CI coverage does not imply signed installers or
-support for every graphics driver. See
-[platform setup](docs/getting-started.md#requirements) for Linux dependencies,
-Homebrew instructions, and platform caveats.
+**Currently built from source.** You'll need **Rust 1.95+** and a desktop with
+OpenGL support. Linux, Apple Silicon macOS, and Windows are tested in CI;
+packaged installers are not yet available. Check the
+[platform requirements](docs/getting-started.md#requirements) before building.
 
 ```sh
 git clone https://github.com/andyintheshell/perseid.git
@@ -62,59 +70,76 @@ cd perseid
 cargo run -p perseid --locked
 ```
 
-1. The window opens on **Proxy > HTTP history**, with the proxy listening on
-   `127.0.0.1:8080` by default.
-2. Try the [local HTTP walkthrough](docs/getting-started.md#try-it-with-a-local-target)
-   to see your first captured exchange without installing a certificate.
+1. Perseid opens on **Proxy > HTTP history**, listening on `127.0.0.1:8080`
+   by default.
+2. Follow the [local HTTP walkthrough](docs/getting-started.md#try-it-with-a-local-target)
+   to capture your first request without installing a certificate.
 3. For HTTPS, open `http://127.0.0.1:8080/` directly and follow the
-   [certificate setup guide](docs/tls.md). The app creates its CA on first
-   launch but never installs trust automatically.
-4. Point your testing browser at `127.0.0.1:8080` for **both HTTP and HTTPS**.
-   Request holding is off initially; enable it in **Proxy > Intercept** when
-   you want to edit traffic before forwarding.
+   [TLS setup guide](docs/tls.md). Perseid creates a local CA on first launch,
+   but **never installs trust automatically**.
+4. Configure a dedicated testing browser to use `127.0.0.1:8080` for both
+   HTTP and HTTPS. Turn on **Proxy > Intercept** when you want to hold and edit
+   requests; it is off by default.
 
 > [!WARNING]
-> Only test systems you own or have explicit permission to test. Use a dedicated
-> browser profile. Proxy scope rules **do not apply to direct Repeater sends**.
-> Intruder is also direct, but when scope enforcement is on it checks every
-> generated request before sending. Read [Safety and privacy](docs/safety.md)
-> before capturing real traffic.
+> Test only systems you own or have explicit permission to assess. Use a
+> dedicated browser profile. Proxy scope rules **do not apply to direct
+> Repeater sends**. Intruder also sends directly, but checks each generated
+> request when scope enforcement is enabled. Read
+> [Safety and privacy](docs/safety.md) before capturing real traffic.
 
-## Know the limits
+## Public alpha: current limitations
 
-- History, Intruder and Repeater results, Decoder chains, Comparer items and
-  results, scope, and rewrite settings are **in memory only**. The local TLS CA
-  is persisted across launches.
-- Large, streaming, and binary intercepted bodies are **header-editable only**.
-  Message previews and direct-send seeds may be truncated or lossy.
-- There is **no automated scanner, crawler, bundled browser, or WebSocket
-  message interception/replay**. WebSocket text and binary messages are captured
-  and inspected, but cannot be edited or resent yet. Intruder generates requests
-  from user-supplied payloads; it is not an automated scanner.
-- Burp Suite Community manual-toolkit parity is a
-  [goal](docs/burp-parity.md), not a current claim. There are no universal
-  memory or performance guarantees; see the [measured baseline](docs/performance.md).
+Perseid is already usable for hands-on HTTP security testing, but there are
+important boundaries:
 
-## Find your way around
+- **No persistent projects yet.** History, Intruder and Repeater results,
+  Decoder chains, Comparer items/results, scope, and rewrite settings live in
+  memory. The local TLS CA *is* persisted across launches.
+- **No WebSocket editing or replay yet.** WebSocket frames can be captured and
+  inspected, but not intercepted, modified, or resent.
+- **Not an automated scanner.** There is no crawler, automated vulnerability
+  scanner, Sequencer, or bundled browser. Intruder sends requests using
+  user-supplied payloads; it does not discover vulnerabilities automatically.
+- **Some message bodies cannot be edited.** Large, streaming, and binary
+  intercepted bodies are header-editable only. Previews and direct-send seeds
+  can be truncated or lossy.
+- **Performance varies by environment.** Resource limits are configurable,
+  but there are no universal memory or speed guarantees. See the
+  [measured baseline](docs/performance.md).
+
+Burp Suite Community manual-toolkit parity is a
+[direction](docs/burp-parity.md), **not a claim of current feature parity**.
+Perseid is independently developed and is not affiliated with or endorsed by
+PortSwigger.
+
+## Help build Perseid
+
+Want an open-source Burp-style workbench to improve? **Contributions are
+welcome**, whether you're interested in Rust networking, egui, usability,
+platform support, tests, or documentation.
+
+- **Try it and report issues:** [Open an issue](https://github.com/andyintheshell/perseid/issues)
+  with a minimal reproduction, your OS, and what you expected to happen.
+- **Contribute code or documentation:** Read [CONTRIBUTING.md](CONTRIBUTING.md)
+  and pick a focused change. HTTP correctness, accessibility, low-memory
+  behavior, and macOS/Windows testing are especially useful.
+- **Discuss future work:** Read the [roadmap](docs/roadmap.md) and
+  [capability matrix](docs/burp-parity.md) before proposing major features.
+- **Report vulnerabilities privately:** Follow [SECURITY.md](SECURITY.md).
+  Never post live credentials, private keys, or sensitive traffic in issues.
+
+## Documentation
 
 | I want to… | Start here |
 | --- | --- |
-| Build, run, or configure the app | [Getting started](docs/getting-started.md) |
-| Capture, intercept, replay, decode, or compare | [Workbench guide](docs/workbench.md) |
-| Trust, exclude, or remove the local CA | [HTTPS interception](docs/tls.md) |
-| Fix a setup or traffic problem | [Troubleshooting](docs/troubleshooting.md) |
-| Understand the architecture or contribute | [Design](docs/design.md) · [Contributing](CONTRIBUTING.md) |
-| Explore all guides and references | [Documentation index](docs/README.md) |
-
-## Contributing and feedback
-
-Bug reports, workflow feedback, and focused pull requests are welcome. Start
-with [CONTRIBUTING.md](CONTRIBUTING.md); useful areas include HTTP correctness,
-accessibility, low-memory Linux behavior, and real-world macOS/Windows testing.
-
-- [Report a bug or suggest a feature](https://github.com/andyintheshell/perseid/issues).
-- [Report a security vulnerability privately](SECURITY.md)—never attach live
-  credentials, private keys, or sensitive captured traffic to a public issue.
+| Install, build, or configure Perseid | [Getting started](docs/getting-started.md) |
+| Learn Proxy, Intruder, Repeater, Decoder, and Comparer | [Workbench guide](docs/workbench.md) |
+| Set up HTTPS interception and certificate trust | [TLS guide](docs/tls.md) |
+| Troubleshoot setup, traffic, or proxy problems | [Troubleshooting](docs/troubleshooting.md) |
+| Compare implemented and planned capabilities | [Burp Community capability matrix](docs/burp-parity.md) |
+| Understand the architecture | [Design](docs/design.md) |
+| Find all guides and references | [Documentation index](docs/README.md) |
 
 ## License
 
