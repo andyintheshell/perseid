@@ -3,6 +3,7 @@
 //! that are compiled into the binary.
 
 use egui::{ColorImage, Context, IconData, TextureHandle, TextureOptions};
+#[cfg(any(target_os = "macos", test))]
 use std::path::Path;
 
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon-128.png");
@@ -22,6 +23,7 @@ pub fn window_icon() -> Option<IconData> {
 
 /// Whether `executable` is inside a macOS app bundle. Packaged macOS apps
 /// should use the bundle's ICNS icon so the system can apply its native mask.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn is_macos_app_bundle_executable(executable: &Path) -> bool {
     let Some(macos_dir) = executable.parent() else {
         return false;
@@ -40,6 +42,7 @@ pub(crate) fn is_macos_app_bundle_executable(executable: &Path) -> bool {
             .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("app"))
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn path_component_is(path: &Path, expected: &str) -> bool {
     path.file_name()
         .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(expected))
