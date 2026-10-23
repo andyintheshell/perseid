@@ -22,6 +22,9 @@ def main() -> None:
         'LICENSE-APACHE': 'usr/share/doc/perseid/LICENSE-APACHE',
     }
     config = {
+        # Setting the package name avoids cargo-packager 0.11.8 trying to infer
+        # it by changing into the config file's path instead of its parent dir.
+        'name': 'perseid',
         'productName': 'Perseid',
         'identifier': 'io.github.andyintheshell.perseid',
         'version': version,
