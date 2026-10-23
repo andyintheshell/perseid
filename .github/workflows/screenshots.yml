@@ -130,12 +130,13 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The shared preview branch is force-pushed so the summary and PR comment can
-  # embed the images. Keep the write token in a separate job: the build and test
-  # steps above only need contents: read. Fork pull requests still get the
-  # artifact; their read-only token is never asked to push or comment.
+  # The shared preview branch is force-pushed with a Markdown gallery, and the
+  # PR comment links to that single page. Keep the write token in a separate
+  # job: the build and test steps above only need contents: read. Fork pull
+  # requests still get the artifact; their read-only token is never asked to
+  # push or comment.
   publish:
-    name: Publish inline preview
+    name: Publish screenshot gallery
     needs: screenshots
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
@@ -150,7 +151,7 @@ jobs:
           name: perseid-screenshots
           path: artifacts/screenshots
 
-      - name: Publish inline preview
+      - name: Publish screenshot gallery
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -158,16 +159,6 @@ jobs:
           set -euo pipefail
           preview="$(mktemp -d)"
           cp artifacts/screenshots/*.png "$preview/"
-          cd "$preview"
-          git init -q
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -qm "Screenshots from ${GITHUB_SHA}"
-          git push --force \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            HEAD:screenshots-preview
-
           declare -A labels=(
             [perseid-main.png]="Proxy - HTTP history"
             [perseid-project.png]="Projects - File menu"
@@ -208,6 +199,30 @@ jobs:
           # Reruns keep the same run id, so include the attempt in the query to
           # make browsers and GitHub's image proxy fetch the new preview files.
           preview_version="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          {
+            echo "# Perseid screenshot gallery"
+            echo
+            echo "Generated from \`${GITHUB_SHA}\` by the [Screenshots workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) (attempt ${GITHUB_RUN_ATTEMPT})."
+            echo
+            for name in "${order[@]}"; do
+              echo "## ${labels[$name]}"
+              echo
+              echo "![${labels[$name]}](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/${name}?v=${preview_version})"
+              echo
+            done
+          } > "$preview/index.md"
+
+          cd "$preview"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -qm "Screenshots from ${GITHUB_SHA}"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:screenshots-preview
+
           body_file="$(mktemp)"
           {
             echo "<!-- perseid-screenshots -->"
@@ -215,13 +230,9 @@ jobs:
             echo
             echo "Generated from \`${GITHUB_SHA}\` by the [Screenshots workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) (attempt ${GITHUB_RUN_ATTEMPT})."
             echo
-            for name in "${order[@]}"; do
-              echo "#### ${labels[$name]}"
-              echo
-              echo "![${labels[$name]}](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots-preview/${name}?v=${preview_version})"
-              echo
-            done
-            echo "_This preview branch shows the latest generated run. If an image does not load (for example, in a private repository), download the screenshots artifact from the workflow run._"
+            echo "[View all screenshots in one page](https://github.com/${GITHUB_REPOSITORY}/blob/screenshots-preview/index.md?v=${preview_version})"
+            echo
+            echo "_If the gallery does not load, download the PNG artifacts from the workflow run._"
           } > "$body_file"
 
           if [[ -n "${PR_NUMBER:-}" ]]; then
