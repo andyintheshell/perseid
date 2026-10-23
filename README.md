@@ -15,6 +15,7 @@ browser required.**
 [![Rust 1.95+](https://img.shields.io/badge/Rust-1.95%2B-orange?logo=rust)](rust-toolchain.toml)
 [![Public alpha](https://img.shields.io/badge/status-public%20alpha-FF9915)](docs/roadmap.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-112D68)](https://github.com/andyintheshell/perseid/blob/main/LICENSE-MIT)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15832/badge)](https://www.bestpractices.dev/projects/15832)
 
 **[Get started](docs/getting-started.md)** · [Screenshots](docs/screenshots.md) ·
 [Feature comparison](docs/burp-parity.md) · [User guide](docs/workbench.md) ·
