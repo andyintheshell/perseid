@@ -89,7 +89,7 @@ generated `packager.json` is ignored as well.
 # Linux
 cargo build --release --locked -p perseid
 python scripts/generate-packager-config.py --os linux
-cargo packager --release
+cargo packager --release --config packager.json
 python scripts/collect-release.py --os linux --arch x64  # or arm64
 
 # macOS (builds both Rust targets and creates a universal DMG)
