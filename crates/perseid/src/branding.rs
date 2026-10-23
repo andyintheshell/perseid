@@ -3,6 +3,7 @@
 //! that are compiled into the binary.
 
 use egui::{ColorImage, Context, IconData, TextureHandle, TextureOptions};
+use std::path::Path;
 
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon-128.png");
 const LOCKUP_PNG: &[u8] = include_bytes!("../assets/logo-light.png");
@@ -17,6 +18,31 @@ pub fn window_icon() -> Option<IconData> {
         width,
         height,
     })
+}
+
+/// Whether `executable` is inside a macOS app bundle. Packaged macOS apps
+/// should use the bundle's ICNS icon so the system can apply its native mask.
+pub(crate) fn is_macos_app_bundle_executable(executable: &Path) -> bool {
+    let Some(macos_dir) = executable.parent() else {
+        return false;
+    };
+    let Some(contents_dir) = macos_dir.parent() else {
+        return false;
+    };
+    let Some(bundle_dir) = contents_dir.parent() else {
+        return false;
+    };
+
+    path_component_is(macos_dir, "MacOS")
+        && path_component_is(contents_dir, "Contents")
+        && bundle_dir
+            .extension()
+            .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("app"))
+}
+
+fn path_component_is(path: &Path, expected: &str) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(expected))
 }
 
 /// Transparent mark used in the toolbar.
@@ -51,5 +77,25 @@ mod tests {
         assert!(image::load_from_memory(ICON_PNG).is_ok());
         assert!(image::load_from_memory(LOCKUP_PNG).is_ok());
         assert!(image::load_from_memory(MARK_PNG).is_ok());
+    }
+
+    #[test]
+    fn recognizes_macos_app_bundle_executable_paths() {
+        assert!(is_macos_app_bundle_executable(Path::new(
+            "/Applications/Perseid.app/Contents/MacOS/perseid"
+        )));
+        assert!(is_macos_app_bundle_executable(Path::new(
+            "/Applications/Perseid Beta.APP/Contents/MacOS/perseid"
+        )));
+
+        assert!(!is_macos_app_bundle_executable(Path::new(
+            "/Users/test/perseid/target/release/perseid"
+        )));
+        assert!(!is_macos_app_bundle_executable(Path::new(
+            "/opt/Contents/MacOS/perseid"
+        )));
+        assert!(!is_macos_app_bundle_executable(Path::new(
+            "/Applications/Perseid.app/Contents/Resources/perseid"
+        )));
     }
 }
