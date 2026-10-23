@@ -45,9 +45,9 @@ PortSwigger Ltd. References to Burp are for comparison only.
 
 ## Install and run the desktop app
 
-`cargo install` builds Perseid from source; it does not download a prebuilt
-installer. With Rust 1.95+ and the platform's native build requirements
-installed, run:
+Install the latest version published to crates.io with Cargo. `cargo install`
+builds Perseid from source; it does not download a prebuilt installer. With Rust
+1.95+ and the platform's native build requirements installed, run:
 
 ```sh
 cargo install perseid --locked
@@ -56,8 +56,11 @@ perseid
 
 For Linux build dependencies, macOS setup, and graphics requirements, see the
 [platform guide](https://github.com/andyintheshell/perseid/blob/main/docs/getting-started.md).
-Prebuilt release downloads, when available, are listed on
-[GitHub Releases](https://github.com/andyintheshell/perseid/releases).
+For compiled binaries that do not require a local Rust toolchain, use
+[GitHub Releases](https://github.com/andyintheshell/perseid/releases/latest):
+Windows MSI or no-install ZIP (x64/ARM64), universal macOS DMG, or Linux
+AppImage/DEB (x86-64/ARM64). Windows packages are unsigned; macOS is ad-hoc
+signed but not notarized.
 
 ## Use the proxy API from Rust
 

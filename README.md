@@ -60,10 +60,25 @@ limitations, or browse the [screenshot gallery](docs/screenshots.md).
 
 ## Quick start
 
-**Currently built from source.** You'll need **Rust 1.95+** and a desktop with
-OpenGL support. Linux, Apple Silicon macOS, and Windows are tested in CI;
-packaged installers are not yet available. Check the
-[platform requirements](docs/getting-started.md#requirements) before building.
+Install the latest version published to crates.io with Cargo (it compiles from
+source), or choose a prebuilt binary from
+[GitHub Releases](https://github.com/andyintheshell/perseid/releases/latest).
+The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
+macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
+are unsigned; the macOS app is ad-hoc signed but not notarized. See the
+[platform requirements](docs/getting-started.md#requirements) before installing.
+
+### Install from crates.io
+
+```sh
+cargo install perseid --locked
+perseid
+```
+
+This builds the latest published crate on your machine and needs Rust 1.95+
+plus the platform's native build dependencies.
+
+### Build from a source checkout
 
 ```sh
 git clone https://github.com/andyintheshell/perseid.git
