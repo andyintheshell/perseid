@@ -2,6 +2,10 @@
 
 [Project home](../README.md) · [Documentation](../docs/README.md)
 
+The Perseid name and visual identity have separate terms in
+[LICENSE-brand.txt](LICENSE-brand.txt); the source-code licenses do not grant
+branding rights.
+
 **Name:** Perseid
 **Tagline:** INSPECT · MODIFY · REPLAY
 **Descriptor:** A lightweight web security workbench.

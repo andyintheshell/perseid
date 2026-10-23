@@ -1,30 +1,69 @@
+![Perseid — inspect, modify, replay](https://raw.githubusercontent.com/andyintheshell/perseid/main/branding/perseid-readme-banner.png)
+
 # Perseid
 
+**An open-source, Rust-native alternative to Burp Suite Community Edition for manual HTTP(S) security testing.**
+
+Intercept, inspect, modify, replay, and fuzz web traffic in one application.
+Perseid is built for security researchers, CTF players, and developers testing
+systems they own or are authorized to assess. It needs no Java runtime or bundled
+browser.
+
+[![CI](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml)
+[![Rust 1.95+](https://img.shields.io/badge/Rust-1.95%2B-orange?logo=rust)](https://github.com/andyintheshell/perseid/blob/main/rust-toolchain.toml)
+[![Public alpha](https://img.shields.io/badge/status-public%20alpha-FF9915)](https://github.com/andyintheshell/perseid/blob/main/docs/roadmap.md)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-112D68)](https://github.com/andyintheshell/perseid/blob/main/LICENSE-MIT)
+
 [Project home](https://github.com/andyintheshell/perseid) ·
-[Documentation](https://github.com/andyintheshell/perseid/tree/main/docs) ·
-[Contributing](https://github.com/andyintheshell/perseid/blob/main/CONTRIBUTING.md)
+[Getting started](https://github.com/andyintheshell/perseid/blob/main/docs/getting-started.md) ·
+[Screenshots](https://github.com/andyintheshell/perseid/blob/main/docs/screenshots.md) ·
+[API documentation](https://docs.rs/perseid)
 
-The single `perseid` package contains the native egui desktop workbench and
-its embedded HTTP/1.1/HTTP/2 interception proxy with WebSocket capture. Rust
-callers use `perseid::proxy`; the application binary adds HTTP and WebSocket
-history, message viewers, interception controls, Intruder and Repeater
-workspaces, Decoder, and local CA storage.
+![Perseid HTTP history with side-by-side request and response views](https://raw.githubusercontent.com/andyintheshell/perseid/main/docs/images/perseid-main.png)
 
-## Run the desktop app
+> **Public alpha:** the core manual-testing workflows work today, but Perseid is
+> actively developed and is not a feature-complete or drop-in Burp replacement.
+> See the [capability matrix](https://github.com/andyintheshell/perseid/blob/main/docs/burp-parity.md)
+> for current coverage and limitations.
 
-From the repository root:
+## What this crate contains
+
+The `perseid` package provides both the desktop application and the
+`perseid::proxy` Rust API. Its desktop workbench includes:
+
+- An HTTP/1.1 and HTTP/2 intercepting proxy, traffic history, and a host/path site map.
+- HTTPS interception with a local certificate authority, explicit trust setup, and per-host TLS pass-through.
+- Interception controls, Repeater, Intruder, Decoder, Comparer, scope rules, and match/replace.
+- WebSocket history for `ws://` and decrypted `wss://` traffic.
+- Bounded capture/history resources and a live memory indicator.
+
+WebSocket editing and replay, persistent projects, and automated scanning are
+not implemented. Burp Suite and Burp Suite Community Edition are trademarks of
+PortSwigger Ltd. Perseid is independently developed, contains no PortSwigger
+software or logos, and is not affiliated with, sponsored by, or endorsed by
+PortSwigger Ltd. References to Burp are for comparison only.
+
+## Install and run the desktop app
+
+`cargo install` builds Perseid from source; it does not download a prebuilt
+installer. With Rust 1.95+ and the platform's native build requirements
+installed, run:
 
 ```sh
-cargo run -p perseid --locked
+cargo install perseid --locked
+perseid
 ```
 
-See [Getting started](https://github.com/andyintheshell/perseid/blob/main/docs/getting-started.md)
-for platform dependencies, Homebrew setup, CLI flags, and a local-target walkthrough.
+For Linux build dependencies, macOS setup, and graphics requirements, see the
+[platform guide](https://github.com/andyintheshell/perseid/blob/main/docs/getting-started.md).
+Prebuilt release downloads, when available, are listed on
+[GitHub Releases](https://github.com/andyintheshell/perseid/releases).
 
-## Use the proxy from Rust
+## Use the proxy API from Rust
 
-The proxy owns its runtime and publishes capture events. Dropping the handle
-requests shutdown and joins its runtime thread. For example:
+Add `perseid` to your application with `cargo add perseid`. The proxy owns its
+runtime and publishes capture events; dropping the handle requests shutdown and
+joins its runtime thread. For example:
 
 ```rust,no_run
 use std::sync::mpsc::RecvTimeoutError;
@@ -46,52 +85,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**Defaults are not the same as the desktop app's startup behavior.**
-`ProxyConfig::default()` binds loopback and leaves TLS interception off. It
-does not generate or persist a CA. To decrypt HTTPS, a caller supplies a
-`CertificateAuthority` in `TlsConfig` and enables the relevant `ProxySettings`.
-The desktop app makes those decisions and manages the filesystem separately.
-
-The API also exposes editable interception decisions, scope and match/replace
-policy, bounded body capture, capture-drop counters, complete WebSocket
-messages through `ProxyEvent::WebSocketMessage`, and separate direct
-HTTP/HTTPS `Repeater` and `Intruder` clients. Both bypass proxy interception,
-rewriting, and proxy scope enforcement. The desktop Intruder workspace supplies
-the enforced scope with each plan, and the engine checks every generated
-request.
-
-Repeater admission includes queued requests, active work, and unread results.
-`send` can return `RepeaterError::Busy` without stopping other requests; drain
-`try_recv` to release reservations before retrying. Intruder attacks use `$$`
-positions and four attack types, run up to 32 requests concurrently, and deliver
-bounded result events. Oversized requests and capture configurations are
-rejected separately. See the
-[workbench limits](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#repeater)
-for the count/byte budgets.
-
-Loaded CA certificate/key pairs are checked for a match. The desktop app owns
-the [generation-based CA store](https://github.com/andyintheshell/perseid/blob/main/docs/tls.md#where-the-ca-lives);
-the proxy API itself still has no filesystem policy or automatic trust installation.
-
-For a runnable event-consumer example, see
-[headless.rs](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/examples/headless.rs):
-
-```sh
-cargo run -p perseid --example headless --locked
-cargo doc -p perseid --no-deps --locked --open
-```
-
-Headless use does not open a window, but still builds the same crate and GUI
-dependencies. This prototype API can change; consult the source/API docs for
-the checkout you are using.
+`ProxyConfig::default()` binds to loopback and leaves TLS interception off. It
+does not generate or persist a CA. To decrypt HTTPS, supply a
+`CertificateAuthority` in `TlsConfig` and enable the relevant `ProxySettings`.
+The desktop app manages CA files separately. Direct Repeater and Intruder
+requests bypass proxy interception, rewriting, and proxy scope enforcement.
+See the [proxy API example](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/examples/headless.rs)
+and [workbench limits](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#repeater).
 
 ## Safety and license
 
-Use only on explicitly authorized targets. Captured traffic and CA keys are
-sensitive; read
+Use Perseid only on targets you own or are explicitly authorized to assess.
+Captured traffic and CA keys are sensitive; read
 [Safety and privacy](https://github.com/andyintheshell/perseid/blob/main/docs/safety.md)
 and the [security policy](https://github.com/andyintheshell/perseid/blob/main/SECURITY.md).
 
-Dual-licensed under MIT or Apache-2.0, at your option.
+The source code is dual-licensed under
+[MIT](https://github.com/andyintheshell/perseid/blob/main/LICENSE-MIT) or
+[Apache-2.0](https://github.com/andyintheshell/perseid/blob/main/LICENSE-APACHE),
+at your option. `SPDX-License-Identifier: MIT OR Apache-2.0`.
 
-`SPDX-License-Identifier: MIT OR Apache-2.0`
+The Perseid name, logos, and visual identity are project branding and are not
+covered by those source-code licenses. Forks and modified versions must remove
+or replace them and use their own branding. See the
+[Perseid brand terms](https://github.com/andyintheshell/perseid/blob/main/branding/LICENSE-brand.txt).

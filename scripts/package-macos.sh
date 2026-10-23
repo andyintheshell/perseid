@@ -39,7 +39,8 @@ lipo -create \
   "$ROOT/target/x86_64-apple-darwin/release/perseid" \
   -output "$APP/Contents/MacOS/perseid"
 chmod 755 "$APP/Contents/MacOS/perseid"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/perseid"
+lipo "$APP/Contents/MacOS/perseid" -verify_arch arm64
+lipo "$APP/Contents/MacOS/perseid" -verify_arch x86_64
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

@@ -111,8 +111,10 @@ important boundaries:
 
 Burp Suite Community manual-toolkit parity is a
 [direction](docs/burp-parity.md), **not a claim of current feature parity**.
-Perseid is independently developed and is not affiliated with or endorsed by
-PortSwigger.
+Burp Suite and Burp Suite Community Edition are trademarks of PortSwigger Ltd.
+Perseid is independently developed, contains no PortSwigger software or logos,
+and is not affiliated with, sponsored by, or endorsed by PortSwigger Ltd.
+References to Burp are for comparison only.
 
 ## Help build Perseid
 
@@ -144,8 +146,16 @@ platform support, tests, or documentation.
 
 ## License
 
-Dual-licensed under [MIT](LICENSE-MIT) **or** [Apache-2.0](LICENSE-APACHE), at
-your option. Third-party dependencies, fonts, and assets retain their own
-licenses.
+The source code is dual-licensed under [MIT](LICENSE-MIT) **or**
+[Apache-2.0](LICENSE-APACHE), at your option. Third-party dependencies, fonts,
+and assets retain their own licenses; the Perseid Marks have separate terms
+below.
 
 `SPDX-License-Identifier: MIT OR Apache-2.0`
+
+### Trademarks and Perseid branding
+
+The Perseid name, logos, and visual identity identify this project and are not
+covered by the source-code licenses. Forks and modified versions must remove or
+replace them and use their own branding. See the
+[Perseid brand terms](branding/LICENSE-brand.txt).
