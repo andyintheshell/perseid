@@ -7,6 +7,12 @@ impl PerseidApp {
     pub(super) fn keyboard(&mut self, ctx: &egui::Context) {
         self.zoom_shortcuts(ctx);
 
+        #[cfg(target_os = "macos")]
+        if ctx.input_mut(|input| input.consume_shortcut(&FULL_SCREEN_SHORTCUT)) {
+            let fullscreen = ctx.input(|input| input.viewport().fullscreen.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+        }
+
         if ctx.input_mut(|input| input.consume_shortcut(&SEARCH_SHORTCUT)) {
             self.search.focus_or_open();
         }

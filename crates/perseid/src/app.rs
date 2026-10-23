@@ -116,6 +116,9 @@ const SEARCH_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::F,
 );
+#[cfg(target_os = "macos")]
+const FULL_SCREEN_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND), Key::F);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum MainTab {

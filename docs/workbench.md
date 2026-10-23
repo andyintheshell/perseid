@@ -426,6 +426,11 @@ Use `Cmd` in place of `Ctrl` on macOS unless noted.
 | Start or stop an Intruder attack | `Ctrl`+`Enter` |
 | Send the active Repeater request | `Ctrl`+`Enter` |
 | Zoom in / out / reset | `Ctrl`+`+` / `Ctrl`+`-` / `Ctrl`+`0` |
+| Enter / exit full screen on macOS | `Ctrl`+`Cmd`+`F` |
+
+On macOS, the title-bar full-screen control enters a native full-screen Space.
+Option-click it to zoom the window to the current screen without entering a
+separate Space, matching the system green-button behavior.
 
 ## Limits and persistence
 
