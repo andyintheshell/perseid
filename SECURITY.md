@@ -6,14 +6,13 @@ are sensitive by design. This policy covers vulnerabilities in Perseid itself.
 
 ## Supported versions
 
-Perseid is an early prototype. Security fixes are applied to `main` and to the
-most recent tagged release, once releases are published. Older commits and
-tags do not receive fixes.
+Perseid is an early prototype. Security fixes are applied to `main` and the
+most recent published release. Older commits and tags do not receive fixes.
 
 | Version | Supported |
 | --- | --- |
 | `main` (development) | Yes |
-| Latest tagged release | Yes, once published |
+| Latest tagged release | Yes |
 | Older releases and commits | No |
 
 If you are testing a build from a branch, include the commit ID in your report.

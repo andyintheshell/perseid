@@ -49,11 +49,9 @@ use a local lab or another target you are explicitly authorized to test.
 required CI workflow runs formatting, Clippy, tests, and package checks in
 parallel on Linux, GitHub-hosted Apple Silicon macOS, and Windows with MSVC.
 The Linux screenshot workflow remains a separate Xvfb job. Cross-platform CI
-does not provide signed installers or validate every desktop/graphics setup.
+does not install-test release packages or validate every desktop/graphics setup.
 
-The release workflow can build packages into a draft GitHub Release (Windows is
-unsigned; macOS is ad-hoc signed but not notarized). It does not validate every
-desktop or graphics setup. See the [release guide](releasing.md) before treating
-draft packages as supported downloads, and check
-[requirements](getting-started.md#requirements) for the currently tested
-platforms.
+GitHub Releases now include Windows, macOS, and Linux packages. Windows
+packages are unsigned, and macOS is ad-hoc signed but not notarized. Release
+builds do not validate every desktop or graphics setup; see the
+[release guide](releasing.md) and [platform requirements](getting-started.md#requirements).

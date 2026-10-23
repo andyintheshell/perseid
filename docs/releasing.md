@@ -61,7 +61,7 @@ maintainers.
 - No signing secrets are required by this initial workflow. This means MSI and
   Windows executables are unsigned, and the macOS DMG is not notarized.
 
-## First-draft smoke test
+## Release smoke-test checklist
 
 - **Windows:** Install the MSI on x64 and ARM64 Windows, confirm it creates a
   Start Menu shortcut, launch it, uninstall it, and test an upgrade. Extract the
@@ -104,7 +104,7 @@ wix extension add -g WixToolset.UI.wixext/5.0.2
 pwsh scripts/package-windows.ps1 -Arch x64 # or arm64
 ```
 
-The first hosted release run is the first full validation of these package
-formats. In particular, validate the native ARM64 Windows runner, ARM64
-AppImage tooling, MSI install/upgrade behavior, macOS Gatekeeper experience, and
-Linux runtime dependencies before publishing.
+The published `0.1.0` release completed all five hosted package builders. That
+checks artifact generation, not every installer and runtime on clean machines.
+Continue smoke-testing native ARM64 builds, MSI install/upgrade behavior, the
+macOS Gatekeeper experience, and Linux runtime dependencies before each release.
