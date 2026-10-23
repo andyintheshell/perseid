@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Perseid per-machine installer for WiX Toolset v5.
+  Keep UpgradeCode stable across versions. MSI Version must be numeric X.Y.Z.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Perseid"
+           Manufacturer="andyintheshell"
+           Version="$(var.Version)"
+           UpgradeCode="0C5D14C7-9702-5ED4-AF09-8FA5887A2E79"
+           Scope="perMachine"
+           Compressed="yes"
+           Language="1033">
+    <SummaryInformation Description="Perseid HTTP(S) security testing workbench"
+                        Manufacturer="andyintheshell" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Perseid is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/andyintheshell/perseid" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/andyintheshell/perseid/releases" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Perseid" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="Perseid" Level="1">
+      <ComponentGroupRef Id="PerseidFiles" />
+    </Feature>
+
+    <!-- WixUI_InstallDir without a license page: Perseid is MIT OR Apache-2.0. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+               Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog"
+               Value="WelcomeDlg" Order="2" />
+    </UI>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="PerseidFiles" Directory="INSTALLFOLDER">
+      <Component Id="PerseidApp" Guid="*">
+        <File Id="PerseidExe" Source="$(var.BinDir)\perseid.exe" KeyPath="yes">
+          <Shortcut Id="PerseidStartMenu" Directory="ProgramMenuFolder"
+                    Name="Perseid" Description="Perseid HTTP(S) security testing workbench"
+                    WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+        </File>
+      </Component>
+      <Component Id="PerseidLicenses" Guid="*">
+        <File Id="PerseidMIT" Source="$(var.BinDir)\LICENSE-MIT" KeyPath="yes" />
+        <File Id="PerseidApache" Source="$(var.BinDir)\LICENSE-APACHE" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

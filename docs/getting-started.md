@@ -18,8 +18,8 @@ plain-HTTP walkthrough.
 | Platform | Validation status |
 | --- | --- |
 | Linux | CI-tested on Ubuntu 26.04; the desktop screenshot workflow also runs on Linux/Xvfb. The published memory baseline is from a Kali arm64 VM. |
-| macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. Homebrew instructions are below. No packaged `.app` or installer is produced. |
-| Windows | CI-tested on the GitHub-hosted Windows 2025 runner with MSVC. This checks builds and tests, not a signed installer or every graphics driver. |
+| macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. Homebrew instructions are below. Release packaging is not yet validated or published. |
+| Windows | CI-tested on the GitHub-hosted Windows 2025 runner with MSVC. Release packaging is not yet validated or published, and graphics-driver coverage is limited. |
 
 ### Linux
 

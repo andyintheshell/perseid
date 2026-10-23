@@ -1,0 +1,211 @@
+name: Draft desktop release
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perseid-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/release'
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: windows-x64, runner: windows-2025, os: windows, arch: x64 }
+          - { id: windows-arm64, runner: windows-11-arm, os: windows, arch: arm64 }
+          - { id: linux-x64, runner: ubuntu-22.04, os: linux, arch: x64 }
+          - { id: linux-arm64, runner: ubuntu-22.04-arm, os: linux, arch: arm64 }
+          - { id: macos-universal, runner: macos-15, os: macos, arch: universal }
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Linux packaging and build dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libssl-dev \
+            libfuse2 file desktop-file-utils
+
+      - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+        with:
+          toolchain: '1.95.0'
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Verify native Linux architecture
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          case '${{ matrix.arch }}' in
+            x64) expected=x86_64 ;;
+            arm64) expected=aarch64 ;;
+            *) echo "Unexpected Linux architecture: ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
+          actual=$(uname -m)
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Runner architecture is $actual; expected $expected" >&2
+            exit 1
+          fi
+
+      - name: Build native Windows/Linux binary
+        if: matrix.os != 'macos'
+        run: cargo build --release --locked -p perseid
+
+      - name: Install WiX Toolset v5 on Windows
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to install WiX Toolset v5' }
+          $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'
+          & $wix extension add -g WixToolset.UI.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to install WiX UI extension' }
+
+      - name: Build Windows MSI and portable ZIP
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Arch ${{ matrix.arch }}
+
+      - name: Install cargo-packager on Linux
+        if: matrix.os == 'linux'
+        run: cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Generate Linux package metadata
+        if: matrix.os == 'linux'
+        run: python scripts/generate-packager-config.py --os linux
+
+      - name: Package Linux AppImage and DEB
+        if: matrix.os == 'linux'
+        run: cargo packager --release --config packager.json
+
+      - name: Normalize Linux release assets
+        if: matrix.os == 'linux'
+        run: python scripts/collect-release.py --os linux --arch ${{ matrix.arch }}
+
+      - name: Build universal macOS DMG
+        if: matrix.os == 'macos'
+        shell: bash
+        run: bash scripts/package-macos.sh
+
+      - name: Upload release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.id }}
+          path: dist/perseid-*
+          if-no-files-found: error
+          retention-days: 14
+
+  draft:
+    if: github.ref == 'refs/heads/release'
+    name: Create or update draft GitHub Release
+    needs: [build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify artifacts and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unsupported release version: $version" >&2
+            exit 1
+          fi
+          for arch in x64 arm64; do
+            test -s "dist/perseid-${version}-windows-${arch}.msi"
+            test -s "dist/perseid-${version}-windows-${arch}-portable.zip"
+          done
+          for arch in x86_64 aarch64; do
+            test -s "dist/perseid-${version}-linux-${arch}.AppImage"
+            test -s "dist/perseid-${version}-linux-${arch}.deb"
+          done
+          test -s "dist/perseid-${version}-macos-universal.dmg"
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 9
+          (cd dist && sha256sum perseid-* > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+
+      - name: Create or update draft (never overwrite a published release)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          tag="v${version}"
+          prerelease_version=${version%%+*}
+          prerelease=false
+          if [[ "$prerelease_version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          if gh release view "$tag" --json isDraft >/dev/null 2>&1; then
+            is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft')
+            if [[ "$is_draft" != true ]]; then
+              echo "Refusing to replace published release: $tag" >&2
+              exit 1
+            fi
+            # Remove stale assets too, not just files with matching names.
+            while IFS= read -r asset; do
+              [[ -z "$asset" ]] || gh release delete-asset "$tag" "$asset" --yes
+            done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+            gh release edit "$tag" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "Perseid $tag" \
+              --prerelease="$prerelease"
+            gh release upload "$tag" dist/perseid-* dist/SHA256SUMS.txt
+          else
+            if [[ "$prerelease" == true ]]; then
+              gh release create "$tag" dist/perseid-* dist/SHA256SUMS.txt \
+                --target "$GITHUB_SHA" \
+                --title "Perseid $tag" \
+                --generate-notes \
+                --draft \
+                --prerelease
+            else
+              gh release create "$tag" dist/perseid-* dist/SHA256SUMS.txt \
+                --target "$GITHUB_SHA" \
+                --title "Perseid $tag" \
+                --generate-notes \
+                --draft
+            fi
+          fi
+          echo "Draft ready: $tag — review the assets and notes, then publish manually."
