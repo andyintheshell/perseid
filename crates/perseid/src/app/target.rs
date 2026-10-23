@@ -292,3 +292,113 @@ impl PerseidApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::time::{Duration, SystemTime};
+
+    use crate::history::FALLBACK_HISTORY_BYTES;
+    use crate::proxy::{ProxyEvent, RequestInfo};
+
+    use super::*;
+
+    /// Build history rows the way the proxy reports captured exchanges.
+    fn history(entries: &[(&str, &str, &str)]) -> History {
+        let mut history = History::new(100, FALLBACK_HISTORY_BYTES);
+        for (index, (method, host, path)) in entries.iter().enumerate() {
+            let id = index as u64 + 1;
+            history.apply(ProxyEvent::Started {
+                id,
+                timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(id),
+                request: RequestInfo {
+                    method: method.to_string(),
+                    uri: format!("http://{host}{path}"),
+                    scheme: "http".to_string(),
+                    host: host.to_string(),
+                    path: path.to_string(),
+                    version: "HTTP/1.1".to_string(),
+                    headers: Vec::new(),
+                },
+            });
+        }
+        history
+    }
+
+    #[test]
+    fn captured_host_list_counts_each_host_and_sorts_by_name() {
+        let history = history(&[
+            ("GET", "zeta.test", "/"),
+            ("GET", "alpha.test", "/a"),
+            ("POST", "alpha.test", "/b"),
+        ]);
+        assert_eq!(
+            captured_hosts(&history),
+            vec![("alpha.test".to_string(), 2), ("zeta.test".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn captured_host_list_skips_requests_without_a_host() {
+        let history = history(&[("GET", "", "/orphan"), ("GET", "alpha.test", "/")]);
+        assert_eq!(
+            captured_hosts(&history),
+            vec![("alpha.test".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn site_map_tree_groups_endpoints_under_their_host() {
+        let history = history(&[
+            ("GET", "example.com", "/a"),
+            ("POST", "example.com", "/a"),
+            ("GET", "api.example.com", "/v1"),
+        ]);
+        let map = SiteMap::build(&history, None);
+        let hosts: Vec<&str> = map.hosts.iter().map(|host| host.host.as_str()).collect();
+        assert_eq!(hosts, vec!["api.example.com", "example.com"]);
+        assert_eq!(map.endpoint_count(), 2);
+        let example = &map.hosts[1];
+        assert_eq!(example.entries.len(), 1);
+        assert_eq!(example.entries[0].count, 2);
+    }
+
+    #[test]
+    fn site_map_tree_hides_hosts_outside_the_scope() {
+        let scope = BTreeSet::from(["example.com".to_string()]);
+        let history = history(&[
+            ("GET", "example.com", "/"),
+            ("GET", "api.example.com", "/v1"),
+            ("GET", "other.test", "/"),
+        ]);
+        let map = SiteMap::build(&history, Some(&scope));
+        let hosts: Vec<&str> = map.hosts.iter().map(|host| host.host.as_str()).collect();
+        assert_eq!(hosts, vec!["api.example.com", "example.com"]);
+    }
+
+    #[test]
+    fn scope_helper_treats_every_host_as_in_scope_without_rules() {
+        assert!(site_map::host_in_scope("anything.test", &BTreeSet::new()));
+    }
+
+    #[test]
+    fn scope_helper_matches_subdomains_and_ignores_ports() {
+        let scope = BTreeSet::from(["example.com".to_string()]);
+        assert!(site_map::host_in_scope("example.com:8443", &scope));
+        assert!(site_map::host_in_scope("api.example.com", &scope));
+        assert!(!site_map::host_in_scope("notexample.com", &scope));
+    }
+
+    #[test]
+    fn scope_input_normalizes_urls_ports_and_case() {
+        assert_eq!(
+            site_map::normalize_scope_input(" https://Example.com/path "),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            site_map::normalize_scope_input("example.com:8443"),
+            Some("example.com:8443".to_string())
+        );
+        assert_eq!(site_map::normalize_scope_input("   "), None);
+    }
+}

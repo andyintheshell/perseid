@@ -203,3 +203,284 @@ impl Default for MemoryMeter {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// The heap counters are process-wide, so the tests that pin them
+    /// serialize on this lock even though `cargo test` runs them on parallel
+    /// threads. The lib test binary uses the system allocator (only the
+    /// `perseid` binary installs [`TrackingAllocator`]), so nothing else
+    /// changes the counters while these tests run.
+    static COUNTER_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_counters() -> MutexGuard<'static, ()> {
+        COUNTER_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Restores the live and peak counters when dropped, so pinning them for
+    /// a test does not disturb the rest of the suite.
+    struct CounterSnapshot {
+        in_use: usize,
+        peak: usize,
+    }
+
+    impl CounterSnapshot {
+        fn take() -> Self {
+            Self {
+                in_use: HEAP_IN_USE.load(Ordering::Relaxed),
+                peak: HEAP_PEAK.load(Ordering::Relaxed),
+            }
+        }
+    }
+
+    impl Drop for CounterSnapshot {
+        fn drop(&mut self) {
+            HEAP_IN_USE.store(self.in_use, Ordering::Relaxed);
+            HEAP_PEAK.store(self.peak, Ordering::Relaxed);
+        }
+    }
+
+    fn past_sample_deadline(meter: &mut MemoryMeter) {
+        meter.last_sample = Instant::now()
+            .checked_sub(SAMPLE_INTERVAL + Duration::from_millis(1))
+            .expect("the process has been running for over a second");
+    }
+
+    #[test]
+    fn sample_history_covers_three_minutes() {
+        assert_eq!(
+            SAMPLE_INTERVAL * SAMPLE_HISTORY as u32,
+            Duration::from_secs(180)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn physical_memory_is_reported_on_unix() {
+        let bytes = physical_memory_bytes().expect("sysconf reports physical memory");
+        assert!(bytes > 0);
+    }
+
+    #[test]
+    fn new_meter_starts_with_one_live_sample() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(1234, Ordering::Relaxed);
+
+        let meter = MemoryMeter::new();
+        assert_eq!(meter.samples().len(), 1);
+        assert_eq!(meter.samples()[0], 1234);
+        assert!(meter.time_until_next_sample() <= SAMPLE_INTERVAL);
+
+        assert_eq!(MemoryMeter::default().samples().len(), 1);
+    }
+
+    #[test]
+    fn sample_if_due_waits_for_the_interval() {
+        let _guard = lock_counters();
+        let mut meter = MemoryMeter::new();
+        let before = meter.samples().len();
+
+        meter.last_sample = Instant::now();
+        meter.sample_if_due();
+
+        assert_eq!(meter.samples().len(), before);
+        assert!(meter.time_until_next_sample() > Duration::ZERO);
+    }
+
+    #[test]
+    fn a_meter_past_its_deadline_reports_no_time_left() {
+        let _guard = lock_counters();
+        let mut meter = MemoryMeter::new();
+        past_sample_deadline(&mut meter);
+        assert_eq!(meter.time_until_next_sample(), Duration::ZERO);
+    }
+
+    #[test]
+    fn sample_if_due_appends_at_the_end_and_evicts_at_capacity() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        let mut meter = MemoryMeter::new();
+        meter.samples.clear();
+        meter.samples.extend(0..SAMPLE_HISTORY as u64);
+        past_sample_deadline(&mut meter);
+        HEAP_IN_USE.store(999, Ordering::Relaxed);
+
+        meter.sample_if_due();
+
+        assert_eq!(meter.samples().len(), SAMPLE_HISTORY);
+        assert_eq!(*meter.samples().front().unwrap(), 1);
+        assert_eq!(*meter.samples().back().unwrap(), 999);
+    }
+
+    #[test]
+    fn grew_and_shrank_track_live_and_peak_bytes() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(0, Ordering::Relaxed);
+        HEAP_PEAK.store(0, Ordering::Relaxed);
+        let allocator = TrackingAllocator;
+
+        allocator.grew(100);
+        assert_eq!(heap_in_use(), 100);
+        assert_eq!(heap_peak(), 100);
+
+        allocator.shrank(40);
+        assert_eq!(heap_in_use(), 60);
+        assert_eq!(heap_peak(), 100);
+
+        allocator.grew(5);
+        assert_eq!(heap_in_use(), 65);
+        assert_eq!(heap_peak(), 100);
+    }
+
+    #[test]
+    fn shrank_saturates_at_zero() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(4, Ordering::Relaxed);
+        HEAP_PEAK.store(4, Ordering::Relaxed);
+
+        TrackingAllocator.shrank(10);
+
+        assert_eq!(heap_in_use(), 0);
+        assert_eq!(heap_peak(), 4);
+    }
+
+    #[test]
+    fn alloc_and_dealloc_are_forwarded_and_tracked() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(0, Ordering::Relaxed);
+        HEAP_PEAK.store(0, Ordering::Relaxed);
+        let allocator = TrackingAllocator;
+        let layout = Layout::from_size_align(64, 8).unwrap();
+
+        // SAFETY: the allocation is freed below with its own layout.
+        unsafe {
+            let ptr = allocator.alloc(layout);
+            assert!(!ptr.is_null());
+            assert_eq!(heap_in_use(), 64);
+
+            allocator.dealloc(ptr, layout);
+        }
+        assert_eq!(heap_in_use(), 0);
+        assert_eq!(heap_peak(), 64);
+    }
+
+    #[test]
+    fn alloc_zeroed_is_tracked_and_zeroed() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(0, Ordering::Relaxed);
+        let allocator = TrackingAllocator;
+        let layout = Layout::from_size_align(128, 8).unwrap();
+
+        // SAFETY: the allocation is freed below with its own layout.
+        unsafe {
+            let ptr = allocator.alloc_zeroed(layout);
+            assert!(!ptr.is_null());
+            assert_eq!(heap_in_use(), 128);
+            let bytes = std::slice::from_raw_parts(ptr, 128);
+            assert!(bytes.iter().all(|&byte| byte == 0));
+
+            allocator.dealloc(ptr, layout);
+        }
+        assert_eq!(heap_in_use(), 0);
+    }
+
+    #[test]
+    fn realloc_tracks_the_size_delta_in_both_directions() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(0, Ordering::Relaxed);
+        HEAP_PEAK.store(0, Ordering::Relaxed);
+        let allocator = TrackingAllocator;
+        let small = Layout::from_size_align(64, 8).unwrap();
+        let medium = Layout::from_size_align(256, 8).unwrap();
+        let tiny = Layout::from_size_align(32, 8).unwrap();
+
+        // SAFETY: every pointer is reallocated or freed with its own layout.
+        unsafe {
+            let ptr = allocator.alloc(small);
+            assert!(!ptr.is_null());
+
+            let bigger = allocator.realloc(ptr, small, 256);
+            assert!(!bigger.is_null());
+            assert_eq!(heap_in_use(), 256);
+
+            let smaller = allocator.realloc(bigger, medium, 32);
+            assert!(!smaller.is_null());
+            assert_eq!(heap_in_use(), 32);
+            assert_eq!(heap_peak(), 256);
+
+            allocator.dealloc(smaller, tiny);
+        }
+        assert_eq!(heap_in_use(), 0);
+    }
+
+    #[test]
+    fn failed_allocations_do_not_change_the_counters() {
+        let _guard = lock_counters();
+        let _snapshot = CounterSnapshot::take();
+        HEAP_IN_USE.store(0, Ordering::Relaxed);
+        let layout = Layout::from_size_align(1 << 62, 8).unwrap();
+
+        // SAFETY: a failed allocation returns null and owns no memory.
+        let ptr = unsafe { TrackingAllocator.alloc(layout) };
+
+        assert!(ptr.is_null());
+        assert_eq!(heap_in_use(), 0);
+    }
+
+    #[cfg(feature = "screenshots")]
+    mod presentation {
+        use super::*;
+
+        #[test]
+        fn smoothstep_saturates_and_hits_its_midpoint() {
+            assert_eq!(smoothstep(-1.0), 0.0);
+            assert_eq!(smoothstep(0.0), 0.0);
+            assert_eq!(smoothstep(0.5), 0.5);
+            assert_eq!(smoothstep(1.0), 1.0);
+            assert_eq!(smoothstep(2.0), 1.0);
+        }
+
+        #[test]
+        fn seeded_samples_fill_the_graph_within_the_observed_peak() {
+            let _guard = lock_counters();
+            let _snapshot = CounterSnapshot::take();
+            HEAP_IN_USE.store(1000, Ordering::Relaxed);
+            HEAP_PEAK.store(2000, Ordering::Relaxed);
+
+            let mut meter = MemoryMeter::new();
+            meter.seed_presentation_samples();
+
+            assert_eq!(meter.samples().len(), SAMPLE_HISTORY);
+            assert!(
+                meter
+                    .samples()
+                    .iter()
+                    .all(|&sample| (1..=2000).contains(&sample))
+            );
+            assert!(meter.time_until_next_sample() <= SAMPLE_INTERVAL);
+        }
+
+        #[test]
+        fn reset_peak_aligns_the_peak_with_the_live_heap() {
+            let _guard = lock_counters();
+            let _snapshot = CounterSnapshot::take();
+            HEAP_IN_USE.store(42, Ordering::Relaxed);
+            HEAP_PEAK.store(999, Ordering::Relaxed);
+
+            reset_peak_for_screenshot();
+
+            assert_eq!(heap_peak(), 42);
+        }
+    }
+}

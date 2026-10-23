@@ -286,7 +286,7 @@ impl PerseidApp {
                         );
                         ui.hyperlink_to(
                             RichText::new("Full setup and removal guide").color(theme::ACCENT_DARK),
-                            "https://github.com/andyintheshell/perseid/blob/main/docs/tls.md",
+                            format!("{}/tls.md", branding::DOCS_URL),
                         );
                     });
 

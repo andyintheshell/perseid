@@ -716,6 +716,10 @@ fn run_writer(
                         let _ = reply.send(Ok(opened));
                     }
                     Err(err) => {
+                        // Match every other failure arm: without this the
+                        // status widget would keep showing the previous state
+                        // as if the new project had been created.
+                        shared.set_status_error(err.to_string());
                         let _ = reply.send(Err(err));
                     }
                 }
@@ -1375,6 +1379,7 @@ mod tests {
 
         let mut workspace = WorkspaceState::default();
         workspace.scope.enabled = true;
+        workspace.scope.enforce = true;
         workspace.scope.hosts = vec!["*.example.com".to_string()];
         assert!(project.set_workspace(workspace.clone()));
         wait(project.flush()).expect("flush");

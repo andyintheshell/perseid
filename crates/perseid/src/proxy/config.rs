@@ -153,3 +153,153 @@ impl fmt::Debug for ProxyConfig {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proxy::rules::{RuleDirection, RulePart};
+
+    fn rule(pattern: &str) -> MatchReplaceRule {
+        MatchReplaceRule {
+            enabled: true,
+            direction: RuleDirection::Request,
+            part: RulePart::Head,
+            pattern: pattern.to_string(),
+            replacement: "replacement".to_string(),
+            regex: true,
+        }
+    }
+
+    fn settings_with(rules: Vec<MatchReplaceRule>) -> ProxySettings {
+        ProxySettings {
+            match_replace: rules,
+            ..ProxySettings::default()
+        }
+    }
+
+    #[test]
+    fn defaults_are_loopback_only_and_match_the_documented_limits() {
+        let config = ProxyConfig::default();
+        assert_eq!(config.listen, SocketAddr::from(([127, 0, 0, 1], 8080)));
+        assert_eq!(config.capture_limit, DEFAULT_CAPTURE_LIMIT);
+        assert_eq!(config.intercept_limit, DEFAULT_INTERCEPT_LIMIT);
+        assert_eq!(config.event_queue, DEFAULT_EVENT_QUEUE);
+        assert_eq!(config.connect_timeout, DEFAULT_CONNECT_TIMEOUT);
+        assert_eq!(config.max_connections, DEFAULT_MAX_CONNECTIONS);
+        assert_eq!(config.max_tunnels, DEFAULT_MAX_TUNNELS);
+        assert!(config.notify.is_none());
+    }
+
+    #[test]
+    fn default_settings_are_permissive() {
+        let settings = ProxySettings::default();
+        assert!(!settings.intercept_requests);
+        assert!(!settings.intercept_responses);
+        assert!(!settings.scope_enforce);
+        assert!(settings.scope_rules.is_empty());
+        assert!(!settings.tls_intercept);
+        assert!(settings.tls_passthrough.is_empty());
+        assert!(settings.match_replace.is_empty());
+
+        let tls = TlsConfig::default();
+        assert!(tls.authority.is_none());
+        assert!(tls.extra_roots_pem.is_empty());
+    }
+
+    #[test]
+    fn new_keeps_every_default_but_the_listen_address() {
+        let listen = SocketAddr::from(([0, 0, 0, 0], 9090));
+        let config = ProxyConfig::new(listen);
+        let defaults = ProxyConfig::default();
+
+        assert_eq!(config.listen, listen);
+        assert_eq!(config.capture_limit, defaults.capture_limit);
+        assert_eq!(config.intercept_limit, defaults.intercept_limit);
+        assert_eq!(config.event_queue, defaults.event_queue);
+        assert_eq!(config.connect_timeout, defaults.connect_timeout);
+        assert_eq!(config.max_connections, defaults.max_connections);
+        assert_eq!(config.max_tunnels, defaults.max_tunnels);
+        assert_eq!(config.settings, defaults.settings);
+    }
+
+    #[test]
+    fn validate_accepts_no_rules() {
+        assert!(ProxySettings::default().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_ignores_disabled_and_empty_rules() {
+        let mut disabled = rule("(");
+        disabled.enabled = false;
+        let empty_regex = rule("");
+        let mut empty_literal = rule("");
+        empty_literal.regex = false;
+
+        assert!(
+            settings_with(vec![disabled, empty_regex, empty_literal])
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_accepts_a_valid_regex() {
+        assert!(
+            settings_with(vec![rule(r"secret=(\w+)")])
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_rejects_an_invalid_regex_and_names_the_pattern() {
+        let error = settings_with(vec![rule("[")])
+            .validate()
+            .expect_err("an invalid regex must fail validation");
+
+        match &error {
+            RuleError::InvalidRegex { pattern, .. } => assert_eq!(pattern, "["),
+        }
+        let message = error.to_string();
+        assert!(message.contains("invalid regular expression"));
+        assert!(message.contains('['));
+    }
+
+    #[test]
+    fn validate_reports_the_first_invalid_rule() {
+        let error = settings_with(vec![rule("[a"), rule("(b")])
+            .validate()
+            .expect_err("an invalid regex must fail validation");
+
+        match error {
+            RuleError::InvalidRegex { pattern, .. } => assert_eq!(pattern, "[a"),
+        }
+    }
+
+    #[test]
+    fn tls_debug_shows_authority_presence_and_root_count_without_pem_bodies() {
+        let tls = TlsConfig {
+            authority: None,
+            extra_roots_pem: vec!["-----BEGIN CERTIFICATE-----\nsecret".to_string()],
+        };
+
+        let debug = format!("{tls:?}");
+        assert!(debug.contains("authority: false"));
+        assert!(debug.contains("extra_roots: 1"));
+        assert!(!debug.contains("BEGIN CERTIFICATE"));
+        assert!(!debug.contains("secret"));
+    }
+
+    #[test]
+    fn proxy_config_debug_reports_whether_notify_is_set() {
+        assert!(format!("{:?}", ProxyConfig::default()).contains("notify: false"));
+
+        let config = ProxyConfig {
+            notify: Some(Arc::new(|| {})),
+            ..ProxyConfig::default()
+        };
+        let debug = format!("{config:?}");
+        assert!(debug.contains("notify: true"));
+        assert!(debug.contains("127.0.0.1:8080"));
+    }
+}

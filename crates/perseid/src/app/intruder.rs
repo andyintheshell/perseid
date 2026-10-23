@@ -24,7 +24,7 @@ use crate::project::{IntruderAttackRecord, IntruderWorkspace};
 use crate::proxy::{
     AttackType, DEFAULT_REPEATER_TIMEOUT, Intruder, IntruderConfig, IntruderError, IntruderEvent,
     IntruderPlan, IntruderResult, MAX_INTRUDER_CONCURRENCY, RepeaterRequest, RepeaterResult,
-    auto_mark, clear_markers, marker_ranges, toggle_marker, update_host_header,
+    auto_mark, clear_markers, marker_ranges, split_raw_request, toggle_marker, update_host_header,
 };
 use crate::view::{self, MessageViews};
 
@@ -109,7 +109,6 @@ pub(super) struct IntruderState {
     started_at: Option<Instant>,
     total: u64,
     received: u64,
-    completed: u64,
     running: bool,
     stopping: bool,
     finished_note: Option<String>,
@@ -142,7 +141,6 @@ impl IntruderState {
             started_at: None,
             total: 0,
             received: 0,
-            completed: 0,
             running: false,
             stopping: false,
             finished_note: None,
@@ -192,7 +190,6 @@ impl IntruderState {
         self.started_at = None;
         self.total = 0;
         self.received = 0;
-        self.completed = 0;
         self.running = false;
         self.stopping = false;
         self.finished_note = None;
@@ -316,7 +313,6 @@ impl IntruderState {
         self.detail = None;
         self.total = total;
         self.received = 0;
-        self.completed = 0;
         self.running = true;
         self.stopping = false;
         self.started_at = Some(Instant::now());
@@ -359,25 +355,27 @@ impl IntruderState {
         }
     }
 
-    fn finish(&mut self, attack_id: u64, completed: u64, total: u64, cancelled: bool) {
-        if self.attack_id == Some(attack_id) {
-            self.completed = completed;
-            if total > 0 {
-                self.total = total;
-            }
-            self.finished_note = Some(if cancelled {
-                format!("Attack stopped after {} request(s)", self.received)
-            } else {
-                format!(
-                    "Attack finished: {} request(s) in {}",
-                    self.received,
-                    self.started_at.map_or_else(
-                        || "—".to_string(),
-                        |start| view::format_duration(start.elapsed())
-                    )
-                )
-            });
+    fn finish(&mut self, attack_id: u64, total: u64, cancelled: bool) {
+        // A finished event from a stopped or replaced attack must not clear
+        // the state of the attack currently running.
+        if self.attack_id != Some(attack_id) {
+            return;
         }
+        if total > 0 {
+            self.total = total;
+        }
+        self.finished_note = Some(if cancelled {
+            format!("Attack stopped after {} request(s)", self.received)
+        } else {
+            format!(
+                "Attack finished: {} request(s) in {}",
+                self.received,
+                self.started_at.map_or_else(
+                    || "—".to_string(),
+                    |start| view::format_duration(start.elapsed())
+                )
+            )
+        });
         self.running = false;
         self.stopping = false;
         self.started_at = None;
@@ -403,7 +401,6 @@ impl IntruderState {
         self.started_at = None;
         self.total = 0;
         self.received = 0;
-        self.completed = 0;
         self.finished_note = None;
     }
 
@@ -517,7 +514,6 @@ Connection: keep-alive\r\n\
         self.attack_id = Some(1);
         self.total = 5;
         self.received = 5;
-        self.completed = 5;
         self.running = false;
         self.stopping = false;
         self.started_at = None;
@@ -615,28 +611,7 @@ impl PerseidApp {
         } else {
             item.request.scheme.clone()
         };
-        let body = &item.request_body;
-        let mut notes = Vec::new();
-        if body.is_truncated() {
-            notes.push("the captured request body was truncated at the capture limit");
-        }
-        if !body.is_complete() {
-            notes.push("the captured request body did not finish");
-        }
-        if body.data().len() > view::TEXT_PREVIEW_LIMIT {
-            notes.push("the editor contains a bounded body preview");
-        }
-        if !body.data().is_empty() && std::str::from_utf8(body.data()).is_err() {
-            notes.push(
-                "the captured body was encoded or binary; the editor uses a best-effort text view",
-            );
-        }
-        let note = (!notes.is_empty()).then(|| {
-            format!(
-                "Seeded from history: {}. Review the body before starting an attack.",
-                notes.join("; ")
-            )
-        });
+        let note = view::seeded_body_note(&item.request_body, "starting an attack");
 
         self.intruder.load_template(
             scheme,
@@ -664,10 +639,10 @@ impl PerseidApp {
                 IntruderEvent::Result(result) => self.intruder.record_result(result),
                 IntruderEvent::Finished {
                     attack_id,
-                    completed,
                     total,
                     cancelled,
-                } => self.intruder.finish(attack_id, completed, total, cancelled),
+                    ..
+                } => self.intruder.finish(attack_id, total, cancelled),
             }
         }
 
@@ -1487,7 +1462,7 @@ impl PerseidApp {
                                 ui.label(
                                     RichText::new(status.to_string())
                                         .small()
-                                        .color(status_color(*status)),
+                                        .color(view::status_class_color(*status)),
                                 );
                             }
                             RepeaterResult::Failed { .. } => {
@@ -1576,7 +1551,7 @@ impl PerseidApp {
             match &result.result {
                 RepeaterResult::Response { status, reason, .. } => {
                     ui.colored_label(
-                        status_color(*status),
+                        view::status_class_color(*status),
                         RichText::new(if reason.is_empty() {
                             status.to_string()
                         } else {
@@ -1788,16 +1763,6 @@ fn byte_offset_for_char(text: &str, char_index: usize) -> usize {
         .map_or(text.len(), |(offset, _)| offset)
 }
 
-fn split_raw_request(raw: &str) -> (&str, &str) {
-    if let Some(position) = raw.find("\r\n\r\n") {
-        (&raw[..position + 4], &raw[position + 4..])
-    } else if let Some(position) = raw.find("\n\n") {
-        (&raw[..position + 2], &raw[position + 2..])
-    } else {
-        (raw, "")
-    }
-}
-
 fn authority_from_uri(uri: &str) -> String {
     let Some((_, rest)) = uri.split_once("://") else {
         return String::new();
@@ -1809,16 +1774,6 @@ fn authority_from_uri(uri: &str) -> String {
         .next()
         .unwrap_or_default()
         .to_string()
-}
-
-fn status_color(status: u16) -> Color32 {
-    match status / 100 {
-        2 => theme::GREEN,
-        3 => theme::BLUE,
-        4 => theme::AMBER,
-        5 => theme::RED,
-        _ => theme::GRAY,
-    }
 }
 
 fn result_size(result: &IntruderResult) -> usize {
@@ -1916,7 +1871,6 @@ impl PerseidApp {
         state.started_at = None;
         state.total = 0;
         state.received = 0;
-        state.completed = 0;
         state.running = false;
         state.stopping = false;
         state.finished_note = None;

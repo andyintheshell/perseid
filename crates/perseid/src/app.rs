@@ -9,9 +9,10 @@
 //!
 //! This module holds the application state, the window shell, and the shared
 //! top-level panels. The tabs and supporting pieces are split by area:
-//! [`comparer`], [`decoder`], [`intercept`], [`intruder`], [`proxy`],
-//! [`repeater`], [`rules`], [`search`], [`target`], [`windows`], [`widgets`],
-//! [`message_view`], [`util`], and [`scale`].
+//! [`comparer`], [`decoder`], [`inspector`], [`intercept`], [`intruder`],
+//! [`project_ui`], [`proxy`], [`repeater`], [`rules`], [`search`], [`target`],
+//! [`tls`], [`windows`], [`widgets`], [`message_view`], [`util`], [`scale`],
+//! and the feature-gated [`screenshots`] driver.
 
 mod comparer;
 mod decoder;
@@ -41,7 +42,7 @@ use std::time::Duration;
 
 use crate::proxy::{
     CertificateAuthority, InterceptKey, Intruder, MatchReplaceRule, Proxy, ProxyConfig, ProxyEvent,
-    ProxySettings, Repeater, TlsConfig,
+    ProxySettings, Repeater, TlsConfig, display_ip,
 };
 use egui::{Color32, Key, RichText, Stroke};
 
@@ -524,13 +525,7 @@ impl PerseidApp {
     pub(super) fn certificate_page_url(&self) -> Option<String> {
         self.proxy.as_ref().map(|proxy| {
             let addr = proxy.local_addr();
-            let host = match addr.ip() {
-                std::net::IpAddr::V4(ip) if ip.is_unspecified() => "127.0.0.1".to_string(),
-                std::net::IpAddr::V6(ip) if ip.is_unspecified() => "[::1]".to_string(),
-                std::net::IpAddr::V4(ip) => ip.to_string(),
-                std::net::IpAddr::V6(ip) => format!("[{ip}]"),
-            };
-            format!("http://{host}:{}/", addr.port())
+            format!("http://{}:{}/", display_ip(addr.ip()), addr.port())
         })
     }
 
@@ -583,14 +578,7 @@ impl PerseidApp {
     /// Settings sent to the proxy: enabled rules that compile. A broken regex
     /// stays visible in the editor but never becomes part of the live policy.
     fn sanitized_proxy_settings(&self) -> (ProxySettings, Option<String>) {
-        let mut settings = self.proxy_settings();
-        let error = settings.validate().err().map(|err| err.to_string());
-        if error.is_some() {
-            settings
-                .match_replace
-                .retain(|rule| rule.validate().is_ok());
-        }
-        (settings, error)
+        sanitized_settings(self.proxy_settings())
     }
 
     /// Push interception, scope, and rewrite settings to the running proxy.
@@ -844,31 +832,21 @@ impl PerseidApp {
     }
 
     fn move_selection(&mut self, delta: isize) {
-        if self.visible.is_empty() {
-            self.selected = None;
-            return;
+        match moved_row_index(self.visible.len(), self.selected_row_index(), delta) {
+            Some(next) => self.select_id(self.visible[next]),
+            None => self.selected = None,
         }
-        let next = match self.selected_row_index() {
-            Some(position) => {
-                (position as isize + delta).clamp(0, self.visible.len() as isize - 1) as usize
-            }
-            None => 0,
-        };
-        self.select_id(self.visible[next]);
     }
 
     fn move_websocket_selection(&mut self, delta: isize) {
-        if self.websocket_visible.is_empty() {
-            self.websocket_selected = None;
-            return;
+        match moved_row_index(
+            self.websocket_visible.len(),
+            self.selected_websocket_row_index(),
+            delta,
+        ) {
+            Some(next) => self.select_websocket_id(self.websocket_visible[next]),
+            None => self.websocket_selected = None,
         }
-        let next = match self.selected_websocket_row_index() {
-            Some(position) => (position as isize + delta)
-                .clamp(0, self.websocket_visible.len() as isize - 1)
-                as usize,
-            None => 0,
-        };
-        self.select_websocket_id(self.websocket_visible[next]);
     }
 
     fn select_id(&mut self, id: u64) {
@@ -1105,10 +1083,7 @@ impl PerseidApp {
                         self.about_open = true;
                         ui.close();
                     }
-                    ui.hyperlink_to(
-                        "Project on GitHub",
-                        "https://github.com/andyintheshell/perseid",
-                    );
+                    ui.hyperlink_to("Project on GitHub", branding::REPOSITORY_URL);
                 });
             });
 
@@ -1476,9 +1451,41 @@ impl eframe::App for PerseidApp {
     }
 }
 
+/// Settings sent to the proxy: enabled rules that compile.
+///
+/// A broken regex stays visible in the editor but never becomes part of the
+/// live policy: every rule that fails validation is dropped and the first
+/// validation error is reported.
+fn sanitized_settings(mut settings: ProxySettings) -> (ProxySettings, Option<String>) {
+    let error = settings.validate().err().map(|err| err.to_string());
+    if error.is_some() {
+        settings
+            .match_replace
+            .retain(|rule| rule.validate().is_ok());
+    }
+    (settings, error)
+}
+
+/// Row index after moving the selection by `delta` within `len` rows.
+///
+/// Without a selection the first row becomes selected, regardless of the
+/// direction; otherwise the target index clamps to the ends and never wraps.
+/// `None` means there are no rows.
+fn moved_row_index(len: usize, current: Option<usize>, delta: isize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    let next = match current {
+        Some(position) => position as isize + delta,
+        None => 0,
+    };
+    Some(next.clamp(0, len as isize - 1) as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::{RuleDirection, RulePart};
 
     #[test]
     fn tabs_follow_burp_order() {
@@ -1494,5 +1501,44 @@ mod tests {
                 MainTab::Comparer
             ]
         );
+    }
+
+    #[test]
+    fn sanitized_settings_keep_only_rules_that_compile() {
+        let rule = |pattern: &str, regex: bool| MatchReplaceRule {
+            enabled: true,
+            direction: RuleDirection::Request,
+            part: RulePart::All,
+            pattern: pattern.to_string(),
+            replacement: String::new(),
+            regex,
+        };
+
+        let settings = ProxySettings {
+            match_replace: vec![rule("(", true), rule("ok", false)],
+            ..ProxySettings::default()
+        };
+        let (sanitized, error) = sanitized_settings(settings);
+        assert!(error.is_some());
+        assert_eq!(sanitized.match_replace.len(), 1);
+        assert_eq!(sanitized.match_replace[0].pattern, "ok");
+
+        let (clean, error) = sanitized_settings(ProxySettings {
+            match_replace: vec![rule("ok", false)],
+            ..ProxySettings::default()
+        });
+        assert!(error.is_none());
+        assert_eq!(clean.match_replace.len(), 1);
+    }
+
+    #[test]
+    fn move_selection_starts_at_the_first_row_and_clamps() {
+        assert_eq!(moved_row_index(0, None, 1), None);
+        assert_eq!(moved_row_index(5, None, 1), Some(0));
+        assert_eq!(moved_row_index(5, None, -1), Some(0));
+        assert_eq!(moved_row_index(5, Some(2), 10), Some(4));
+        assert_eq!(moved_row_index(5, Some(2), -10), Some(0));
+        assert_eq!(moved_row_index(5, Some(0), -1), Some(0));
+        assert_eq!(moved_row_index(5, Some(4), 1), Some(4));
     }
 }

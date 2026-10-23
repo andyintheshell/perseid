@@ -10,6 +10,12 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/icon-128.png");
 const LOCKUP_PNG: &[u8] = include_bytes!("../assets/logo-light.png");
 const MARK_PNG: &[u8] = include_bytes!("../assets/mark.png");
 
+/// Canonical repository URL used by the About window and help links.
+pub const REPOSITORY_URL: &str = "https://github.com/andyintheshell/perseid";
+
+/// Hosted documentation root for the repository's `docs/` directory.
+pub const DOCS_URL: &str = "https://github.com/andyintheshell/perseid/blob/main/docs";
+
 /// Window/task-bar icon, decoded from the 128 px app icon.
 pub fn window_icon() -> Option<IconData> {
     let image = image::load_from_memory(ICON_PNG).ok()?.into_rgba8();

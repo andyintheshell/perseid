@@ -365,7 +365,8 @@ pub fn apply(operation: Transform, input: &[u8]) -> Result<Vec<u8>> {
     Ok(transform(input, None, operation)?.data)
 }
 
-fn normalize_selection(length: usize, selection: Option<Range<usize>>) -> Range<usize> {
+/// Clamp a byte selection to `length`, falling back to the whole input.
+pub(crate) fn normalize_selection(length: usize, selection: Option<Range<usize>>) -> Range<usize> {
     match selection {
         Some(range) if range.start < range.end && range.start < length => {
             range.start.min(length)..range.end.min(length)
@@ -879,7 +880,7 @@ fn hex_digit(value: u8) -> u8 {
     }
 }
 
-fn hex_value(byte: u8) -> Option<u8> {
+pub(crate) fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),

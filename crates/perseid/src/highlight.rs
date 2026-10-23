@@ -11,6 +11,7 @@ use egui::text::{ByteIndex, LayoutJob, LayoutSection};
 use egui::{Color32, FontId, TextFormat};
 
 use crate::theme;
+use crate::view;
 
 /// Message text is a little smaller than the UI's default monospace style so
 /// more of a request or response fits in the detail panes.
@@ -292,13 +293,10 @@ fn start_line(job: &mut LayoutJob, line: &str, font: &FontId) {
 }
 
 fn status_color(status: &str) -> Color32 {
-    match status.parse::<u16>().map(|status| status / 100) {
-        Ok(2) => theme::GREEN,
-        Ok(3) => theme::BLUE,
-        Ok(4) => theme::AMBER,
-        Ok(5) => theme::RED,
-        _ => theme::TEXT_MUTED,
-    }
+    status
+        .parse::<u16>()
+        .map(view::status_class_color)
+        .unwrap_or(theme::TEXT_MUTED)
 }
 
 fn header_line(job: &mut LayoutJob, line: &str, font: &FontId) {

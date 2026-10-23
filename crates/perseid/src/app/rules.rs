@@ -223,3 +223,21 @@ impl PerseidApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direction_labels_cover_both_directions() {
+        assert_eq!(direction_label(RuleDirection::Request), "Request");
+        assert_eq!(direction_label(RuleDirection::Response), "Response");
+    }
+
+    #[test]
+    fn part_labels_describe_where_the_rule_applies() {
+        assert_eq!(part_label(RulePart::Head), "Head");
+        assert_eq!(part_label(RulePart::Body), "Body");
+        assert_eq!(part_label(RulePart::All), "Head + body");
+    }
+}

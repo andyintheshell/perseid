@@ -16,13 +16,16 @@ use perseid::proxy::{
     ProxyConfig, ProxyEvent, ProxySettings, RequestInfo, RuleDirection, RulePart, StartError,
     TlsConfig, WebSocketDirection, WebSocketOpcode,
 };
-use rcgen::{CertificateParams, KeyPair};
-use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
-use rustls::{ClientConfig, RootCertStore, ServerConfig};
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, RootCertStore};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
+
+mod common;
+
+use common::{origin_certificate, origin_certificate_h2, read_request};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -88,35 +91,6 @@ async fn spawn_capture_origin(response: String) -> (SocketAddr, oneshot::Receive
         }
     });
     (addr, request_rx)
-}
-
-/// Read a request head plus declared body.
-async fn read_request<S: AsyncRead + Unpin>(stream: &mut S) -> Vec<u8> {
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = match stream.read(&mut chunk).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        buf.extend_from_slice(&chunk[..n]);
-        if let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            let head = String::from_utf8_lossy(&buf[..head_end]);
-            let content_length = head
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .unwrap_or(0);
-            if buf.len() >= head_end + 4 + content_length {
-                break;
-            }
-        }
-    }
-    buf
 }
 
 /// Send a raw request, return the raw response (client sends `Connection: close`).
@@ -733,9 +707,12 @@ async fn paused_capture_ignores_new_exchanges_until_resumed() {
 async fn rejects_connections_above_the_limit() {
     let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin_addr = origin.local_addr().unwrap();
+    // Hold the origin connection open until the test releases it, so the
+    // first exchange cannot finish and free the permit early.
+    let (release_tx, release_rx) = oneshot::channel();
     let origin_task = tokio::spawn(async move {
         let (_stream, _) = origin.accept().await.unwrap();
-        tokio::time::sleep(TIMEOUT * 2).await;
+        let _ = release_rx.await;
     });
 
     let proxy = Proxy::start(ProxyConfig {
@@ -770,7 +747,8 @@ async fn rejects_connections_above_the_limit() {
     assert_eq!(proxy.rejected_connections(), 1);
 
     drop(first);
-    origin_task.abort();
+    let _ = release_tx.send(());
+    origin_task.await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1474,25 +1452,6 @@ fn start_returns_only_after_the_proxy_is_running() {
 // ---------------------------------------------------------------------------
 // TLS interception
 // ---------------------------------------------------------------------------
-
-/// Self-signed certificate for `name`, as a server config plus its PEM.
-fn origin_certificate(name: &str) -> (ServerConfig, String) {
-    let key = KeyPair::generate().expect("origin key");
-    let params = CertificateParams::new(vec![name.to_string()]).expect("origin params");
-    let cert = params.self_signed(&key).expect("origin certificate");
-    let key_der = PrivatePkcs8KeyDer::from(key.serialize_der());
-    let config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert.der().clone()], PrivateKeyDer::Pkcs8(key_der))
-        .expect("origin server config");
-    (config, cert.pem())
-}
-
-fn origin_certificate_h2(name: &str) -> (ServerConfig, String) {
-    let (mut config, pem) = origin_certificate(name);
-    config.alpn_protocols = vec![b"h2".to_vec()];
-    (config, pem)
-}
 
 #[derive(Debug)]
 struct CapturedH2Request {
