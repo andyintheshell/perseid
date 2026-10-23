@@ -6,7 +6,38 @@
 **User-visible extension:** `.perseid`  
 **Scope:** Local desktop projects; no cloud sync or multi-user editing
 
-> This is a design and implementation plan, not a claim that the changes have been made. It is based on the published v0.1.0 release, public repository source and current redb documentation. A local Git checkout was not available for compilation; verify exact module APIs against the v0.1.0 tag when implementing.
+> This is a design and implementation plan, not a claim that the changes have been made. It is based on the published v0.1.0 release, public repository source and current redb documentation.
+
+## 0. Review and implementation status
+
+**Reviewed:** 2026-10-23, on `feat/persistence-design` (workspace version `0.2.0`).
+
+**Verdict:** the design is sound and was adopted, with one deliberate shortcut and the smaller deviations listed below. The document was written against the `v0.1.0` release tag, while the implementing checkout is `0.2.0`; the integration points named in §3 still exist with the same responsibilities. The API snippets in §5 and §10 describe the intended shape and are not compilable code.
+
+### 0.1 Implementation status
+
+Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `backend`, `queries`, `transfer`, `service`) plus `crates/perseid/src/app/project_ui.rs`:
+
+- Schema v1 as specified in §6.2, including the Perseid `application_id`, `schema_version`, `record_version` and `state` checks from §6.1/§11.1; a newer schema or an unsupported record version is rejected with a typed error.
+- One writer actor with a bounded command queue, `Durability::Immediate` file commits, capture batching (128 events / 50 ms), flush receipts and workspace write coalescing (§5.2–5.4).
+- HTTP `Started`/`ResponseHead`/`Finished`, WebSocket messages/connections and workspace state persisted, with secondary indexes updated in the same transaction (§6.3–6.5). Bodies are stored as raw bytes; structured records are versioned JSON DTOs.
+- Temporary startup, `New Project`, `Open Project…`, `Save Project As…`, `Save Project Copy…`, in-flight repair on open, and clear-history, with the proxy stopped and restarted around open/new (§4).
+- Project status widget (mode, counts, capture loss, last error) and a final flush in `eframe::App::on_exit`.
+
+### 0.2 Deviations from the proposal
+
+| Proposal | Implemented | Why |
+| --- | --- | --- |
+| §9.2 ordered delta replay during Save As | The documented §9.2 shortcut: after the command queue drains, copy a redb read snapshot into a new `initializing` file, mark it ready, then switch | Smaller first slice. The file format, transfer engine and service boundary are unchanged, so delta replay can replace the shortcut without a format change. |
+| Paged UI over `list_http`/`list_ws` (§7.1) | Paged queries and cursors exist and are tested; the first UI wiring hydrates a bounded newest-first snapshot (count and byte budget) into the existing `History`/`WebSocketHistory` caches | Keeps the existing UI behavior in this change; the query API is the migration path. |
+| Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
+| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | Not implemented; exit flushes committed state and drops unsaved temporary history silently | Deferred until a global recent-files/unsaved-content prompt design exists. |
+| Migrations (§11.2) | Older schemas are rejected with a clear “requires migration” error; no migration code yet | No schema-v2 exists to migrate; the check keeps forward compatibility safe. |
+
+### 0.3 Test and follow-up notes
+
+- Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, workspace persistence, and ID monotonicity across clears.
+- Follow-up work, in priority order: (1) replace the quiesced Save As with the §9.2 delta handover if the capture gap is user-visible; (2) wire the history table to the paged queries so persistent projects are not bounded by the UI cache; (3) add migration scaffolding and the remaining §13.1 matrix rows (crash injection, 100k-exchange fixtures, sidecar audit).
 
 ## 1. Executive decision
 

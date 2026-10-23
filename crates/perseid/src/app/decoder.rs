@@ -18,6 +18,7 @@ use egui::{
 
 use super::PerseidApp;
 use crate::decoder as engine;
+use crate::project::DecoderPanelWorkspace;
 use crate::theme;
 use crate::view;
 
@@ -997,6 +998,35 @@ fn hex_copy(bytes: &[u8]) -> String {
 impl PerseidApp {
     pub(super) fn decoder_view(&mut self, ui: &mut egui::Ui) {
         self.decoder.ui(ui);
+    }
+
+    pub(super) fn decoder_workspace(&self) -> Vec<DecoderPanelWorkspace> {
+        self.decoder
+            .panels
+            .iter()
+            .map(|panel| DecoderPanelWorkspace {
+                id: panel.id,
+                data: panel.data.clone(),
+            })
+            .collect()
+    }
+
+    pub(super) fn apply_decoder_workspace(&mut self, panels: &[DecoderPanelWorkspace]) {
+        if panels.is_empty() {
+            self.decoder.reset();
+            return;
+        }
+        self.decoder.panels.clear();
+        let mut next_id = 1;
+        for workspace in panels {
+            let id = workspace.id.max(next_id);
+            next_id = id.saturating_add(1).max(next_id.saturating_add(1));
+            self.decoder
+                .panels
+                .push(Panel::new(id, workspace.data.clone(), Vec::new(), None));
+        }
+        self.decoder.next_id = next_id;
+        self.decoder.scroll_to_end = false;
     }
 }
 

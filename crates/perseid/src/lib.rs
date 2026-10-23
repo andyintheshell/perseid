@@ -13,6 +13,7 @@ mod highlight;
 mod history;
 mod memory;
 mod pretty;
+mod project;
 mod site_map;
 mod theme;
 mod view;

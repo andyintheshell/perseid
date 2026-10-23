@@ -20,6 +20,7 @@ use egui::text_edit::TextEditState;
 use egui::{FontId, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
+use crate::project::{IntruderAttackRecord, IntruderWorkspace};
 use crate::proxy::{
     AttackType, DEFAULT_REPEATER_TIMEOUT, Intruder, IntruderConfig, IntruderError, IntruderEvent,
     IntruderPlan, IntruderResult, MAX_INTRUDER_CONCURRENCY, RepeaterRequest, RepeaterResult,
@@ -1840,10 +1841,91 @@ fn result_size(result: &IntruderResult) -> usize {
     payloads.saturating_add(result).saturating_add(128)
 }
 
+impl PerseidApp {
+    pub(super) fn intruder_workspace(&self) -> IntruderWorkspace {
+        let state = &self.intruder;
+        IntruderWorkspace {
+            scheme: state.scheme.clone(),
+            host: state.host.clone(),
+            request: state.request.clone(),
+            attack: match state.attack {
+                AttackType::Sniper => IntruderAttackRecord::Sniper,
+                AttackType::BatteringRam => IntruderAttackRecord::BatteringRam,
+                AttackType::Pitchfork => IntruderAttackRecord::Pitchfork,
+                AttackType::ClusterBomb => IntruderAttackRecord::ClusterBomb,
+            },
+            payload_sets: state
+                .payload_sets
+                .iter()
+                .map(|set| set.text.clone())
+                .collect(),
+            active_set: state.active_set,
+            concurrency: state.concurrency,
+            update_host: state.update_host,
+            note: state.note.clone(),
+        }
+    }
+
+    pub(super) fn apply_intruder_workspace(&mut self, workspace: &IntruderWorkspace) {
+        if workspace.scheme.is_empty()
+            && workspace.host.is_empty()
+            && workspace.request.is_empty()
+            && workspace.payload_sets.is_empty()
+        {
+            self.intruder = IntruderState::new();
+            return;
+        }
+        let state = &mut self.intruder;
+        state.scheme = workspace.scheme.clone();
+        state.host = workspace.host.clone();
+        state.request = workspace.request.clone();
+        state.attack = match workspace.attack {
+            IntruderAttackRecord::Sniper => AttackType::Sniper,
+            IntruderAttackRecord::BatteringRam => AttackType::BatteringRam,
+            IntruderAttackRecord::Pitchfork => AttackType::Pitchfork,
+            IntruderAttackRecord::ClusterBomb => AttackType::ClusterBomb,
+        };
+        state.payload_sets = if workspace.payload_sets.is_empty() {
+            vec![PayloadSet::default()]
+        } else {
+            workspace
+                .payload_sets
+                .iter()
+                .cloned()
+                .map(|text| PayloadSet { text })
+                .collect()
+        };
+        state.active_set = workspace
+            .active_set
+            .min(state.payload_sets.len().saturating_sub(1));
+        state.concurrency = workspace.concurrency.clamp(1, MAX_INTRUDER_CONCURRENCY);
+        state.update_host = workspace.update_host;
+        state.note = workspace.note.clone();
+        state.error = None;
+        state.notice = None;
+        state.selection = None;
+        state.cursor = 0;
+        state.results.clear();
+        state.result_bytes = 0;
+        state.selected = None;
+        state.detail = None;
+        state.detail_pane = MessagePane::Response;
+        state.detail_view = MessageView::Pretty;
+        state.attack_id = None;
+        state.last_plan = None;
+        state.started_at = None;
+        state.total = 0;
+        state.received = 0;
+        state.completed = 0;
+        state.running = false;
+        state.stopping = false;
+        state.finished_note = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn payloads_ignore_blank_lines_and_accept_crlf() {
         assert_eq!(
