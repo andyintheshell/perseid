@@ -281,6 +281,7 @@ impl PerseidApp {
         self.target_section = TargetSection::SiteMap;
         self.request_view = MessageView::Pretty;
         self.response_view = MessageView::Pretty;
+        self.inspector.reset();
         self.filter.clear();
         self.visible_key = None;
         self.selected = Some(2);

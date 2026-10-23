@@ -18,7 +18,10 @@ illustrate the UI, not platform support or performance guarantees.
 
 ## Proxy > HTTP history
 
-![Proxy HTTP history with request and response detail](images/perseid-main.png)
+The request and response editors open side by side, with the parsed Inspector
+on the right and per-exchange Notes behind its rail tab.
+
+![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
 
 ## Proxy > WebSockets history
 
