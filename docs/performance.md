@@ -47,18 +47,25 @@ the platform does not report installed memory (`--history-bytes` overrides it).
 On the 5.3 GiB benchmark VM this resolves to about 2.65 GiB per cache across
 request and response bodies, so a worst case of 2,000 HTTP exchanges with two
 full 1 MiB bodies each still cannot retain the full 4 GiB in that cache. The
-HTTP and WebSocket caches have separate budgets. These settings do not cap the
-project backend: the current temporary redb store retains captures in RAM
-without aggregate eviction, and persistent project files retain records on disk
-until cleared. Neither mode has an automatic total-store retention cap today.
-The M0 workload retained only 125 KiB, so the UI-cache budget did not bind in the
-measurements above.
+HTTP and WebSocket caches have separate budgets. The temporary redb project has
+its own aggregate retention limits: combined record count across HTTP and
+WebSocket messages, and retained HTTP body/WebSocket payload bytes. By default
+both mirror the history settings, so the same numbers bound the UI cache and
+the temporary store; `--temporary-retention-limit` and
+`--temporary-retention-bytes` change them independently, and `0` disables a
+dimension. Persistent project files retain records on disk until cleared and
+have no automatic total-store retention cap. The M0 workload retained only
+125 KiB, so the UI-cache budget did not bind in the measurements above.
 
 This UI-cache budget counts retained request/response bodies, not headers,
 formatting caches, editor state, queued work, graphics resources, or the entire
 process. One exchange may remain even when it alone exceeds the configured
-history byte budget. The uncapped temporary project store can grow separately;
-treat the history controls as UI-cache limits, not a hard RSS ceiling.
+history byte budget, and the temporary store always keeps the newest record.
+The aggregate retention limits count retained body/payload bytes and record
+counts; they do not account for headers, redb page/cache overhead, formatting
+caches, editor state, queued work, graphics resources, or the entire process.
+Treat the history and retention controls as bounded-data limits, not a hard RSS
+ceiling.
 
 ### Heap in use and resident memory
 

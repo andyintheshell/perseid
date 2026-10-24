@@ -32,12 +32,14 @@ workbench inputs are saved automatically, so there is no periodic Save command.
 Use **Save Project Copy…** to make a separate snapshot without switching away
 from the open project.
 
-- **New Project** shows a discard warning, then starts an empty temporary
-  project. It does not delete an existing saved file.
+- **New Project** starts an empty temporary project. If the current temporary
+  project has unsaved records or workbench edits, Perseid first asks
+  Save/Discard/Cancel. Nothing is deleted from an existing saved file.
 - **Open Project…** opens an existing `.perseid` file. Enter its path in the
   dialog; there is no native file picker. If the proxy is running, it stops for
-  the switch and restarts afterward. An Open does not prompt to save an unsaved
-  temporary project, so use Save As first if you want to keep it.
+  the switch and restarts afterward. When the current temporary project has
+  unsaved work, Open asks Save/Discard/Cancel first; a cancelled prompt or a
+  failed open leaves the current project active.
 - **Save Project As…** transfers the current project into a new file and makes
   that file active. The destination must not already exist; Perseid does not
   overwrite projects.
@@ -63,9 +65,12 @@ sharing one.
 bounded:** opening a project loads only the newest snapshot allowed by
 `--history-limit` and `--history-bytes`. Older rows remain in the file but are
 not yet pageable or searchable from the UI. In a temporary project, those same
-limits bound the UI cache only: the temporary in-memory redb project currently
-retains accepted captures without an aggregate eviction/size cap, so its RAM use
-can grow with traffic until you clear history or exit. `--capture-limit` still
+flags define the default aggregate retention limits, but the limits can be set
+independently with `--temporary-retention-limit` and
+`--temporary-retention-bytes`: when the temporary store exceeds the configured
+record count or retained-body budget, the oldest records are evicted first (the
+newest is always kept) and the status bar reports the eviction count. Saved
+project files are not pruned automatically. `--capture-limit` still
 caps each stored body, and clearing history deletes stored records from the
 active project.
 
@@ -610,7 +615,8 @@ separate Space, matching the system green-button behavior.
 | --- | --- |
 | Captured bodies | 1 MiB retained per request/response by default; forwarding can stream larger bodies. |
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
-| History UI cache | 2,000 HTTP exchanges and 2,000 WebSocket messages; each cache uses the configured retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). These are not an aggregate cap on the temporary redb store or saved project files. |
+| History UI cache | 2,000 HTTP exchanges and 2,000 WebSocket messages; each cache uses the configured retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). These are UI-cache limits; the temporary store has separate aggregate retention settings. |
+| Temporary retention | Combined HTTP + WebSocket records default to `--history-limit`; retained HTTP body + WebSocket payload bytes default to `--history-bytes`. Override with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest records are evicted first and the newest is always kept. |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
@@ -619,17 +625,18 @@ separate Space, matching the system green-button behavior.
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
-| Temporary storage growth | The in-memory redb project retains accepted captures without an aggregate eviction cap. `--history-limit`/`--history-bytes` only bound the UI cache; RAM can grow until history is cleared or the app exits. |
-| Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, have no automatic disk-retention cap, and are not encrypted. |
+| Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above; the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
+| Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, are never pruned automatically, and are not encrypted. |
 | Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
-| Project transitions | New Project confirms discard; Open Project has no save/discard prompt for a temporary project. Save As/Copy refuse to overwrite an existing file. |
+| Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy refuse to overwrite an existing file. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
 | Sequencer work | At most 10,000 tokens of 16,384 characters; analysis uses 5,000 tokens, 1,024 character positions, and 4,096 bit positions. Capture is limited to the retained history. |
 | Missing tools/protocols | No WebSocket message interception/replay or HTTP/3/QUIC support. |
 
-See [CLI options](getting-started.md#options) to change the UI-cache limits and
-[Safety and privacy](safety.md) for the data-handling implications. Larger
-budgets allow more sensitive data to remain in memory; they do not improve
-protocol support or make an unsupported editing operation safe.
-One exchange can remain even if it alone exceeds the history-body byte budget.
+See [CLI options](getting-started.md#options) to change the UI-cache and
+temporary-retention limits and [Safety and privacy](safety.md) for the
+data-handling implications. Larger budgets allow more sensitive data to remain
+in memory; they do not improve protocol support or make an unsupported editing
+operation safe. One record can remain even if it alone exceeds the
+history-body or temporary retention byte budget.

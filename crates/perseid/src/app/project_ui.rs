@@ -19,8 +19,8 @@ use egui::{Align2, RichText};
 
 use crate::project::{
     CommitReceipt, MainTabRecord, OpenedProject, ProjectError, ProjectHandle, ProjectMode,
-    ProjectStatus, ProxySectionRecord, RuleDirectionRecord, RulePartRecord, RuleWorkspace,
-    ScopeWorkspace, TargetSectionRecord, TlsWorkspace, UiWorkspace, WorkspaceState,
+    ProjectStatus, ProxySectionRecord, RetentionLimits, RuleDirectionRecord, RulePartRecord,
+    RuleWorkspace, ScopeWorkspace, TargetSectionRecord, TlsWorkspace, UiWorkspace, WorkspaceState,
 };
 use crate::proxy::{MatchReplaceRule, RuleDirection, RulePart};
 
@@ -36,7 +36,6 @@ const TEMPORARY_LABEL: &str = "Untitled (temporary)";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProjectDialogKind {
-    New,
     Open,
     SaveAs,
     SaveCopy,
@@ -45,7 +44,6 @@ enum ProjectDialogKind {
 impl ProjectDialogKind {
     fn title(self) -> &'static str {
         match self {
-            Self::New => "New Project",
             Self::Open => "Open Project",
             Self::SaveAs => "Save Project As",
             Self::SaveCopy => "Save Project Copy",
@@ -54,16 +52,29 @@ impl ProjectDialogKind {
 
     fn submit_label(self) -> &'static str {
         match self {
-            Self::New => "New Project",
             Self::Open => "Open",
             Self::SaveAs => "Save",
             Self::SaveCopy => "Save Copy",
         }
     }
+}
 
-    fn needs_path(self) -> bool {
-        !matches!(self, Self::New)
-    }
+/// A project switch that may need to be postponed until the current temporary
+/// project is saved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProjectSwitch {
+    New,
+    Open(PathBuf),
+}
+
+struct ProjectSwitchPrompt {
+    request: ProjectSwitch,
+}
+
+enum ProjectSwitchAction {
+    Save,
+    Discard,
+    Cancel,
 }
 
 struct ProjectDialog {
@@ -130,13 +141,15 @@ enum ProjectCompletion {
 }
 
 enum ProjectDialogAction {
-    Submit(ProjectDialogKind, Option<PathBuf>),
+    Submit(ProjectDialogKind, PathBuf),
 }
 
 /// UI state for the current project.
 pub(super) struct ProjectUi {
     handle: Option<ProjectHandle>,
     dialog: Option<ProjectDialog>,
+    switch_prompt: Option<ProjectSwitchPrompt>,
+    switch_after_save: Option<ProjectSwitch>,
     pending: Vec<PendingProject>,
     notice: Option<ProjectNotice>,
     last_workspace: Option<WorkspaceState>,
@@ -149,8 +162,8 @@ pub(super) struct ProjectUi {
 }
 
 impl ProjectUi {
-    pub(super) fn new(ui_limit: usize, ui_bytes: usize) -> Self {
-        let handle = match ProjectHandle::temporary() {
+    pub(super) fn new(ui_limit: usize, ui_bytes: usize, retention: RetentionLimits) -> Self {
+        let handle = match ProjectHandle::temporary_with_retention(retention) {
             Ok(handle) => Some(handle),
             Err(err) => {
                 log::error!("could not start the temporary project: {err}");
@@ -160,6 +173,8 @@ impl ProjectUi {
         let mut ui = Self {
             handle,
             dialog: None,
+            switch_prompt: None,
+            switch_after_save: None,
             pending: Vec::new(),
             notice: None,
             last_workspace: None,
@@ -228,16 +243,60 @@ impl ProjectUi {
     }
 
     fn open_dialog(&mut self, kind: ProjectDialogKind, current: Option<&Path>) {
-        let path = if kind.needs_path() {
-            default_project_path(current, kind == ProjectDialogKind::SaveCopy)
-        } else {
-            String::new()
-        };
+        let path = default_project_path(current, kind == ProjectDialogKind::SaveCopy);
         self.dialog = Some(ProjectDialog {
             kind,
             path,
             error: None,
         });
+    }
+
+    /// Ask for Save/Discard/Cancel before replacing a project with unsaved
+    /// temporary content.
+    fn ask_before_switch(&mut self, request: ProjectSwitch) {
+        self.switch_prompt = Some(ProjectSwitchPrompt { request });
+    }
+
+    fn take_switch_request(&mut self) -> Option<ProjectSwitch> {
+        self.switch_prompt.take().map(|prompt| prompt.request)
+    }
+
+    fn cancel_switch(&mut self) {
+        self.switch_prompt = None;
+    }
+
+    fn take_switch_after_save(&mut self) -> Option<ProjectSwitch> {
+        self.switch_after_save.take()
+    }
+
+    fn clear_switch_after_save(&mut self) {
+        self.switch_after_save = None;
+    }
+
+    /// The unsaved-work prompt chose Save: remember the pending switch and let
+    /// the Save As dialog continue it after a successful save.
+    fn begin_switch_save(&mut self) {
+        let Some(request) = self.take_switch_request() else {
+            return;
+        };
+        self.switch_after_save = Some(request);
+        let current = self
+            .status()
+            .and_then(|status| status.mode.path().map(Path::to_path_buf));
+        self.open_dialog(ProjectDialogKind::SaveAs, current.as_deref());
+    }
+
+    fn close_dialog(&mut self) {
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.kind == ProjectDialogKind::SaveAs)
+        {
+            // Cancelling the Save As also cancels the switch it was meant to
+            // enable. The current project stays open either way.
+            self.switch_after_save = None;
+        }
+        self.dialog = None;
     }
 
     /// Documentation screenshots reset transient project UI between scenes.
@@ -272,19 +331,6 @@ impl ProjectUi {
                 let dialog = self.dialog.as_mut().expect("dialog is still open");
                 ui.set_min_width(420.0);
                 match kind {
-                    ProjectDialogKind::New => {
-                        ui.label(
-                            "Discard the current project and start with an empty temporary project?",
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(
-                                "Nothing is deleted from disk. Save the current project first if you want to keep it.",
-                            )
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                        );
-                    }
                     ProjectDialogKind::Open => {
                         ui.label("Path to an existing .perseid project:");
                         let edit = ui.add(
@@ -334,23 +380,66 @@ impl ProjectUi {
 
         if submit {
             let dialog = self.dialog.as_mut()?;
-            if dialog.kind.needs_path() {
-                let trimmed = dialog.path.trim();
-                if trimmed.is_empty() {
-                    dialog.error = Some("Enter a project file path.".to_string());
-                    return None;
-                }
-                let path = normalize_project_path(trimmed);
-                let kind = dialog.kind;
-                self.dialog = None;
-                return Some(ProjectDialogAction::Submit(kind, Some(path)));
+            let trimmed = dialog.path.trim();
+            if trimmed.is_empty() {
+                dialog.error = Some("Enter a project file path.".to_string());
+                return None;
             }
+            let path = normalize_project_path(trimmed);
             let kind = dialog.kind;
             self.dialog = None;
-            return Some(ProjectDialogAction::Submit(kind, None));
+            return Some(ProjectDialogAction::Submit(kind, path));
         }
         if !open || cancel {
-            self.dialog = None;
+            self.close_dialog();
+        }
+        None
+    }
+
+    /// Ask whether to save the current temporary project before replacing it.
+    fn switch_prompt(&mut self, ctx: &egui::Context) -> Option<ProjectSwitchAction> {
+        let prompt = self.switch_prompt.as_ref()?;
+        let destination = match &prompt.request {
+            ProjectSwitch::New => {
+                "Starting a new project will replace the current temporary project.".to_string()
+            }
+            ProjectSwitch::Open(path) => format!(
+                "Opening {} will replace the current temporary project.",
+                path.display()
+            ),
+        };
+        let mut open = true;
+        let mut action = None;
+        egui::Window::new("Unsaved Project")
+            .id(egui::Id::unique("perseid.project.unsaved"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_min_width(420.0);
+                ui.label("The current temporary project has not been saved.");
+                ui.add_space(4.0);
+                ui.label(RichText::new(destination).small().color(theme::TEXT_MUTED));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Save…").clicked() {
+                        action = Some(ProjectSwitchAction::Save);
+                    }
+                    if ui.button("Discard").clicked() {
+                        action = Some(ProjectSwitchAction::Discard);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = Some(ProjectSwitchAction::Cancel);
+                    }
+                });
+            });
+        if action.is_some() {
+            return action;
+        }
+        if !open {
+            self.switch_prompt = None;
+            return Some(ProjectSwitchAction::Cancel);
         }
         None
     }
@@ -589,7 +678,7 @@ impl PerseidApp {
     pub(super) fn project_menu(&mut self, ui: &mut egui::Ui) {
         let response = ui.menu_button("File", |ui| {
             if ui.button("New Project").clicked() {
-                self.project.open_dialog(ProjectDialogKind::New, None);
+                self.request_project_switch(ProjectSwitch::New);
                 ui.close();
             }
             if ui.button("Open Project…").clicked() {
@@ -635,6 +724,38 @@ impl PerseidApp {
     fn notify_project_busy(&mut self) {
         self.project
             .notify_error("Wait for the current project operation to finish.");
+    }
+
+    /// A temporary project is worth a confirmation when it holds captured
+    /// records or non-default workbench state.
+    fn has_unsaved_temporary_work(&self) -> bool {
+        let Some(status) = self.project.status() else {
+            return false;
+        };
+        if !matches!(status.mode, ProjectMode::Temporary) {
+            return false;
+        }
+        status.http_count.saturating_add(status.ws_count) > 0
+            || self.workspace_snapshot() != self.project_baseline_workspace
+    }
+
+    fn request_project_switch(&mut self, request: ProjectSwitch) {
+        if self.project.is_busy() {
+            self.notify_project_busy();
+            return;
+        }
+        if self.has_unsaved_temporary_work() {
+            self.project.ask_before_switch(request);
+        } else {
+            self.perform_project_switch(request);
+        }
+    }
+
+    fn perform_project_switch(&mut self, request: ProjectSwitch) {
+        match request {
+            ProjectSwitch::New => self.begin_new_project(),
+            ProjectSwitch::Open(path) => self.begin_open_project(path),
+        }
     }
 
     fn begin_save_project(&mut self, path: PathBuf, copy: bool) {
@@ -722,8 +843,14 @@ impl PerseidApp {
                         } else {
                             format!("Saved project to {}", path.display())
                         });
+                        if copy {
+                            self.project.clear_switch_after_save();
+                        } else if let Some(request) = self.project.take_switch_after_save() {
+                            self.perform_project_switch(request);
+                        }
                     }
                     Err(err) => {
+                        self.project.clear_switch_after_save();
                         self.project
                             .notify_error(format!("Could not save the project: {err}"));
                     }
@@ -794,7 +921,9 @@ impl PerseidApp {
         self.websocket_scroll_to_selected = false;
         self.invalidate_views();
         self.apply_workspace(&opened.workspace);
-        self.project.last_workspace = Some(self.workspace_snapshot());
+        let baseline = self.workspace_snapshot();
+        self.project.last_workspace = Some(baseline.clone());
+        self.project_baseline_workspace = baseline;
         self.project.last_workspace_check = Instant::now();
 
         let truncated = http_loaded < http_total || ws_loaded < ws_total;
@@ -850,7 +979,7 @@ impl PerseidApp {
         self.site_map_ui = target::SiteMapUi::new();
     }
 
-    fn workspace_snapshot(&self) -> WorkspaceState {
+    pub(super) fn workspace_snapshot(&self) -> WorkspaceState {
         WorkspaceState {
             version: WorkspaceState::CURRENT_VERSION,
             scope: ScopeWorkspace {
@@ -936,19 +1065,28 @@ impl PerseidApp {
 
     /// Poll project commands and draw their dialogs. Called once per frame.
     pub(super) fn project_windows(&mut self, ctx: &egui::Context) {
+        if let Some(action) = self.project.switch_prompt(ctx) {
+            match action {
+                ProjectSwitchAction::Save => self.project.begin_switch_save(),
+                ProjectSwitchAction::Discard => {
+                    if let Some(request) = self.project.take_switch_request() {
+                        self.perform_project_switch(request);
+                    }
+                }
+                ProjectSwitchAction::Cancel => self.project.cancel_switch(),
+            }
+        }
         if let Some(action) = self.project.dialog(ctx) {
             match action {
-                ProjectDialogAction::Submit(kind, path) => match (kind, path) {
-                    (ProjectDialogKind::New, _) => self.begin_new_project(),
-                    (ProjectDialogKind::Open, Some(path)) => self.begin_open_project(path),
-                    (ProjectDialogKind::SaveAs, Some(path)) => {
-                        self.begin_save_project(path, false);
-                    }
-                    (ProjectDialogKind::SaveCopy, Some(path)) => {
-                        self.begin_save_project(path, true);
-                    }
-                    (_, None) => {}
-                },
+                ProjectDialogAction::Submit(ProjectDialogKind::Open, path) => {
+                    self.request_project_switch(ProjectSwitch::Open(path));
+                }
+                ProjectDialogAction::Submit(ProjectDialogKind::SaveAs, path) => {
+                    self.begin_save_project(path, false);
+                }
+                ProjectDialogAction::Submit(ProjectDialogKind::SaveCopy, path) => {
+                    self.begin_save_project(path, true);
+                }
             }
         }
         self.sync_workspace(false);
@@ -1007,6 +1145,15 @@ impl PerseidApp {
                 )
                 .on_hover_text(
                     "Some capture events or terminal responses were lost. The affected rows are marked in the project.",
+                );
+            }
+            if status.retention_evictions > 0 {
+                ui.colored_label(
+                    theme::AMBER,
+                    format!("{} old records evicted", status.retention_evictions),
+                )
+                .on_hover_text(
+                    "Temporary-project retention removed the oldest captured records to stay within the configured limits.",
                 );
             }
         }
@@ -1275,5 +1422,134 @@ mod tests {
             PathBuf::from(path),
             source.with_file_name("session-copy.perseid")
         );
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_temporary_project_switches_without_a_prompt() {
+        let mut app = PerseidApp::test_app();
+        assert!(!app.has_unsaved_temporary_work());
+
+        app.request_project_switch(ProjectSwitch::New);
+
+        assert!(app.project.switch_prompt.is_none());
+        assert!(matches!(
+            app.project.pending.as_slice(),
+            [PendingProject::New { .. }]
+        ));
+    }
+
+    #[test]
+    fn unsaved_work_asks_before_a_switch_and_cancel_keeps_the_project() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        assert!(app.has_unsaved_temporary_work());
+
+        app.request_project_switch(ProjectSwitch::New);
+        assert!(app.project.switch_prompt.is_some());
+        assert!(app.project.pending.is_empty());
+
+        app.project.cancel_switch();
+        assert!(app.project.switch_prompt.is_none());
+        assert!(app.project.pending.is_empty());
+        assert_eq!(
+            app.project.status().expect("project status").mode,
+            ProjectMode::Temporary
+        );
+        assert!(app.scope_enabled);
+    }
+
+    #[test]
+    fn discarding_unsaved_work_performs_the_pending_switch() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        app.request_project_switch(ProjectSwitch::New);
+
+        let request = app
+            .project
+            .take_switch_request()
+            .expect("pending project switch");
+        app.perform_project_switch(request);
+
+        assert!(matches!(
+            app.project.pending.as_slice(),
+            [PendingProject::New { .. }]
+        ));
+    }
+
+    #[test]
+    fn cancelling_save_as_after_the_prompt_keeps_the_current_project() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        app.request_project_switch(ProjectSwitch::New);
+
+        app.project.begin_switch_save();
+        assert_eq!(app.project.switch_after_save, Some(ProjectSwitch::New));
+        assert_eq!(
+            app.project.dialog.as_ref().expect("save dialog").kind,
+            ProjectDialogKind::SaveAs
+        );
+
+        app.project.close_dialog();
+        assert!(app.project.switch_after_save.is_none());
+        assert!(app.project.dialog.is_none());
+        assert!(app.project.pending.is_empty());
+        assert_eq!(
+            app.project.status().expect("project status").mode,
+            ProjectMode::Temporary
+        );
+    }
+
+    #[test]
+    fn a_failed_save_cancels_the_pending_switch_and_keeps_the_project_open() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        drop(sender);
+        app.project.pending.push(PendingProject::Save {
+            copy: false,
+            path: PathBuf::from("/nonexistent/demo.perseid"),
+            receiver,
+        });
+        app.project.switch_after_save = Some(ProjectSwitch::New);
+
+        app.poll_project();
+
+        assert!(app.project.switch_after_save.is_none());
+        assert!(app.project.pending.is_empty());
+        assert_eq!(
+            app.project.status().expect("project status").mode,
+            ProjectMode::Temporary
+        );
+        assert!(
+            app.project.notice().expect("save error notice").1,
+            "the failed save must be reported as an error"
+        );
+    }
+
+    #[test]
+    fn a_successful_save_continues_the_pending_switch() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(Ok(())).expect("queue save result");
+        app.project.pending.push(PendingProject::Save {
+            copy: false,
+            path: PathBuf::from("/tmp/demo.perseid"),
+            receiver,
+        });
+        app.project.switch_after_save = Some(ProjectSwitch::New);
+
+        app.poll_project();
+
+        assert!(app.project.switch_after_save.is_none());
+        assert!(matches!(
+            app.project.pending.as_slice(),
+            [PendingProject::New { .. }]
+        ));
     }
 }

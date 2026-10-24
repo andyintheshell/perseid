@@ -62,8 +62,10 @@ public interface just to work around a local port conflict.
 4. Clear the history filter and disable **Filter views to the scope** temporarily.
 5. Check UI-cache eviction and dropped-event counters in the status bar. Cache
    eviction removes a row from the current view; it does not delete that record
-   from a saved project. The temporary project store can grow beyond these cache
-   limits until history is cleared or the app exits.
+   from a saved project. Temporary projects also evict the oldest records once
+   they exceed the configured retention limits, shown as an eviction count in
+   the status bar; raise `--temporary-retention-limit` /
+   `--temporary-retention-bytes` if you need a larger temporary history.
 6. In **Target > Site map**, check the display filter. By default Perseid hides
    not-found items, CSS, images, general binary content, 4xx responses, and
    empty folders. Click the filter bar and choose **Show all items** (or relax

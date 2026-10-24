@@ -413,11 +413,15 @@ fn clearing_history_is_persisted() {
     assert_eq!(http_receipt.http_count, 0);
     assert!(project.get_http(http_id).expect("read HTTP").is_none());
     assert_eq!(project.status().http_count, 0);
+    let meta = persisted_meta(&project);
+    assert_eq!(meta.http_body_bytes, 0);
+    assert_eq!(meta.ws_body_bytes, b"ws".len() as u64);
 
     let ws_receipt = wait(project.clear_ws()).expect("clear WebSocket history");
     assert_eq!(ws_receipt.ws_count, 0);
     assert!(project.get_ws(ws_id).expect("read WebSocket").is_none());
     assert_eq!(project.status().ws_count, 0);
+    assert_eq!(persisted_meta(&project).ws_body_bytes, 0);
 
     let file = TempProject::new("cleared");
     wait(project.save_as(file.path.clone())).expect("save as");
@@ -557,4 +561,335 @@ fn open_rejects_migrating_and_unknown_states() {
         matches!(error, ProjectError::InvalidProject(ref message) if message.contains("unknown project state"))
     );
     assert_eq!(reopened.status().mode, ProjectMode::Temporary);
+}
+
+fn persisted_meta(project: &ProjectHandle) -> ProjectMeta {
+    let db = project.current_db().expect("current database");
+    let read = db.begin_read().expect("begin read");
+    super::super::schema::read_meta(&read).expect("read project metadata")
+}
+
+fn corrupt_project(file: &TempProject, mutate: impl FnOnce(&redb::WriteTransaction)) {
+    let db = super::super::backend::open_file(&file.path).expect("open raw project");
+    let tx = db.begin_write().expect("begin write");
+    mutate(&tx);
+    tx.commit().expect("commit corruption");
+}
+
+fn assert_snapshot_error(error: ProjectError, component: &str) {
+    match error {
+        ProjectError::Snapshot {
+            component: actual,
+            source,
+        } => {
+            assert_eq!(actual, component);
+            assert!(
+                matches!(*source, ProjectError::Encoding(_)),
+                "unexpected snapshot source: {source}"
+            );
+        }
+        other => panic!("expected a snapshot error, got {other}"),
+    }
+}
+
+#[test]
+fn failed_capture_batches_roll_back_records_and_metadata() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let first = capture_all(&project, &[started(1, "GET")])[0];
+    wait(project.flush()).expect("flush");
+    let before = persisted_meta(&project);
+
+    // Corrupt the committed record so the next batch fails while applying a
+    // response head, after adding another exchange in the same transaction.
+    {
+        let db = project.current_db().expect("current database");
+        let tx = db.begin_write().expect("begin write");
+        {
+            tx.open_table(schema::HTTP_EXCHANGES)
+                .expect("exchanges table")
+                .insert(first, b"not json".as_slice())
+                .expect("corrupt record");
+        }
+        tx.commit().expect("commit corruption");
+    }
+
+    let second = capture_all(&project, &[started(2, "GET"), response_head(1, 200)]);
+    assert_eq!(second[1], first);
+    let new_id = second[0];
+    wait(project.flush()).expect("flush after the failed batch");
+
+    let status = project.status();
+    assert_eq!(status.http_count, before.http_count);
+    assert_eq!(
+        status.last_committed_sequence,
+        before.last_committed_sequence
+    );
+    assert!(
+        status.last_error.is_some(),
+        "the failed batch must stay visible in the status bar"
+    );
+
+    let after = persisted_meta(&project);
+    assert_eq!(after.http_count, before.http_count);
+    assert_eq!(
+        after.last_committed_sequence,
+        before.last_committed_sequence
+    );
+    assert_eq!(after.next_http_id, before.next_http_id);
+    let db = project.current_db().expect("current database");
+    assert_eq!(
+        super::super::queries::count_http(&db).expect("count HTTP records"),
+        before.http_count,
+        "the successful part of the batch must roll back with the transaction"
+    );
+    assert!(
+        project
+            .get_http(new_id)
+            .expect("read rolled-back ID")
+            .is_none(),
+        "a record inserted before the failure must not remain visible"
+    );
+}
+
+#[test]
+fn temporary_retention_evicts_the_oldest_records_across_http_and_websocket() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(2, 0))
+        .expect("bounded temporary project");
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"old-req", b"old-resp"),
+            started(2, "GET"),
+            finished(2, b"new-req", b"new-resp"),
+            ws_message(3, 1, b"ws"),
+        ],
+    );
+    let old_http = ids[0];
+    let new_http = ids[2];
+    let ws_id = ids[4];
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.ws_count, 1);
+    assert_eq!(status.retention_evictions, 1);
+    assert!(
+        project
+            .get_http(old_http)
+            .expect("read evicted HTTP record")
+            .is_none()
+    );
+    assert!(
+        project
+            .get_http(new_http)
+            .expect("read retained HTTP record")
+            .is_some()
+    );
+    assert!(
+        project
+            .get_ws(ws_id)
+            .expect("read retained WebSocket message")
+            .is_some()
+    );
+
+    let meta = persisted_meta(&project);
+    assert_eq!(meta.http_count, 1);
+    assert_eq!(meta.ws_count, 1);
+    assert_eq!(meta.retention_evictions, 1);
+    assert_eq!(
+        meta.http_body_bytes,
+        (b"new-req".len() + b"new-resp".len()) as u64,
+        "evicting a record must also release its retained body bytes"
+    );
+    assert_eq!(meta.ws_body_bytes, b"ws".len() as u64);
+    assert_eq!(project.list_http(None, 10).expect("list HTTP").len(), 1);
+    assert_eq!(project.list_ws(None, 10).expect("list WebSocket").len(), 1);
+}
+
+#[test]
+fn temporary_retention_enforces_body_bytes_and_keeps_the_newest_record() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(0, 8))
+        .expect("byte-bounded temporary project");
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"aaaa", b""),
+            started(2, "GET"),
+            finished(2, b"bbbb", b""),
+            ws_message(3, 1, b"cccc"),
+        ],
+    );
+    let old_http = ids[0];
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.ws_count, 1);
+    assert_eq!(status.retention_evictions, 1);
+    assert!(
+        project
+            .get_http(old_http)
+            .expect("read evicted HTTP record")
+            .is_none()
+    );
+    let meta = persisted_meta(&project);
+    assert_eq!(meta.http_body_bytes, 4);
+    assert_eq!(meta.ws_body_bytes, 4);
+
+    // A single record larger than the whole budget is still retained.
+    let oversized = ProjectHandle::temporary_with_retention(RetentionLimits::new(0, 2))
+        .expect("tiny byte budget");
+    let oversized_ids = capture_all(&oversized, &[started(1, "GET"), finished(1, b"12345", b"")]);
+    wait(oversized.flush()).expect("flush oversized record");
+    let status = oversized.status();
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.retention_evictions, 0);
+    assert!(
+        oversized
+            .get_http(oversized_ids[0])
+            .expect("read newest record")
+            .is_some()
+    );
+    assert_eq!(persisted_meta(&oversized).http_body_bytes, 5);
+}
+
+#[test]
+fn saved_projects_never_apply_temporary_retention_limits() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(1, 0))
+        .expect("bounded temporary project");
+    let file = TempProject::new("saved-retention");
+    wait(project.save_as(file.path.clone())).expect("save as");
+
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"", b"one"),
+            started(2, "GET"),
+            finished(2, b"", b"two"),
+            ws_message(3, 1, b"ws"),
+        ],
+    );
+    wait(project.flush()).expect("flush");
+    let status = project.status();
+    assert_eq!(status.http_count, 2);
+    assert_eq!(status.ws_count, 1);
+    assert_eq!(status.retention_evictions, 0);
+    assert!(
+        project
+            .get_http(ids[0])
+            .expect("read oldest saved HTTP record")
+            .is_some()
+    );
+    let meta = persisted_meta(&project);
+    assert_eq!(meta.http_count, 2);
+    assert_eq!(meta.ws_count, 1);
+    assert_eq!(meta.retention_evictions, 0);
+}
+
+#[test]
+fn open_surfaces_corrupt_http_snapshots_and_preserves_the_current_project() {
+    let source = ProjectHandle::temporary().expect("source project");
+    let saved_id = capture_all(
+        &source,
+        &[started(1, "GET"), finished(1, b"", b"persisted")],
+    )[0];
+    wait(source.flush()).expect("flush");
+    let file = TempProject::new("corrupt-http-snapshot");
+    wait(source.save_as(file.path.clone())).expect("save as");
+    drop(source);
+    corrupt_project(&file, |tx| {
+        tx.open_table(schema::HTTP_EXCHANGES)
+            .expect("exchanges table")
+            .insert(saved_id, b"not json".as_slice())
+            .expect("corrupt HTTP record");
+    });
+
+    let project = ProjectHandle::temporary().expect("current project");
+    let kept = capture_all(
+        &project,
+        &[started(101, "GET"), finished(101, b"", b"kept")],
+    )[0];
+    wait(project.flush()).expect("flush current project");
+
+    let error = wait(project.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("a corrupt HTTP snapshot must fail the open");
+    assert_snapshot_error(error, "HTTP history");
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    let current = project
+        .get_http(kept)
+        .expect("read current HTTP record")
+        .expect("current project still present");
+    assert_eq!(
+        current.response_body().expect("response body").data(),
+        b"kept"
+    );
+}
+
+#[test]
+fn open_surfaces_corrupt_websocket_snapshots_and_preserves_the_current_project() {
+    let source = ProjectHandle::temporary().expect("source project");
+    let saved_id = capture_all(&source, &[ws_message(1, 1, b"persisted")])[0];
+    wait(source.flush()).expect("flush");
+    let file = TempProject::new("corrupt-ws-snapshot");
+    wait(source.save_as(file.path.clone())).expect("save as");
+    drop(source);
+    corrupt_project(&file, |tx| {
+        tx.open_table(schema::WS_MESSAGES)
+            .expect("messages table")
+            .insert(saved_id, b"not json".as_slice())
+            .expect("corrupt WebSocket record");
+    });
+
+    let project = ProjectHandle::temporary().expect("current project");
+    let kept = capture_all(&project, &[ws_message(101, 2, b"kept")])[0];
+    wait(project.flush()).expect("flush current project");
+
+    let error = wait(project.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("a corrupt WebSocket snapshot must fail the open");
+    assert_snapshot_error(error, "WebSocket history");
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    let current = project
+        .get_ws(kept)
+        .expect("read current WebSocket record")
+        .expect("current project still present");
+    assert_eq!(current.payload.data(), b"kept");
+}
+
+#[test]
+fn open_surfaces_corrupt_workspace_state_and_preserves_the_current_project() {
+    let source = ProjectHandle::temporary().expect("source project");
+    let mut workspace = WorkspaceState::default();
+    workspace.ui.http_filter = "saved-filter".to_string();
+    assert!(source.set_workspace(workspace));
+    wait(source.flush()).expect("flush");
+    let file = TempProject::new("corrupt-workspace");
+    wait(source.save_as(file.path.clone())).expect("save as");
+    drop(source);
+    corrupt_project(&file, |tx| {
+        tx.open_table(schema::WORKSPACE)
+            .expect("workspace table")
+            .insert(schema::WORKSPACE_KEY, b"not json".as_slice())
+            .expect("corrupt workspace");
+    });
+
+    let project = ProjectHandle::temporary().expect("current project");
+    let kept = capture_all(
+        &project,
+        &[started(101, "GET"), finished(101, b"", b"kept")],
+    )[0];
+    wait(project.flush()).expect("flush current project");
+
+    let error = wait(project.open(file.path.clone(), 100, 1024 * 1024))
+        .expect_err("corrupt workspace state must fail the open");
+    assert_snapshot_error(error, "workspace state");
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    assert!(
+        project
+            .get_http(kept)
+            .expect("read current HTTP record")
+            .is_some()
+    );
 }
