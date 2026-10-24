@@ -162,6 +162,11 @@ reports are a guide: new logic should come with tests in the same pull
 request, and a drop in coverage for the code you touched should be explained
 in the PR description.
 
+`codecov/patch` is a required check for merging to `main`. Its settings in
+[`codecov.yml`](codecov.yml) require changed lines to meet Codecov's automatic
+patch target with no allowed shortfall; a failed CI run also fails the status.
+Add tests for executable lines changed by a pull request so this check can pass.
+
 ## Dependencies
 
 `Cargo.lock` is tracked. It is the exact, reproducible resolution used by
