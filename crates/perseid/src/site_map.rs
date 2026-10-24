@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use crate::history::History;
-use crate::proxy::RequestInfo;
+use crate::proxy::{CapturedBody, RequestInfo};
 use crate::view;
 
 /// One endpoint in the site map: a unique method plus request target.
@@ -34,6 +34,9 @@ pub struct SiteEntry {
     pub mime: String,
     pub title: String,
     pub params: usize,
+    /// True when a request body was truncated or not fully captured, so the
+    /// parameter count is a conservative lower bound rather than an exact one.
+    pub params_uncertain: bool,
     pub timestamp: SystemTime,
 }
 
@@ -286,6 +289,7 @@ impl SiteMap {
             let scheme = request_scheme(&item.request);
 
             let builder = hosts.entry(host.clone()).or_default();
+            builder.schemes.insert(scheme.clone());
             let entry = builder
                 .entries
                 .entry((path.clone(), item.request.method.clone()))
@@ -303,6 +307,7 @@ impl SiteMap {
                     mime: String::new(),
                     title: String::new(),
                     params: 0,
+                    params_uncertain: false,
                     timestamp: item.timestamp,
                 });
             entry.count += 1;
@@ -320,11 +325,19 @@ impl SiteMap {
                         .cmp(&right.path)
                         .then_with(|| left.method.cmp(&right.method))
                 });
-                let scheme = entries
-                    .iter()
-                    .max_by_key(|entry| entry.id)
-                    .map(|entry| entry.scheme.clone())
-                    .unwrap_or_else(|| "http".to_string());
+                // Track schemes per host rather than from the surviving entry
+                // for each endpoint: the same URL captured over both HTTP and
+                // HTTPS collapses to one endpoint entry with the latest
+                // scheme, but the host node must still report both.
+                let scheme = if builder.schemes.len() == 1 {
+                    builder
+                        .schemes
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "http".to_string())
+                } else {
+                    "mixed".to_string()
+                };
                 SiteHost {
                     host,
                     scheme,
@@ -399,6 +412,9 @@ impl SiteEntry {
 #[derive(Default)]
 struct HostBuilder {
     entries: BTreeMap<(String, String), SiteEntry>,
+    /// Every scheme observed for this host, including when the same endpoint
+    /// was captured over both HTTP and HTTPS.
+    schemes: BTreeSet<String>,
 }
 
 struct TreeDirectory {
@@ -629,7 +645,9 @@ fn update_entry(entry: &mut SiteEntry, item: &crate::history::HistoryItem, schem
     } else {
         String::new()
     };
-    entry.params = parameter_count(&item.request, item.request_body.data());
+    let params = parameter_count(&item.request, &item.request_body);
+    entry.params = params.count;
+    entry.params_uncertain = params.uncertain;
 }
 
 fn request_scheme(request: &RequestInfo) -> String {
@@ -656,21 +674,50 @@ fn response_mime(response: Option<&crate::proxy::ResponseHead>) -> String {
 }
 
 /// Count query and form parameters the way Burp's Params flag does.
-fn parameter_count(request: &RequestInfo, body: &[u8]) -> usize {
-    let mut count = parameter_count_in_path(&request.path);
+///
+/// Returns the number of parameters observed and whether that number is a
+/// lower bound because the request body was truncated or never fully loaded.
+/// An incomplete form body with no visible parameter name is still treated as
+/// parameterized so the parameterized-only filter does not silently hide it.
+fn parameter_count(request: &RequestInfo, body: &CapturedBody) -> ParameterCount {
+    let count = parameter_count_in_path(&request.path);
     let content_type = request
         .headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
         .map(|(_, value)| value.to_ascii_lowercase())
         .unwrap_or_default();
+    let exact = body.is_complete() && !body.is_truncated();
+    let mut total = count;
+    let mut uncertain = false;
     if content_type.starts_with("application/x-www-form-urlencoded") {
-        count += form_parameter_count(body);
+        total += form_parameter_count(body.data());
+        if !exact {
+            uncertain = true;
+            if total == 0 && body.total_len() > 0 {
+                total = 1;
+            }
+        }
     } else if content_type.starts_with("multipart/form-data") {
-        let text = String::from_utf8_lossy(body);
-        count += text.matches("; name=\"").count();
+        let text = String::from_utf8_lossy(body.data());
+        total += text.matches("; name=\"").count();
+        if !exact {
+            uncertain = true;
+            if total == 0 && body.total_len() > 0 {
+                total = 1;
+            }
+        }
     }
-    count
+    ParameterCount {
+        count: total,
+        uncertain,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ParameterCount {
+    count: usize,
+    uncertain: bool,
 }
 
 fn parameter_count_in_path(path: &str) -> usize {
@@ -867,6 +914,77 @@ mod tests {
         });
         let map = SiteMap::build(&history, None);
         assert_eq!(map.hosts[0].entries[0].params, 3);
+    }
+
+    #[test]
+    fn truncated_form_bodies_stay_parameterized_with_an_uncertain_count() {
+        let mut history = History::new(10, 1024);
+        for (id, body) in [
+            (
+                1,
+                CapturedBody::from_stored_parts(b"user=alice&pass=".to_vec(), 4096, true, false),
+            ),
+            (
+                2,
+                CapturedBody::from_stored_parts(Vec::new(), 42, false, false),
+            ),
+        ] {
+            let mut request = request("POST", "example.com", &format!("/login{id}"));
+            request.headers.push((
+                "content-type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            ));
+            history.apply(ProxyEvent::Started {
+                id,
+                timestamp: SystemTime::UNIX_EPOCH,
+                request,
+            });
+            history.apply(ProxyEvent::Finished {
+                id,
+                end: ExchangeEnd {
+                    duration: Duration::from_millis(1),
+                    request_body: body,
+                    result: ExchangeResult::Failed {
+                        error: "offline".to_string(),
+                    },
+                },
+            });
+        }
+
+        let map = SiteMap::build(&history, None);
+        let entries = &map.hosts[0].entries;
+        assert_eq!(entries[0].params, 2);
+        assert!(entries[0].params_uncertain);
+        // A summary-only body is too short to parse, but it must not be
+        // silently excluded from the parameterized-only filter.
+        assert_eq!(entries[1].params, 1);
+        assert!(entries[1].params_uncertain);
+        assert!(
+            SiteMapFilter {
+                parameterized_only: true,
+                ..SiteMapFilter::SHOW_ALL
+            }
+            .allows(&entries[1])
+        );
+    }
+
+    #[test]
+    fn host_scheme_marks_mixed_http_and_https_traffic() {
+        let mut history = History::new(10, 1024);
+        for (id, scheme) in [(1, "http"), (2, "https")] {
+            let mut request = request("GET", "example.com", "/");
+            request.scheme = scheme.to_string();
+            request.uri = format!("{scheme}://example.com/");
+            history.apply(ProxyEvent::Started {
+                id,
+                timestamp: SystemTime::UNIX_EPOCH,
+                request,
+            });
+        }
+
+        let map = SiteMap::build(&history, None);
+        assert_eq!(map.hosts[0].scheme, "mixed");
+        assert_eq!(map.tree(SiteMapFilter::SHOW_ALL)[0].scheme, "mixed");
     }
 
     #[test]

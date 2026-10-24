@@ -70,7 +70,8 @@ impl PerseidApp {
         let on_history = on_http_history || on_websocket_history;
         let on_site_map = self.main_tab == MainTab::Target
             && self.target_section == TargetSection::SiteMap
-            && self.site_map_ui.on_contents();
+            && self.site_map_ui.on_contents()
+            && !self.site_map_ui.windows_open();
         if on_site_map {
             let search_id = egui::Id::unique(super::target::SITE_MAP_SEARCH_ID);
             if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::F)) {
@@ -179,5 +180,113 @@ impl PerseidApp {
         } else if zoom_out {
             self.set_ui_scale(ctx, stepped_scale(ctx.pixels_per_point(), -0.1));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(key: Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn shortcut(key: Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }
+    }
+
+    fn keyboard_frame(ctx: &egui::Context, app: &mut PerseidApp, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_ui| app.keyboard(ctx));
+        output.textures_delta.clear();
+    }
+
+    fn site_map_app() -> PerseidApp {
+        let mut app = PerseidApp::test_app();
+        app.main_tab = MainTab::Target;
+        app.target_section = TargetSection::SiteMap;
+        app.site_map_ui.set_visible_ids(vec![10, 20, 30]);
+        app
+    }
+
+    #[test]
+    fn site_map_keyboard_navigates_visible_contents_rows() {
+        let mut app = site_map_app();
+        let ctx = egui::Context::default();
+
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, Some(10));
+        keyboard_frame(&ctx, &mut app, vec![key(Key::J)]);
+        assert_eq!(app.selected, Some(20));
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowUp)]);
+        assert_eq!(app.selected, Some(10));
+        keyboard_frame(&ctx, &mut app, vec![key(Key::End)]);
+        assert_eq!(app.selected, Some(30));
+        keyboard_frame(&ctx, &mut app, vec![key(Key::Home)]);
+        assert_eq!(app.selected, Some(10));
+
+        // The site map only owns the keyboard while Contents is active.
+        app.site_map_ui.set_issues_tab();
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, Some(10));
+
+        // Open floating windows also own the keyboard.
+        app.site_map_ui.set_contents_tab();
+        app.site_map_ui.set_windows_open(true);
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, Some(10));
+    }
+
+    #[test]
+    fn site_map_search_shortcut_focuses_and_escape_releases_the_field() {
+        let mut app = site_map_app();
+        let ctx = egui::Context::default();
+        let search_id = egui::Id::unique(super::super::target::SITE_MAP_SEARCH_ID);
+
+        keyboard_frame(&ctx, &mut app, vec![shortcut(Key::F)]);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id));
+
+        // While the search field is focused, site-map navigation keys are
+        // routed to the text edit instead of moving the table selection.
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, None);
+
+        keyboard_frame(&ctx, &mut app, vec![key(Key::Escape)]);
+        assert_eq!(ctx.memory(|memory| memory.focused()), None);
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, Some(10));
+    }
+
+    #[test]
+    fn site_map_keyboard_is_inactive_on_other_tabs_and_sections() {
+        let mut app = site_map_app();
+        app.target_section = TargetSection::Scope;
+        let ctx = egui::Context::default();
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, None);
+
+        app.target_section = TargetSection::SiteMap;
+        app.main_tab = MainTab::Proxy;
+        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
+        assert_eq!(app.selected, None);
     }
 }

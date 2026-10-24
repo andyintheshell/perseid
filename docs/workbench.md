@@ -76,7 +76,9 @@ requests by host, folder, and resource; selecting a node filters the
 **Contents** table to that node and everything below it. Query variants share
 the same tree leaf while each method and URL remains its own Contents row.
 Columns cover Host, Method, URL, Params, Status code, Length, MIME type, Title,
-Notes, and Time requested, and every column can be sorted.
+Notes, and Time requested, and every column can be sorted. HTTPS hosts use a
+lock icon; a host captured over both HTTP and HTTPS uses a globe with a small
+lock badge so the tree never presents mixed traffic as a single scheme.
 
 The filter bar only changes what is displayed. Its defaults match Burp's:
 not-found items, CSS, images, general binary content, 4xx responses, and empty

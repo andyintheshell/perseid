@@ -115,6 +115,32 @@ impl SiteMapUi {
         self.tab == SiteMapTab::Contents
     }
 
+    /// Whether a site-map window is open over the workspace.
+    pub(super) fn windows_open(&self) -> bool {
+        self.filter_open || self.help_open
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_issues_tab(&mut self) {
+        self.tab = SiteMapTab::Issues;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_contents_tab(&mut self) {
+        self.tab = SiteMapTab::Contents;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_visible_ids(&mut self, ids: Vec<u64>) {
+        self.visible_ids = ids;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_windows_open(&mut self, open: bool) {
+        self.filter_open = open;
+        self.help_open = open;
+    }
+
     #[cfg(feature = "screenshots")]
     pub(super) fn reset(&mut self) {
         *self = Self::new();
@@ -329,10 +355,8 @@ impl PerseidApp {
                         .clicked()
                     {
                         self.site_map_ui.paused = !self.site_map_ui.paused;
-                        if !self.site_map_ui.paused {
-                            // Rebuild from the newest history on the next frame.
-                            self.site_map = None;
-                        }
+                        // Keep the current snapshot visible until the next
+                        // frame's revision check rebuilds it after new traffic.
                     }
                     if icon_button(ui, SiteMapIcon::Settings, false)
                         .on_hover_text("Site map filter settings")
@@ -436,6 +460,9 @@ impl PerseidApp {
                     "Select a host, folder, or resource in the site map.",
                 )
             };
+            self.site_map_ui.visible_ids.clear();
+            self.selected = None;
+            self.detail = None;
             site_map_empty_contents(ui, &mut self.site_map_ui, title, body);
             return None;
         };
@@ -471,10 +498,8 @@ impl PerseidApp {
             };
             site_map_empty_contents(ui, &mut self.site_map_ui, title, body);
             self.site_map_ui.visible_ids.clear();
-            if self.selected.is_some() {
-                self.selected = None;
-                self.detail = None;
-            }
+            self.selected = None;
+            self.detail = None;
             return None;
         }
 
@@ -610,11 +635,19 @@ impl PerseidApp {
                                     ],
                                     stroke,
                                 );
-                                response.on_hover_text(format!(
-                                    "{} parameter{}",
-                                    entry.params,
-                                    if entry.params == 1 { "" } else { "s" }
-                                ));
+                                response.on_hover_text(if entry.params_uncertain {
+                                    format!(
+                                        "At least {} parameter{}; request body was not fully captured",
+                                        entry.params,
+                                        if entry.params == 1 { "" } else { "s" }
+                                    )
+                                } else {
+                                    format!(
+                                        "{} parameter{}",
+                                        entry.params,
+                                        if entry.params == 1 { "" } else { "s" }
+                                    )
+                                });
                             }
                         });
                         row.col(|ui| {
@@ -1247,6 +1280,8 @@ fn tree_node_row(
             SiteNodeId::Host { .. } => {
                 if node.scheme.eq_ignore_ascii_case("https") {
                     paint_lock(painter, icon_center, theme::BLUE);
+                } else if node.scheme.eq_ignore_ascii_case("mixed") {
+                    paint_mixed_scheme(painter, icon_center);
                 } else {
                     paint_globe(painter, icon_center, theme::GRAY);
                 }
@@ -1280,8 +1315,14 @@ fn tree_node_row(
 
     let hover = match &node.id {
         SiteNodeId::Host { host } => {
+            let scheme = match node.scheme.as_str() {
+                "https" => "HTTPS",
+                "http" => "HTTP",
+                "mixed" => "HTTP and HTTPS",
+                _ => "captured",
+            };
             format!(
-                "{host} — {} captured endpoint{}",
+                "{host} — {scheme}; {} captured endpoint{}",
                 node.count,
                 plural(node.count)
             )
@@ -1392,10 +1433,12 @@ fn site_map_empty_contents(ui: &mut egui::Ui, state: &mut SiteMapUi, title: &str
 fn site_row_matches(row: &SiteRowRef<'_>, needle: &str) -> bool {
     let entry = row.entry;
     let status = entry.status_label();
+    let url = entry.url();
     [
         entry.host.as_str(),
         entry.method.as_str(),
         entry.path.as_str(),
+        url.as_str(),
         entry.title.as_str(),
         entry.mime.as_str(),
         row.notes,
@@ -1789,6 +1832,29 @@ fn paint_globe(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
     ));
 }
 
+/// A host captured over both HTTP and HTTPS: a globe with a small lock badge.
+fn paint_mixed_scheme(painter: &egui::Painter, center: egui::Pos2) {
+    paint_globe(painter, center + egui::vec2(-3.5, 0.0), theme::GRAY);
+    let lock = center + egui::vec2(4.5, 3.0);
+    let body = Rect::from_center_size(lock, egui::vec2(5.0, 4.0));
+    painter.rect_stroke(
+        body,
+        egui::CornerRadius::same(1),
+        Stroke::new(1.0, theme::BLUE),
+        egui::StrokeKind::Inside,
+    );
+    painter.add(Shape::line(
+        vec![
+            lock + egui::vec2(-1.8, -2.0),
+            lock + egui::vec2(-1.8, -3.0),
+            lock + egui::vec2(0.0, -4.0),
+            lock + egui::vec2(1.8, -3.0),
+            lock + egui::vec2(1.8, -2.0),
+        ],
+        Stroke::new(1.0, theme::BLUE),
+    ));
+}
+
 fn paint_funnel(painter: &egui::Painter, center: egui::Pos2, color: Color32) {
     let stroke = Stroke::new(1.2, color);
     painter.add(Shape::line(
@@ -1810,8 +1876,10 @@ mod tests {
     use std::collections::BTreeSet;
     use std::time::{Duration, SystemTime};
 
-    use crate::history::FALLBACK_HISTORY_BYTES;
-    use crate::proxy::{ProxyEvent, RequestInfo};
+    use crate::history::{FALLBACK_HISTORY_BYTES, History};
+    use crate::proxy::{
+        CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
+    };
     use crate::site_map::SiteMapFilter;
 
     use super::*;
@@ -1970,5 +2038,881 @@ mod tests {
             Some("example.com:8443".to_string())
         );
         assert_eq!(site_map::normalize_scope_input("   "), None);
+    }
+
+    fn screen() -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        }
+    }
+
+    fn test_context() -> egui::Context {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        // Keep widget positions stable between the frames used to synthesize
+        // pointer events.
+        ctx.all_styles_mut(|style| {
+            style.animation_time = 0.0;
+            style.scroll_animation = egui::style::ScrollAnimation::none();
+        });
+        ctx
+    }
+
+    fn target_frame(
+        ctx: &egui::Context,
+        app: &mut PerseidApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let mut input = screen();
+        input.events = events;
+        let mut output = ctx.run_ui(input, |ui| app.target_tab(ui));
+        output.textures_delta.clear();
+        output
+    }
+
+    fn rendered_text(output: &egui::FullOutput) -> String {
+        fn collect(shape: &egui::Shape, text: &mut String) {
+            match shape {
+                egui::Shape::Text(shape) => {
+                    text.push_str(shape.galley.text());
+                    text.push('\n');
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut text = String::new();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut text);
+        }
+        text
+    }
+
+    /// Find the on-screen bounds of an accesskit node by visible label.
+    ///
+    /// Rendering with accessibility enabled lets tests drive widgets without
+    /// hard-coding layout coordinates, so the assertions survive styling
+    /// changes.
+    fn accesskit_rect(
+        output: &egui::FullOutput,
+        needle: &str,
+        require_click: bool,
+    ) -> Option<Rect> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        let mut fallback = None;
+        for (_, node) in &update.nodes {
+            let Some(label) = node.label() else {
+                continue;
+            };
+            if label != needle && !label.contains(needle) {
+                continue;
+            }
+            let Some(bounds) = node.bounds() else {
+                continue;
+            };
+            let rect = Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            );
+            let clickable = node.supports_action(egui::accesskit::Action::Click);
+            let candidate = !require_click || clickable;
+            if label == needle && candidate {
+                return Some(rect);
+            }
+            if fallback.is_none() && candidate {
+                fallback = Some(rect);
+            }
+        }
+        fallback
+    }
+
+    /// Bounds of a drawn text run. Unlike accesskit, this also finds plain
+    /// labels such as sort headers that are clickable but not exposed as
+    /// accessibility buttons.
+    fn rendered_text_rect(output: &egui::FullOutput, needle: &str) -> Option<Rect> {
+        fn collect(shape: &egui::Shape, clip: Rect, needle: &str, found: &mut Option<Rect>) {
+            match shape {
+                egui::Shape::Text(shape) => {
+                    let text = shape.galley.text();
+                    if text == needle || (found.is_none() && text.contains(needle)) {
+                        let rect =
+                            Rect::from_min_size(shape.pos, shape.galley.size()).intersect(clip);
+                        if rect.is_positive() {
+                            *found = Some(rect);
+                        }
+                    }
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, clip, needle, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = None;
+        for clipped in &output.shapes {
+            collect(&clipped.shape, clipped.clip_rect, needle, &mut found);
+        }
+        found
+    }
+
+    fn pointer_button(pos: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn click(
+        ctx: &egui::Context,
+        app: &mut PerseidApp,
+        label: &str,
+        button: egui::PointerButton,
+    ) -> bool {
+        let output = target_frame(ctx, app, Vec::new());
+        let Some(rect) = accesskit_rect(&output, label, false) else {
+            return false;
+        };
+        let pos = rect.center();
+        target_frame(ctx, app, vec![egui::Event::PointerMoved(pos)]);
+        target_frame(ctx, app, vec![pointer_button(pos, button, true)]);
+        target_frame(ctx, app, vec![pointer_button(pos, button, false)]);
+        true
+    }
+
+    fn click_primary(ctx: &egui::Context, app: &mut PerseidApp, label: &str) -> bool {
+        click(ctx, app, label, egui::PointerButton::Primary)
+    }
+
+    fn click_at(
+        ctx: &egui::Context,
+        app: &mut PerseidApp,
+        pos: egui::Pos2,
+        button: egui::PointerButton,
+    ) {
+        target_frame(ctx, app, vec![egui::Event::PointerMoved(pos)]);
+        target_frame(ctx, app, vec![pointer_button(pos, button, true)]);
+        target_frame(ctx, app, vec![pointer_button(pos, button, false)]);
+    }
+
+    fn click_text(
+        ctx: &egui::Context,
+        app: &mut PerseidApp,
+        label: &str,
+        button: egui::PointerButton,
+    ) -> bool {
+        let output = target_frame(ctx, app, Vec::new());
+        let Some(rect) = rendered_text_rect(&output, label) else {
+            return false;
+        };
+        click_at(ctx, app, rect.center(), button);
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn capture(
+        history: &mut History,
+        id: u64,
+        method: &str,
+        scheme: &str,
+        host: &str,
+        path: &str,
+        status: u16,
+        mime: &str,
+        body: &[u8],
+        request_body: &[u8],
+        request_headers: &[(&str, &str)],
+    ) {
+        history.apply(ProxyEvent::Started {
+            id,
+            timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(id),
+            request: RequestInfo {
+                method: method.to_string(),
+                uri: format!("{scheme}://{host}{path}"),
+                scheme: scheme.to_string(),
+                host: host.to_string(),
+                path: path.to_string(),
+                version: "HTTP/1.1".to_string(),
+                headers: request_headers
+                    .iter()
+                    .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                    .collect(),
+            },
+        });
+        let mut headers = Vec::new();
+        if !mime.is_empty() {
+            headers.push(("content-type".to_string(), mime.to_string()));
+        }
+        history.apply(ProxyEvent::ResponseHead {
+            id,
+            head: ResponseHead {
+                version: "HTTP/1.1".to_string(),
+                status,
+                reason: String::new(),
+                headers,
+            },
+        });
+        history.apply(ProxyEvent::Finished {
+            id,
+            end: ExchangeEnd {
+                duration: Duration::from_millis(5),
+                request_body: CapturedBody::from_bytes(request_body.to_vec()),
+                result: ExchangeResult::Response {
+                    body: CapturedBody::from_bytes(body.to_vec()),
+                },
+            },
+        });
+    }
+
+    /// App with a small, varied capture set that exercises every Contents
+    /// column, both schemes, mixed-scheme hosts, filtered MIME types, and
+    /// parameterized form bodies.
+    fn captured_app() -> PerseidApp {
+        let mut app = PerseidApp::test_app();
+        let mut history = History::new(100, FALLBACK_HISTORY_BYTES);
+        capture(
+            &mut history,
+            1,
+            "GET",
+            "http",
+            "example.com",
+            "/",
+            200,
+            "text/html",
+            b"<html><head><title>Home &amp; Away</title></head></html>",
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            2,
+            "GET",
+            "https",
+            "example.com",
+            "/products?sort=price",
+            200,
+            "text/html",
+            b"<title>Products</title>",
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            3,
+            "POST",
+            "https",
+            "example.com",
+            "/products",
+            302,
+            "text/html",
+            b"",
+            b"name=Demo&price=10",
+            &[("content-type", "application/x-www-form-urlencoded")],
+        );
+        capture(
+            &mut history,
+            4,
+            "GET",
+            "http",
+            "example.com",
+            "/assets/site.css",
+            200,
+            "text/css",
+            b"body{}",
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            5,
+            "GET",
+            "http",
+            "example.com",
+            "/missing",
+            404,
+            "text/html",
+            b"not found",
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            6,
+            "GET",
+            "https",
+            "api.example.com",
+            "/v1/items?limit=10",
+            200,
+            "application/json",
+            br#"{"items":[]}"#,
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            7,
+            "GET",
+            "http",
+            "mixed.test",
+            "/plain",
+            200,
+            "text/html",
+            b"<title>Plain</title>",
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            8,
+            "GET",
+            "https",
+            "mixed.test",
+            "/secure",
+            200,
+            "text/html",
+            b"<title>Secure</title>",
+            b"",
+            &[],
+        );
+        capture(
+            &mut history,
+            9,
+            "GET",
+            "https",
+            "example.com",
+            "/logo.png",
+            200,
+            "image/png",
+            b"\x89PNG",
+            b"",
+            &[],
+        );
+        app.history = history;
+        app
+    }
+
+    #[test]
+    fn site_map_renders_burp_columns_and_captured_rows() {
+        let mut app = captured_app();
+        app.inspector
+            .apply_workspace(&crate::project::InspectorWorkspace {
+                notes: vec![crate::project::InspectorNoteWorkspace {
+                    id: 1,
+                    text: "remember the login flow".to_string(),
+                }],
+                ..Default::default()
+            });
+        // Select the host explicitly so the row assertions do not depend on
+        // which host sorts first in the tree.
+        app.site_map_ui.selected_node = Some(SiteNodeId::Host {
+            host: "example.com".to_string(),
+        });
+        let ctx = test_context();
+        let output = target_frame(&ctx, &mut app, Vec::new());
+        let text = rendered_text(&output);
+        for expected in [
+            "Contents",
+            "Issues (0)",
+            "Site map filter: Hiding not found items",
+            "example.com",
+            "mixed.test",
+            "GET",
+            "/products",
+            "HTML",
+            "Products",
+            "Time requested",
+            "remember the login flow",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in {text}");
+        }
+
+        let map = &app.site_map.as_ref().expect("map built").1;
+        assert_eq!(map.hosts.len(), 3);
+        assert_eq!(map.endpoint_count(), 9);
+        assert_eq!(app.selected, Some(1));
+        assert!(!app.site_map_ui.visible_ids.is_empty());
+    }
+
+    #[test]
+    fn site_map_tree_nodes_filter_the_contents_table() {
+        let mut app = captured_app();
+        app.site_map_ui.filter = SiteMapFilter::SHOW_ALL;
+        let ctx = test_context();
+        target_frame(&ctx, &mut app, Vec::new());
+
+        assert!(
+            click_text(&ctx, &mut app, "products", egui::PointerButton::Primary),
+            "products node should be clickable"
+        );
+        let selected = app
+            .site_map_ui
+            .selected_node
+            .clone()
+            .expect("node selected");
+        assert_eq!(
+            selected,
+            SiteNodeId::Endpoint {
+                host: "example.com".to_string(),
+                path: "/products".to_string(),
+            }
+        );
+        assert_eq!(app.site_map_ui.visible_ids, vec![3, 2]);
+
+        // The Contents search matches displayed URLs, titles, and notes.
+        app.site_map_ui.search = "products".to_string();
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("Products"));
+        assert_eq!(app.site_map_ui.visible_ids, vec![3, 2]);
+
+        app.site_map_ui.search = "no-such-row".to_string();
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("No contents match the search"));
+        assert!(app.site_map_ui.visible_ids.is_empty());
+        assert_eq!(app.selected, None);
+
+        // Clearing the node selection also clears the selected exchange and
+        // detail cache instead of leaving a stale detail pane behind. Call the
+        // Contents view directly because the outer site-map view selects the
+        // first tree node whenever the selection is empty.
+        app.site_map_ui.search.clear();
+        app.site_map_ui.selected_node = None;
+        app.selected = Some(1);
+        app.detail = None;
+        let map = SiteMap::build(&app.history, None);
+        let tree = map.tree(SiteMapFilter::SHOW_ALL);
+        let mut output = ctx.run_ui(screen(), |ui| {
+            app.site_map_contents(ui, &map, &tree, false);
+        });
+        let text = rendered_text(&output);
+        output.textures_delta.clear();
+        assert!(text.contains("No node selected"));
+        assert!(text.contains("Select a host, folder, or resource"));
+        assert_eq!(app.selected, None);
+        assert!(app.detail.is_none());
+        assert!(app.site_map_ui.visible_ids.is_empty());
+
+        // A node whose rows are all hidden by the filter shows the filter
+        // empty state and clears the selection.
+        app.site_map_ui.selected_node = Some(SiteNodeId::Endpoint {
+            host: "example.com".to_string(),
+            path: "/assets/site.css".to_string(),
+        });
+        app.site_map_ui.filter = SiteMapFilter {
+            parameterized_only: true,
+            ..SiteMapFilter::SHOW_ALL
+        };
+        app.selected = Some(4);
+        let mut output = ctx.run_ui(screen(), |ui| {
+            app.site_map_contents(ui, &map, &tree, false);
+        });
+        let text = rendered_text(&output);
+        output.textures_delta.clear();
+        assert!(text.contains("No visible items"));
+        assert!(app.site_map_ui.visible_ids.is_empty());
+        assert_eq!(app.selected, None);
+    }
+
+    #[test]
+    fn site_map_toolbar_opens_filter_and_help_windows() {
+        let mut app = captured_app();
+        let ctx = test_context();
+        target_frame(&ctx, &mut app, Vec::new());
+
+        assert!(click_primary(&ctx, &mut app, "Site map help"));
+        assert!(app.site_map_ui.help_open);
+        assert!(app.site_map_ui.windows_open());
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("Mapping captured traffic"));
+        assert!(text.contains("What this view does not do"));
+
+        assert!(click_primary(&ctx, &mut app, "Site map filter settings"));
+        assert!(app.site_map_ui.filter_open);
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("Show only parameterized requests"));
+        assert!(text.contains("Hide general binary"));
+
+        assert!(click_primary(&ctx, &mut app, "Show all items"));
+        assert_eq!(app.site_map_ui.filter, SiteMapFilter::SHOW_ALL);
+        assert!(click_primary(&ctx, &mut app, "Reset to defaults"));
+        assert_eq!(app.site_map_ui.filter, SiteMapFilter::default());
+        assert!(click_primary(&ctx, &mut app, "Close"));
+        assert!(!app.site_map_ui.filter_open);
+
+        assert!(click_primary(&ctx, &mut app, "Pause live updates"));
+        assert!(app.site_map_ui.paused());
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(!text.is_empty());
+        assert!(click_primary(&ctx, &mut app, "Resume live updates"));
+        assert!(!app.site_map_ui.paused());
+
+        app.site_map_ui.help_open = false;
+        assert!(!app.site_map_ui.windows_open());
+    }
+
+    #[test]
+    fn site_map_contents_menu_controls_folders_filter_and_search() {
+        let mut app = captured_app();
+        app.site_map_ui.filter = SiteMapFilter::SHOW_ALL;
+        let ctx = test_context();
+        target_frame(&ctx, &mut app, Vec::new());
+
+        assert!(click_primary(&ctx, &mut app, "..."));
+        assert!(click_primary(&ctx, &mut app, "Expand all folders"));
+        let tree = app
+            .site_map
+            .as_ref()
+            .expect("map cached")
+            .1
+            .tree(SiteMapFilter::SHOW_ALL);
+        let mut expected = BTreeMap::new();
+        set_all_open(&tree, &mut expected, true);
+        for (key, open) in expected {
+            assert_eq!(app.site_map_ui.open.get(&key), Some(&open), "{key}");
+        }
+
+        assert!(click_primary(&ctx, &mut app, "..."));
+        assert!(click_primary(&ctx, &mut app, "Collapse all folders"));
+        assert!(app.site_map_ui.open.values().any(|open| !open));
+
+        app.site_map_ui.filter = SiteMapFilter::SHOW_ALL;
+        assert!(click_primary(&ctx, &mut app, "..."));
+        assert!(click_primary(&ctx, &mut app, "Reset site map filter"));
+        assert_eq!(app.site_map_ui.filter, SiteMapFilter::default());
+
+        app.site_map_ui.search = "products".to_string();
+        assert!(click_primary(&ctx, &mut app, "..."));
+        assert!(click_primary(&ctx, &mut app, "Clear search"));
+        assert!(app.site_map_ui.search.is_empty());
+    }
+
+    #[test]
+    fn site_map_sort_headers_toggle_and_cover_every_column() {
+        let mut app = captured_app();
+        app.site_map_ui.filter = SiteMapFilter::SHOW_ALL;
+        let ctx = test_context();
+        target_frame(&ctx, &mut app, Vec::new());
+
+        for sort in [
+            SiteMapSort::Host,
+            SiteMapSort::Method,
+            SiteMapSort::Url,
+            SiteMapSort::Params,
+            SiteMapSort::Status,
+            SiteMapSort::Length,
+            SiteMapSort::Mime,
+            SiteMapSort::Title,
+            SiteMapSort::Notes,
+            SiteMapSort::Time,
+        ] {
+            let before = (app.site_map_ui.sort, app.site_map_ui.sort_ascending);
+            assert!(
+                click_text(&ctx, &mut app, sort.label(), egui::PointerButton::Primary),
+                "missing header {}",
+                sort.label()
+            );
+            if before.0 == sort {
+                assert_eq!(app.site_map_ui.sort, sort);
+                assert_ne!(app.site_map_ui.sort_ascending, before.1);
+            } else {
+                assert_eq!(app.site_map_ui.sort, sort);
+                assert!(app.site_map_ui.sort_ascending);
+            }
+        }
+    }
+
+    #[test]
+    fn site_map_row_actions_reach_every_workspace() {
+        let mut app = captured_app();
+        app.selected = Some(1);
+
+        app.apply_site_map_row_action(SiteMapRowAction::Repeater);
+        assert_eq!(app.main_tab, MainTab::Repeater);
+        assert_eq!(app.repeater_tabs.len(), 1);
+
+        app.apply_site_map_row_action(SiteMapRowAction::Intruder);
+        assert_eq!(app.main_tab, MainTab::Intruder);
+
+        app.apply_site_map_row_action(SiteMapRowAction::ComparerRequest);
+        app.apply_site_map_row_action(SiteMapRowAction::ComparerResponse);
+        assert_eq!(app.comparer_workspace().len(), 2);
+
+        app.apply_site_map_row_action(SiteMapRowAction::Sequencer);
+        assert_eq!(app.main_tab, MainTab::Sequencer);
+
+        // Missing selections are a no-op rather than a panic.
+        app.selected = None;
+        app.apply_site_map_row_action(SiteMapRowAction::Repeater);
+    }
+
+    #[test]
+    fn site_map_pause_freezes_the_snapshot_until_resume() {
+        let mut app = captured_app();
+        let ctx = test_context();
+        target_frame(&ctx, &mut app, Vec::new());
+        let before = app.site_map.as_ref().expect("map built").1.endpoint_count();
+
+        app.site_map_ui.paused = true;
+        capture(
+            &mut app.history,
+            20,
+            "GET",
+            "https",
+            "example.com",
+            "/while-paused",
+            200,
+            "text/html",
+            b"<title>Paused</title>",
+            b"",
+            &[],
+        );
+        target_frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            app.site_map
+                .as_ref()
+                .expect("paused map")
+                .1
+                .endpoint_count(),
+            before
+        );
+
+        app.site_map_ui.paused = false;
+        target_frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            app.site_map
+                .as_ref()
+                .expect("resumed map")
+                .1
+                .endpoint_count(),
+            before + 1
+        );
+    }
+
+    #[test]
+    fn empty_and_filtered_site_maps_render_accurate_empty_states() {
+        let mut app = PerseidApp::test_app();
+        let ctx = test_context();
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("No HTTP endpoints"));
+        assert!(text.contains("Browse an HTTP or HTTPS site"));
+
+        app.scope_enabled = true;
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("No in-scope HTTP endpoints"));
+
+        // Captured traffic that the default filter hides leaves the map
+        // populated but the tree empty.
+        let mut filtered = PerseidApp::test_app();
+        capture(
+            &mut filtered.history,
+            1,
+            "GET",
+            "https",
+            "example.com",
+            "/site.css",
+            200,
+            "text/css",
+            b"body{}",
+            b"",
+            &[],
+        );
+        let text = rendered_text(&target_frame(&ctx, &mut filtered, Vec::new()));
+        assert!(text.contains("No items match the site map filter"));
+        assert!(text.contains("No visible items"));
+    }
+
+    #[test]
+    fn site_map_issues_tabs_and_target_issues_explain_their_empty_state() {
+        let mut app = captured_app();
+        app.site_map_ui.tab = SiteMapTab::Issues;
+        app.target_section = TargetSection::SiteMap;
+        let ctx = test_context();
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("No issues to show"));
+        assert!(text.contains("Perseid does not run a vulnerability scanner"));
+        assert!(app.site_map_ui.visible_ids.is_empty());
+
+        app.target_section = TargetSection::Issues;
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("No issues to show"));
+        assert!(text.contains("Captured requests are still available"));
+    }
+
+    #[test]
+    fn scope_view_renders_hosts_and_edits_rules() {
+        let mut app = captured_app();
+        app.target_section = TargetSection::Scope;
+        app.scope.insert("example.com".to_string());
+        let ctx = test_context();
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("Scope rules"));
+        assert!(text.contains("Captured hosts"));
+        assert!(text.contains("example.com"));
+        assert!(text.contains("x6"));
+        assert!(text.contains("in scope"));
+        assert!(text.contains("Remove"));
+        assert!(click_primary(&ctx, &mut app, "Remove"));
+        assert!(app.scope.is_empty());
+
+        // With no captured hosts only the Include host form offers Add, so
+        // the click target is unambiguous.
+        app.history.clear();
+        app.scope_input = "api.example.com".to_string();
+        assert!(click_primary(&ctx, &mut app, "Add"));
+        assert!(app.scope.contains("api.example.com"));
+        assert!(app.scope_input.is_empty());
+
+        app.scope.insert("one.test".to_string());
+        app.scope.insert("two.test".to_string());
+        assert!(click_primary(&ctx, &mut app, "Clear scope"));
+        assert!(app.scope.is_empty());
+
+        assert!(click_primary(&ctx, &mut app, "Filter views to the scope"));
+        assert!(app.scope_enabled);
+        assert!(click_primary(&ctx, &mut app, "Block out-of-scope traffic"));
+        assert!(app.scope_enforce);
+    }
+
+    #[test]
+    fn scope_view_without_history_reports_no_captured_hosts() {
+        let mut app = PerseidApp::test_app();
+        app.target_section = TargetSection::Scope;
+        let ctx = test_context();
+        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
+        assert!(text.contains("No hosts captured yet."));
+        assert!(text.contains("No explicit scope rules."));
+    }
+
+    #[test]
+    fn site_map_helpers_cover_matching_sorting_and_labels() {
+        assert_eq!(plural(0), "s");
+        assert_eq!(plural(1), "");
+        assert!(!site_map_time(SystemTime::UNIX_EPOCH).is_empty());
+
+        let mut app = captured_app();
+        app.inspector
+            .apply_workspace(&crate::project::InspectorWorkspace {
+                notes: vec![crate::project::InspectorNoteWorkspace {
+                    id: 2,
+                    text: "note text".to_string(),
+                }],
+                ..Default::default()
+            });
+        let map = SiteMap::build(&app.history, None);
+        let entry2 = map
+            .hosts
+            .iter()
+            .flat_map(|host| &host.entries)
+            .find(|entry| entry.id == 2)
+            .expect("products query entry");
+        let entry3 = map
+            .hosts
+            .iter()
+            .flat_map(|host| &host.entries)
+            .find(|entry| entry.id == 3)
+            .expect("products form entry");
+        assert!(site_row_matches(
+            &SiteRowRef {
+                entry: entry2,
+                item: app.history.get(2),
+                notes: "note text",
+            },
+            "note"
+        ));
+        for needle in [
+            "example.com",
+            "get",
+            "products",
+            "sort=price",
+            "products",
+            "html",
+            "200",
+            "parameter",
+        ] {
+            assert!(
+                site_row_matches(
+                    &SiteRowRef {
+                        entry: entry2,
+                        item: app.history.get(2),
+                        notes: "",
+                    },
+                    needle
+                ),
+                "expected match for {needle}"
+            );
+        }
+        assert!(!site_row_matches(
+            &SiteRowRef {
+                entry: entry2,
+                item: app.history.get(2),
+                notes: "",
+            },
+            "absent"
+        ));
+
+        let mut rows = vec![
+            SiteRowRef {
+                entry: entry2,
+                item: app.history.get(2),
+                notes: "note text",
+            },
+            SiteRowRef {
+                entry: entry3,
+                item: app.history.get(3),
+                notes: "",
+            },
+        ];
+        for sort in [
+            SiteMapSort::Host,
+            SiteMapSort::Method,
+            SiteMapSort::Url,
+            SiteMapSort::Params,
+            SiteMapSort::Status,
+            SiteMapSort::Length,
+            SiteMapSort::Mime,
+            SiteMapSort::Title,
+            SiteMapSort::Notes,
+            SiteMapSort::Time,
+        ] {
+            sort_site_rows(&mut rows, sort, true);
+            sort_site_rows(&mut rows, sort, false);
+        }
+
+        let mut open = BTreeMap::new();
+        let tree = map.tree(SiteMapFilter::SHOW_ALL);
+        set_all_open(&tree, &mut open, true);
+        assert!(open.values().all(|open| *open));
+        set_all_open(&tree, &mut open, false);
+        assert!(open.values().all(|open| !*open));
+    }
+
+    #[test]
+    fn site_map_mixed_scheme_host_renders_the_combined_icon() {
+        let mut app = captured_app();
+        app.site_map_ui.filter = SiteMapFilter::SHOW_ALL;
+        let ctx = test_context();
+        let output = target_frame(&ctx, &mut app, Vec::new());
+        let tree = app
+            .site_map
+            .as_ref()
+            .expect("map built")
+            .1
+            .tree(SiteMapFilter::SHOW_ALL);
+        let mixed = tree
+            .iter()
+            .find(|node| node.label == "mixed.test")
+            .expect("mixed host");
+        assert_eq!(mixed.scheme, "mixed");
+        assert!(!output.shapes.is_empty());
     }
 }

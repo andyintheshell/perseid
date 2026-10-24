@@ -282,6 +282,8 @@ impl WsConnectionRecord {
 /// project.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceState {
+    /// Bump when a workspace field or persisted enum gains a value that older
+    /// readers cannot decode. `version` 2 added `TargetSectionRecord::Issues`.
     #[serde(default = "workspace_version")]
     pub version: u16,
     #[serde(default)]
@@ -311,7 +313,7 @@ pub struct WorkspaceState {
 }
 
 impl WorkspaceState {
-    pub const CURRENT_VERSION: u16 = 1;
+    pub const CURRENT_VERSION: u16 = 2;
 }
 
 impl Default for WorkspaceState {
