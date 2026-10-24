@@ -76,7 +76,8 @@ fi
 
 # Generate into a clean temporary directory, verify, and only then replace the
 # destination files. A failed run cannot leave stale or half-written docs.
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/perseid-screenshots.XXXXXX")"
+# Keep the verifier input under the repository root, its allowed read boundary.
+TMP="$(mktemp -d "$ROOT/.perseid-screenshots.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 status=0
