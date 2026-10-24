@@ -1984,9 +1984,22 @@ mod tests {
     #[test]
     fn shutdown_project_flushes_the_writer() {
         let mut app = PerseidApp::test_app();
+        let file = temp_path("ui-shutdown");
+        wait_for(app.project.handle().expect("handle").save_as(file.clone()));
+
+        // A workbench change made just before shutdown must reach the file,
+        // not only the in-memory project that is about to be dropped.
         app.scope_enabled = true;
         app.shutdown_project();
-        assert!(app.project.handle().is_some());
+        drop(app); // like on_exit: the writer stops and releases the file
+
+        let reopened = ProjectHandle::temporary().expect("temporary project");
+        let opened = wait_for(reopened.open(file.clone(), 10, 1024));
+        assert!(
+            opened.workspace.scope.enabled,
+            "shutdown must flush the pending workspace"
+        );
+        let _ = std::fs::remove_file(&file);
     }
 }
 

@@ -108,24 +108,31 @@ pub(super) fn apply_capture_batch(
                         let mut record: HttpExchangeRecord = codec::decode(value.value())?;
                         drop(value);
                         record.duration_ms = Some(end.duration.as_millis() as u64);
+                        // The record attributes the bytes that were counted for
+                        // the row being replaced; a stale row that no record
+                        // accounts for is dropped without touching the total.
+                        let counted_request = record.request_body.stored_len;
                         record.request_body = BodyCaptureRecord::from_body(&end.request_body);
                         replace_http_body(
                             &mut bodies,
                             (*id, 0),
                             end.request_body.data(),
                             &mut next_meta.http_body_bytes,
+                            counted_request,
                         )?;
                         match &end.result {
                             ExchangeResult::Response { body } => {
                                 record.phase = HttpPhaseRecord::Completed {
                                     duration_ms: end.duration.as_millis() as u64,
                                 };
+                                let counted_response = record.response_body.stored_len;
                                 record.response_body = BodyCaptureRecord::from_body(body);
                                 replace_http_body(
                                     &mut bodies,
                                     (*id, 1),
                                     body.data(),
                                     &mut next_meta.http_body_bytes,
+                                    counted_response,
                                 )?;
                             }
                             ExchangeResult::Failed { error } => {
@@ -215,15 +222,16 @@ fn replace_http_body(
     key: (u64, u8),
     bytes: &[u8],
     retained: &mut u64,
+    counted_old: u64,
 ) -> Result<()> {
+    // `counted_old` is the byte count the exchange record attributes to this
+    // row, not the row's current length: a row that no record accounts for was
+    // never added to the total and is dropped without changing it.
+    *retained = retained.saturating_sub(counted_old);
     if bytes.is_empty() {
-        if let Some(old) = table.remove(key)? {
-            *retained = retained.saturating_sub(old.value().len() as u64);
-        }
+        table.remove(key)?;
     } else {
-        if let Some(old) = table.insert(key, bytes)? {
-            *retained = retained.saturating_sub(old.value().len() as u64);
-        }
+        table.insert(key, bytes)?;
         *retained = retained.saturating_add(bytes.len() as u64);
     }
     Ok(())
@@ -235,14 +243,13 @@ fn replace_ws_payload(
     bytes: &[u8],
     retained: &mut u64,
 ) -> Result<()> {
+    // Duplicate messages are skipped before this is called, so the message is
+    // new and any existing payload row is stale and was never counted; drop it
+    // without touching the retained total.
     if bytes.is_empty() {
-        if let Some(old) = table.remove(key)? {
-            *retained = retained.saturating_sub(old.value().len() as u64);
-        }
+        table.remove(key)?;
     } else {
-        if let Some(old) = table.insert(key, bytes)? {
-            *retained = retained.saturating_sub(old.value().len() as u64);
-        }
+        table.insert(key, bytes)?;
         *retained = retained.saturating_add(bytes.len() as u64);
     }
     Ok(())
@@ -317,19 +324,19 @@ fn enforce_retention(
             if let Some(response) = record.response {
                 by_status.remove((response.status, id))?;
             }
-            let request_bytes = bodies
-                .remove((id, 0))?
-                .map(|body| body.value().len() as u64)
-                .unwrap_or(0);
-            let response_bytes = bodies
-                .remove((id, 1))?
-                .map(|body| body.value().len() as u64)
-                .unwrap_or(0);
+            // Evict the rows for both body slots, but release only the bytes
+            // the record attributed to them; a stale row that was never
+            // counted is dropped without corrupting the total.
+            bodies.remove((id, 0))?;
+            bodies.remove((id, 1))?;
             http.remove(id)?;
             in_flight.remove(id)?;
-            meta.http_body_bytes = meta
-                .http_body_bytes
-                .saturating_sub(request_bytes.saturating_add(response_bytes));
+            meta.http_body_bytes = meta.http_body_bytes.saturating_sub(
+                record
+                    .request_body
+                    .stored_len
+                    .saturating_add(record.response_body.stored_len),
+            );
             meta.http_count = meta.http_count.saturating_sub(1);
             meta.retention_evictions = meta.retention_evictions.saturating_add(1);
         } else {
@@ -343,10 +350,8 @@ fn enforce_retention(
             let record: WsMessageRecord = codec::decode(value.value())?;
             drop(value);
             ws_by_connection.remove((record.connection_id, id))?;
-            let payload_bytes = ws_payloads
-                .remove(id)?
-                .map(|payload| payload.value().len() as u64)
-                .unwrap_or(0);
+            // Release only the payload bytes the record attributed to the row.
+            ws_payloads.remove(id)?;
             ws_messages.remove(id)?;
             let connection_still_used = ws_by_connection
                 .range((record.connection_id, 0)..=(record.connection_id, u64::MAX))?
@@ -355,7 +360,7 @@ fn enforce_retention(
             if !connection_still_used {
                 ws_connections.remove(record.connection_id)?;
             }
-            meta.ws_body_bytes = meta.ws_body_bytes.saturating_sub(payload_bytes);
+            meta.ws_body_bytes = meta.ws_body_bytes.saturating_sub(record.payload.stored_len);
             meta.ws_count = meta.ws_count.saturating_sub(1);
             meta.retention_evictions = meta.retention_evictions.saturating_add(1);
         }

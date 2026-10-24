@@ -1004,8 +1004,16 @@ fn capture_batch_replaces_response_heads_and_accounts_for_body_records() {
     apply_batch(&db, &mut meta, &[started(1, "GET"), response_head(1, 200)]).expect("first batch");
     apply_batch(&db, &mut meta, &[response_head(1, 201)]).expect("replacement head");
 
-    // A stale body row is replaced without double counting: it was never added
-    // to the retained byte total.
+    // Another exchange keeps 2 counted body bytes while a stale, uncounted
+    // body row appears for exchange 1. Replacing the stale row must not
+    // subtract from exchange 2's bytes.
+    apply_batch(
+        &db,
+        &mut meta,
+        &[started(2, "GET"), finished(2, b"22", b"")],
+    )
+    .expect("second exchange");
+    assert_eq!(meta.http_body_bytes, 2);
     {
         let tx = db.begin_write().expect("begin write");
         tx.open_table(schema::HTTP_BODIES)
@@ -1016,11 +1024,14 @@ fn capture_batch_replaces_response_heads_and_accounts_for_body_records() {
     }
 
     apply_batch(&db, &mut meta, &[finished(1, b"one", b"one")]).expect("finished");
-    assert_eq!(meta.http_body_bytes, 6);
+    assert_eq!(meta.http_body_bytes, 8);
     apply_batch(&db, &mut meta, &[finished(1, b"22", b"22")]).expect("replaced bodies");
-    assert_eq!(meta.http_body_bytes, 4);
+    assert_eq!(meta.http_body_bytes, 6);
     apply_batch(&db, &mut meta, &[finished(1, b"", b"")]).expect("released bodies");
-    assert_eq!(meta.http_body_bytes, 0);
+    assert_eq!(
+        meta.http_body_bytes, 2,
+        "only exchange 2's request body stays counted"
+    );
 
     let read = db.begin_read().expect("begin read");
     let statuses = read.open_table(schema::HTTP_BY_STATUS).expect("statuses");
@@ -1029,6 +1040,54 @@ fn capture_batch_replaces_response_heads_and_accounts_for_body_records() {
     let bodies = read.open_table(schema::HTTP_BODIES).expect("bodies");
     assert!(bodies.get((1u64, 0u8)).expect("request body").is_none());
     assert!(bodies.get((1u64, 1u8)).expect("response body").is_none());
+    assert_eq!(
+        bodies
+            .get((2u64, 0u8))
+            .expect("second request body")
+            .expect("stored body")
+            .value(),
+        b"22"
+    );
+}
+
+#[test]
+fn retention_releases_only_the_counted_bytes_of_evicted_records() {
+    let (db, mut meta) = batch_project();
+    let limits = Some(RetentionLimits::new(1, 0));
+
+    super::persistence::apply_capture_batch(
+        &db,
+        &mut meta,
+        limits,
+        &[started(1, "GET"), finished(1, b"one", b"")],
+    )
+    .expect("first exchange");
+    // Exchange 1 never had a response body, so this row is stale and outside
+    // the retained-byte total. Evicting the exchange must not subtract it.
+    {
+        let tx = db.begin_write().expect("begin write");
+        tx.open_table(schema::HTTP_BODIES)
+            .expect("bodies")
+            .insert((1u64, 1u8), b"stale".as_slice())
+            .expect("stale body");
+        tx.commit().expect("commit");
+    }
+
+    super::persistence::apply_capture_batch(
+        &db,
+        &mut meta,
+        limits,
+        &[started(2, "GET"), finished(2, b"22", b"")],
+    )
+    .expect("second exchange");
+
+    assert_eq!(meta.http_count, 1);
+    assert_eq!(meta.retention_evictions, 1);
+    assert_eq!(
+        meta.http_body_bytes, 2,
+        "eviction releases the counted request body of exchange 1 only"
+    );
+    assert_eq!(meta.ws_body_bytes, 0);
 }
 
 #[test]
@@ -1040,10 +1099,11 @@ fn capture_batch_accounts_for_websocket_payloads() {
     apply_batch(&db, &mut meta, &[ws_message(2, 7, b"xy")]).expect("first message");
     assert_eq!(meta.ws_body_bytes, 2);
 
-    // Capturing an empty payload releases the stored payload.
+    // Capturing a second message drops its stale row without releasing the
+    // unrelated payload of message 2 from the retained-byte total.
     insert_stale_ws_payload(&db, 3, b"stale");
     apply_batch(&db, &mut meta, &[ws_message(3, 7, b"")]).expect("empty payload");
-    assert_eq!(meta.ws_body_bytes, 0);
+    assert_eq!(meta.ws_body_bytes, 2);
 
     let read = db.begin_read().expect("begin read");
     let payloads = read.open_table(schema::WS_PAYLOADS).expect("payloads");
