@@ -754,6 +754,7 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::ComparerResponse);
                                 ui.close();
                             }
+                            super::curl::context_menu(ui, item);
                         });
                     });
                 });
@@ -839,11 +840,11 @@ impl PerseidApp {
             )
             .show(ui, |ui| {
                 message_toolbar(ui, MessagePane::Request, &mut request_view, Some(item));
-                message_text(
+                super::message_view::request_message_text_with_curl(
                     ui,
                     id,
-                    MessagePane::Request,
                     request_view,
+                    item,
                     message_view_text(&cache.request, request_view),
                 );
             });
