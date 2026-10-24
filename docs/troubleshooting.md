@@ -98,10 +98,13 @@ current workflow and saved-state coverage.
 
 ## Pages hang with messages awaiting interception
 
-Open **Proxy > Intercept** and use **Forward**, **Drop**, **Forward all**, or
-**Drop all**. Turning interception off does not release messages already held.
-If response holding is enabled, a request may have reached the target while
-its response is still waiting for your decision.
+Open **Proxy > Intercept** and turn interception off to forward held requests
+and responses in table order, including draft edits. A message with an invalid
+edited head remains held with an error; correct it and choose **Forward**, or
+choose **Drop**. You can also use **Forward**, **Drop**, **Forward all**, or
+**Drop all** to resolve messages manually. If response holding is enabled, a
+request may have reached the target while its response is still waiting for
+your decision; turning interception off forwards that response too.
 
 ## A request receives 403
 
