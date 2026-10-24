@@ -1,18 +1,19 @@
 # Perseid storage and project persistence design
 
-**Status:** Proposed implementation design  
-**Target baseline:** Perseid `v0.1.0` (release commit `b8e51e9`, 2026-10-23)  
+**Status:** Original design proposal; the first persistence implementation is
+in `main` (`0.2.0` in development). See §0 for current status and deviations.<br>
+**Design baseline:** Perseid `v0.1.0` (release commit `b8e51e9`, 2026-10-23)<br>
 **Initial storage engine:** `redb` 4.4.x, version pinned through `Cargo.lock`  
 **User-visible extension:** `.perseid`  
 **Scope:** Local desktop projects; no cloud sync or multi-user editing
 
-> This is a design and implementation plan, not a claim that the changes have been made. It is based on the published v0.1.0 release, public repository source and current redb documentation.
+> This document began as a proposal against the published `v0.1.0` release. Persistence has since landed in `main`; §0 records what is implemented and what differs from the proposal. The remaining sections preserve the original design and acceptance criteria and are not a claim that every proposed feature shipped. For user-facing behavior, see the [Workbench guide](workbench.md) and [Safety and privacy](safety.md).
 
 ## 0. Review and implementation status
 
-**Reviewed:** 2026-10-23, on `feat/persistence-design` (workspace version `0.2.0`).
+**Reviewed:** 2026-10-23, against the `0.2.0` workspace implementation.
 
-**Verdict:** the design is sound and was adopted, with one deliberate shortcut and the smaller deviations listed below. The document was written against the `v0.1.0` release tag, while the implementing checkout is `0.2.0`; the integration points named in §3 still exist with the same responsibilities. The API snippets in §5 and §10 describe the intended shape and are not compilable code.
+**Verdict:** the design was adopted in part, with the deviations and unfinished requirements listed below. In particular, project-wide temporary-memory and persistent-disk retention caps are not implemented. The document was written against the `v0.1.0` release tag, while the implementing checkout is `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
 
 ### 0.1 Implementation status
 
@@ -23,23 +24,24 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 - HTTP `Started`/`ResponseHead`/`Finished`, WebSocket messages/connections and workspace state persisted, with secondary indexes updated in the same transaction (§6.3–6.5). Bodies are stored as raw bytes; structured records are versioned JSON DTOs.
 - Temporary startup, `New Project`, `Open Project…`, `Save Project As…`, `Save Project Copy…`, in-flight repair on open, and clear-history, with the proxy stopped and restarted around open/new (§4).
 - Project status widget (mode, counts, capture loss, last error) and a final flush in `eframe::App::on_exit`.
+- **Important current limitation:** temporary projects retain accepted captures in the in-memory redb store without an aggregate eviction/size cap. `--history-limit` and `--history-bytes` bound the UI cache only. Saved project files likewise have no automatic disk-retention cap.
 
 ### 0.2 Deviations from the proposal
 
 | Proposal | Implemented | Why |
 | --- | --- | --- |
-| §9.2 ordered delta replay during Save As | The documented §9.2 shortcut: after the command queue drains, copy a redb read snapshot into a new `initializing` file, mark it ready, then switch | Smaller first slice. The file format, transfer engine and service boundary are unchanged, so delta replay can replace the shortcut without a format change. |
+| §9.2 ordered delta replay during Save As | The single writer copies a consistent read snapshot to a new `initializing` file, marks it ready, then switches to it. Capture events queued during the copy are processed by that writer after the switch; queue overflow is reported as capture loss. | No separate delta log is used. Single-writer ordering handles normal handover while retaining the proposed file format and service boundary. |
 | Paged UI over `list_http`/`list_ws` (§7.1) | Paged queries and cursors exist and are tested; the first UI wiring hydrates a bounded newest-first snapshot (count and byte budget) into the existing `History`/`WebSocketHistory` caches | Keeps the existing UI behavior in this change; the query API is the migration path. |
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
-| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | Not implemented; exit flushes committed state and drops unsaved temporary history silently | Deferred until a global recent-files/unsaved-content prompt design exists. |
+| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | No recent-project list or quit prompt. **New Project** warns before discarding; **Open Project** does not prompt to save a temporary project. Normal exit flushes saved-project state and drops temporary history. | Recent-project and unsaved-work flows remain follow-up work. |
 | Migrations (§11.2) | Older schemas are rejected with a clear “requires migration” error; no migration code yet | No schema-v2 exists to migrate; the check keeps forward compatibility safe. |
 
 ### 0.3 Test and follow-up notes
 
 - Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, workspace persistence, and ID monotonicity across clears.
-- Follow-up work, in priority order: (1) replace the quiesced Save As with the §9.2 delta handover if the capture gap is user-visible; (2) wire the history table to the paged queries so persistent projects are not bounded by the UI cache; (3) add migration scaffolding and the remaining §13.1 matrix rows (crash injection, 100k-exchange fixtures, sidecar audit).
+- Follow-up work, in priority order: (1) wire history views and Search to the paged persistent queries so users can reach older saved records; (2) add recent-project and unsaved-work prompts; (3) add schema migration/integrity handling and more crash, scale, and sidecar tests; (4) cap temporary-project RAM growth and define persistent disk-capacity/retention controls.
 
-## 1. Executive decision
+## 1. Original proposal decision
 
 Perseid has **two project modes**, with identical logical data and behavior:
 
@@ -93,9 +95,10 @@ redb's copy-on-write, crash-recovery design guarantees consistency of committed 
 - Unlimited full-body capture. Existing capture truncation and safety limits remain until explicitly redesigned.
 - Encryption-at-rest, content deduplication, background full-text indexing, and automatic compaction in the first implementation.
 
-## 3. v0.1.0 integration map
+## 3. Historical v0.1.0 integration map
 
-The current design uses a single Cargo package, an independently testable `proxy/` module and an egui/eframe desktop application.
+This map describes the code at the design baseline, not the current module layout.
+The current implementation paths are summarized in §0.1 and `docs/design.md`.
 
 Relevant source modules to adapt:
 
@@ -136,14 +139,18 @@ crates/perseid/src/
     project_ui.rs     # New/Open/Save As/Save Copy, error/status UI
 ```
 
-## 4. User-facing lifecycle and semantics
+## 4. Proposed user-facing lifecycle and semantics
+
+The behavior in this section is the original target proposal. Where it differs
+from the shipped workflow, §0 and the [Workbench guide](workbench.md) describe
+current behavior.
 
 ### 4.1 Startup: temporary mode
 
 - Every normal launch starts with **Untitled — Temporary**. Do not automatically reopen the previous project.
 - Create `Database::builder().create_with_backend(InMemoryBackend::new())`, initialize the same Perseid schema as a file-backed database, and start the project service.
 - No `.perseid` file is created; the only allowable disk writes in this mode are existing **global application** files such as the CA and user preferences (not project content).
-- Temporary history follows **explicit entry-count and captured-byte retention limits**, not an unbounded in-memory redb file. Evict oldest **completed** exchanges/WS messages atomically with their indexes and bodies; never evict active in-flight exchanges merely to satisfy normal retention. If memory pressure persists, stop recording new items and raise a visible warning.
+- **Proposed, not implemented:** temporary history follows explicit entry-count and captured-byte retention limits, evicting oldest completed records or stopping capture with a warning. The current in-memory project store has no aggregate eviction cap; history CLI flags only limit the UI cache.
 - The UI should distinguish **Temporary** from **Saved** without introducing a confusing dirty asterisk: unsaved temporary data is *always* at risk of exit.
 - On Quit/New/Open, show a **Save / Discard / Cancel** prompt if the temporary project has meaningful content.
 
@@ -606,7 +613,11 @@ A `.perseid` file will frequently contain **cookies, bearer tokens, credentials,
 - Loading a project must **never execute** script content, auto-start Intruder, automatically replay HTTP requests or change TLS trust.
 - A fresh project uses a random project ID. A Save Copy keeps provenance but should gain a new `copy_id` if later required by sync/recent-files behavior; decide explicitly, do not conflate independent clones and a continuously edited original.
 
-## 13. Implementation plan and acceptance tests
+## 13. Original implementation plan and acceptance tests
+
+The checklists and acceptance matrix below are preserved from the original
+proposal, not maintained as the live completion tracker. See §0.1–§0.3 for the
+current implementation and remaining work.
 
 Implement in narrowly scoped PRs; make the smallest vertical slice functional before persisting every tool.
 
@@ -689,14 +700,14 @@ Capture write throughput, p50/p95/p99 transaction/commit time, UI frame-time whi
 ### Perseid v0.1.0 and source
 
 - [Perseid v0.1.0 release](https://github.com/andyintheshell/perseid/releases/tag/v0.1.0) — published 2026-10-23; tag commit `b8e51e9`.
-- [Architecture and resource philosophy](https://github.com/andyintheshell/perseid/blob/main/docs/design.md) — currently references planned SQLite; this proposal supersedes that planned storage choice.
+- [Architecture and resource philosophy](https://github.com/andyintheshell/perseid/blob/main/docs/design.md) — current architecture and redb project storage.
 - [Proxy events](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/proxy/events.rs) — `ProxyEvent`, `CapturedBody`, exchange lifecycle.
 - [Proxy channel and runtime](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/proxy/mod.rs) — bounded event queue, dropped-event metric, separate interception queue.
 - [HTTP history](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/history.rs) — `HistoryItem`, `Phase`, memory limits/eviction.
 - [WebSocket history](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/websocket_history.rs).
 - [Workbench app](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/app.rs) — current state ownership and capture drain.
 
-The links above point to `main` for readable source paths, whose workspace version was 0.1.0 when reviewed; **compare each integration point with the pinned `v0.1.0` tag** before modifying code.
+The links above point to current `main` (workspace `0.2.0`) for readable source paths. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for what has since shipped and verify paths against current source before implementing follow-up work.
 
 ### redb
 
@@ -707,7 +718,11 @@ The links above point to `main` for readable source paths, whose workspace versi
 - [Durability semantics](https://docs.rs/redb/latest/redb/enum.Durability.html) — `Immediate` vs `None`.
 - [redb on-disk format and crash-recovery design](https://github.com/cberner/redb/blob/master/docs/design.md) — copy-on-write B+trees and commit/recovery strategy.
 
-## 15. Final acceptance definition
+## 15. Original final acceptance definition
+
+This was the target for the first persistence implementation. It is not fully
+met: in particular, the current UI does not page or search all saved history.
+See §0 for the shipped subset and deviations.
 
 The initial project-storage implementation is ready to release when a user can:
 

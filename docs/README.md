@@ -7,6 +7,11 @@ Perseid is an **early prototype** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
+The current `main` workspace (`0.2.0` in development) includes the first local
+project-persistence support. The latest published crates.io/GitHub release is
+`0.1.0` and predates it; use the source-build instructions until `0.2.0` is
+published.
+
 ## New to Perseid?
 
 1. [Install the prerequisites and capture a local request](getting-started.md).
@@ -36,6 +41,7 @@ use a local lab or another target you are explicitly authorized to test.
 | [Roadmap](roadmap.md) | Completed milestones, current work, and planned capabilities—not delivery dates. |
 | [Burp Community parity](burp-parity.md) | Capability status, deliberate differences, and the definition of parity. |
 | [Design](design.md) | Architecture, module boundaries, technology choices, and design goals. |
+| [Project storage design](storage-design.md) | Original storage proposal, implementation status, deviations, and remaining work. |
 | [Performance and memory](performance.md) | Historical M0 measurements, their environment, and a reproduction method. |
 | [Contributing](../CONTRIBUTING.md) | Toolchains, checks, headless development, screenshots, and documentation changes. |
 | [Proxy library](../crates/perseid/README.md) | The `perseid::proxy` API, its defaults, and the headless example. |

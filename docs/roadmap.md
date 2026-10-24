@@ -9,9 +9,13 @@ definition of done, and deliberate deviations.
 
 **Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
 milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Decoder,
-Comparer, and WebSocket capture/history work; persistent history remains.
-HTTP/2, WebSocket history, and Intruder arrived ahead of the protocol milestone.
-This is a sequence of capabilities, not a schedule or release promise.
+Comparer, WebSocket capture/history, and the first local project-persistence
+workflow are available. The remaining M3 work is paging/search over all saved
+history, project workflow polish, and project-wide retention controls. The
+temporary in-memory project currently has no aggregate capture-retention cap,
+and saved files have no automatic disk cap. HTTP/2, WebSocket history, and
+Intruder arrived ahead of the protocol milestone. This is a sequence of
+capabilities, not a schedule or release promise.
 
 ## Milestones
 
@@ -49,20 +53,23 @@ This is a sequence of capabilities, not a schedule or release promise.
   match/replace, and bounded-capture pipeline as plain HTTP. See
   [HTTPS interception](tls.md).*
 
-- [ ] **Milestone 3 — Daily workbench:** SQLite-backed persistent history,
-  search, Repeater, Decoder, and response diff (Comparer).
+- [ ] **Milestone 3 — Daily workbench:** redb-backed persistent project history
+  and supported workspace state, Search, Repeater, Decoder, and Comparer.
 
-  *Status: searchable in-memory history, editable HTTP/HTTPS Repeater, Decoder,
-  and Comparer work. Search covers HTTP-history heads and decoded bodies with
-  case, regex, negative-match, in-scope, and live-update filters. Repeater has
-  request tabs, history seeding, target and virtual host control, direct replay,
-  and Pretty/Raw/Hex responses;
-  WebSocket message interception/replay and saved tabs are not implemented.
-  Decoder has stacked Text/Hex panels, Burp-compatible encode/decode menus, 31
-  common hashes, Smart decode, and selection-aware transforms; SKEIN/TupleHash/
-  OID aliases and Send to Decoder are still missing. Comparer has a shared item list, word and byte
-  diffs, paired Text/Hex result panes, difference navigation, and synchronized
-  scrolling, with bounded in-memory items. Persistence remains.*
+  *Status: projects start in temporary memory by default. Save As, Open, and Save
+  Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
+  supported workspace inputs are written automatically. On open, the UI loads
+  only a bounded newest-first history snapshot; older records remain on disk but
+  are not yet pageable or searchable. Temporary storage has no aggregate capture
+  eviction cap. There are no recent-projects or
+  save/discard-on-quit prompts, and schema migrations are not implemented.
+  Search covers the loaded HTTP-history heads and decoded bodies with case,
+  regex, negative-match, in-scope, and live-update filters. Repeater persists
+  request tabs/drafts but not response history; Intruder persists its request
+  and payload configuration but not results. Decoder panel contents and
+  Comparer inputs persist, while Inspector notes and computed results do not.
+  WebSocket message interception/replay remains unimplemented. Decoder still
+  lacks SKEIN/TupleHash/OID aliases and Send to Decoder.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
@@ -70,9 +77,9 @@ This is a sequence of capabilities, not a schedule or release promise.
 
   *Status: HTTP/2, WebSocket capture/history, and Intruder-style fuzzing landed
   ahead of this milestone. WebSockets support plain `ws://`, decrypted `wss://`,
-  complete text/binary message reassembly, masking removal, bounded history, and
-  Pretty/Raw/Hex inspection. WebSocket message interception, editing, and replay
-  remain. Intruder supports `$$` positions, editable payload sets, Sniper/
+  complete text/binary message reassembly, masking removal, a bounded UI history
+  snapshot, and Pretty/Raw/Hex inspection. WebSocket message interception,
+  editing, and replay remain. Intruder supports `$$` positions, editable payload sets, Sniper/
   Battering ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests,
   live result inspection, and enforced-scope checks for every generated request.
   Payload processing rules and saved attacks remain. Sequencer is still

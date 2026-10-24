@@ -22,11 +22,56 @@ See the [screenshot gallery](screenshots.md) for each tab. The app opens on
 **Proxy > HTTP history**. The top-toolbar magnifier opens the cross-history
 [search window](#search-captured-traffic) without switching tabs.
 
+## Projects and persistence
+
+Perseid starts each run in **Untitled (temporary)**. Captures and workbench state
+are held in memory until you choose **File > Save Project As…**. A saved project
+is one local `.perseid` file; changes to captured traffic and supported
+workbench inputs are saved automatically, so there is no periodic Save command.
+Use **Save Project Copy…** to make a separate snapshot without switching away
+from the open project.
+
+- **New Project** shows a discard warning, then starts an empty temporary
+  project. It does not delete an existing saved file.
+- **Open Project…** opens an existing `.perseid` file. Enter its path in the
+  dialog; there is no native file picker. If the proxy is running, it stops for
+  the switch and restarts afterward. An Open does not prompt to save an unsaved
+  temporary project, so use Save As first if you want to keep it.
+- **Save Project As…** transfers the current project into a new file and makes
+  that file active. The destination must not already exist; Perseid does not
+  overwrite projects.
+- **Save Project Copy…** writes a consistent copy to a new path and leaves the
+  current project active. Its destination must also be new.
+
+Saved projects currently persist HTTP and WebSocket captures plus scope and
+match/replace rules, Repeater request tabs, Intruder request/payload settings,
+Decoder panel contents, and Comparer input items. They do not restore Inspector
+notes, Repeater responses, Intruder results, computed Comparer results, search
+state, or transient network/interception operations. The local TLS CA stays
+outside the project file.
+
+Project files are not encrypted. Treat a `.perseid` file as sensitive traffic:
+it can contain cookies, tokens, credentials, personal data, and binary bodies.
+See [Safety and privacy](safety.md#data-handling) before saving or
+sharing one.
+
+**History is stored on disk in a saved project, but the current UI is still
+bounded:** opening a project loads only the newest snapshot allowed by
+`--history-limit` and `--history-bytes`. Older rows remain in the file but are
+not yet pageable or searchable from the UI. In a temporary project, those same
+limits bound the UI cache only: the temporary in-memory redb project currently
+retains accepted captures without an aggregate eviction/size cap, so its RAM use
+can grow with traffic until you clear history or exit. `--capture-limit` still
+caps each stored body, and clearing history deletes stored records from the
+active project.
+
 ## Target and scope
 
 **Target > Site map** groups captured requests by host and path, showing the
-latest exchange for each path. It is built from retained history, not from a
-crawler. Evicted or cleared history therefore changes the map.
+latest exchange for each path in the currently loaded history. It is built from
+history, not from a crawler. UI-cache eviction can remove entries from the map
+without deleting their saved project records; clearing history removes the
+stored records too.
 
 In **Target > Scope**, add a bare host, a `host:port` authority, or a full URL.
 Matching includes subdomains and ignores ports; URL schemes and paths do not
@@ -62,11 +107,13 @@ is a quick way to verify the path without a browser or CA trust.
 - The text filter matches method, host, path, URI, and status—not response-body
   contents. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
-- History is bounded by both exchange count and retained-body bytes. The oldest
-  entries are evicted when a bound is exceeded.
+- The in-memory history view is bounded by exchange count and retained-body
+  bytes. These limits evict rows from the UI cache; they do not cap the temporary
+  redb project's total RAM storage or prune saved-project files. Older saved
+  records remain on disk even when evicted from the UI cache.
 - The status bar shows in-flight requests, held messages, dropped capture events,
-  rejected connections, and evictions. A dropped-event warning means the history
-  may be incomplete even if the client received its response.
+  rejected connections, and UI-cache evictions. A dropped-event warning means
+  the history may be incomplete even if the client received its response.
 
 ### WebSockets history
 
@@ -92,8 +139,9 @@ interception for the host if you need its WebSocket messages.
 - `Sec-WebSocket-Extensions` is removed from the forwarded handshake, so the
   origin does not negotiate compression that the history cannot decode.
 - There is no WebSocket message interception, editing, replay, or send-to-tool
-  action yet. WebSocket history has the same count and retained-byte defaults as
-  HTTP history and is in memory only.
+  action yet. WebSocket history has the same count and retained-byte UI-cache
+  defaults as HTTP history. Saved projects persist WebSocket records, but the
+  UI currently loads only a bounded newest-first snapshot.
 
 Click the **Memory** indicator for the current and peak allocator heap and a
 rolling graph. This is not process RSS or a hard memory ceiling; see
@@ -116,7 +164,8 @@ all non-empty sections. Query, form, and percent-encoded cookie values are
 decoded for display; the message editor continues to show the representation
 being forwarded. The Inspector reflects the captured exchange and does not
 rewrite it. Its width is draggable. The **Notes** tab stores a note per exchange
-for the current session; clearing history also clears the notes.
+for the current session; notes are not restored from a saved project, and
+clearing history also clears them.
 
 | View | Representation |
 | --- | --- |
@@ -180,8 +229,9 @@ pane has **Pretty**, **Raw**, and **Hex** views and the same Inspector/Notes rai
 as the history detail. Matches in the selected view are highlighted, and the
 detail header reports the match count.
 
-Search is limited to what remains in the bounded in-memory HTTP history.
-WebSocket messages, Repeater traffic, and their responses are not included.
+Search is limited to the currently loaded HTTP history snapshot. In a saved
+project, older rows remain on disk but are not searched yet. WebSocket messages,
+Repeater traffic, and their responses are not included.
 Matching uses the decoded body representation; uncompressed retained bodies
 are searched in full, while decoded compressed previews are bounded by the
 same decoder limits as the message editor.
@@ -225,7 +275,8 @@ Rules run in list order, after interception and before forwarding. Body rules
 apply only to buffered UTF-8 bodies, not streaming, oversized, or binary data.
 Empty patterns and disabled rules are ignored. Invalid regexes stay visible
 with an error and are excluded from the live policy; valid rules and toggles
-remain active. Rules are not saved between launches.
+remain active. Scope and rules are saved with a persistent project; temporary
+projects keep them only for the current run.
 
 ## Intruder
 
@@ -281,7 +332,8 @@ up to 1,000 result rows and 64 MiB of result data, evicting the oldest rows. The
 engine queues at most 64 unread results (and 64 MiB) before applying
 backpressure. Generated requests are limited to 8 MiB with 64 KiB heads, each
 request has a 60-second timeout, and response bodies use the same capture limit
-as the rest of the app. Results are not saved between launches.
+as the rest of the app. Persistent projects save the attack configuration and
+payload sets, but not result rows; temporary projects keep both only in memory.
 
 ## Repeater
 
@@ -312,7 +364,8 @@ Captured history seeds use the decoded, bounded message representation, so
 compressed, binary, or large bodies can be lossy. Review seed warnings before
 sending. Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
-with up to eight concurrent sends. Saved tabs and WebSocket replay are absent.
+with up to eight concurrent sends. Request tabs are saved with a persistent
+project, but response history is not. WebSocket replay is absent.
 
 Admission is bounded across **queued requests, active sends, and unread results
 together**: at most **32 pending operations** and **64 MiB of retained-data
@@ -379,7 +432,8 @@ retained data as text or hex, not just the visible hex preview.
 
 Manual encode/decode/hash transforms accept at most 8 MiB of input and produce
 at most 16 MiB of output, including preserved selection prefixes/suffixes. There
-is no **Send to Decoder** action from message editors yet, and chains are not saved.
+is no **Send to Decoder** action from message editors yet. Persistent projects
+restore Decoder panel contents, but not operation annotations or selections.
 
 ## Comparer
 
@@ -409,7 +463,8 @@ Comparer keeps up to **200 items** of **8 MiB each** in memory. A word compare
 accepts up to **2 MiB and 250,000 words per item**; a byte compare accepts up to
 **512 KiB per item** because Myers' algorithm is more expensive on bytes.
 Oversized inputs are rejected with a message, and both modes give the diff
-algorithm a 500 ms deadline. Items and results are not saved between launches.
+algorithm a 500 ms deadline. Comparer input items are saved with a persistent
+project; computed results and view state are rebuilt/reset when it is opened.
 
 ## Keyboard shortcuts
 
@@ -438,7 +493,7 @@ separate Space, matching the system green-button behavior.
 | --- | --- |
 | Captured bodies | 1 MiB retained per request/response by default; forwarding can stream larger bodies. |
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
-| History | 2,000 HTTP exchanges and 2,000 WebSocket messages; both use the same retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). |
+| History UI cache | 2,000 HTTP exchanges and 2,000 WebSocket messages; each cache uses the configured retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). These are not an aggregate cap on the temporary redb store or saved project files. |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
@@ -446,10 +501,16 @@ separate Space, matching the system green-button behavior.
 | Intruder work | Up to 32 simultaneous requests and one attack at a time; the engine queues up to 64 unread results or 64 MiB. |
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
-| Saved state | No persisted history, Intruder results, Repeater tabs, Decoder chains, Comparer items, scope, or rewrite rules. The local CA is persisted. |
+| Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
+| Temporary storage growth | The in-memory redb project retains accepted captures without an aggregate eviction cap. `--history-limit`/`--history-bytes` only bound the UI cache; RAM can grow until history is cleared or the app exits. |
+| Persistent project | One local `.perseid` redb file; captured records and supported workspace inputs auto-save. Files are plaintext, have no automatic disk-retention cap, and are not encrypted. |
+| Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
+| Persisted workspace | Scope, match/replace, Repeater request tabs, Intruder configuration/payloads, Decoder panel contents, and Comparer inputs. Notes, response/attack results, computed diffs, search state, and transient selections are not restored. |
+| Project transitions | New Project confirms discard; Open Project has no save/discard prompt for a temporary project. Save As/Copy refuse to overwrite an existing file. |
+| Local CA | Persisted separately from projects; its private key is never included in a `.perseid` file. |
 | Missing tools/protocols | No Sequencer, WebSocket message interception/replay, or HTTP/3/QUIC support. |
 
-See [CLI options](getting-started.md#options) to change retention limits and
+See [CLI options](getting-started.md#options) to change the UI-cache limits and
 [Safety and privacy](safety.md) for the data-handling implications. Larger
 budgets allow more sensitive data to remain in memory; they do not improve
 protocol support or make an unsupported editing operation safe.
