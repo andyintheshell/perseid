@@ -17,7 +17,7 @@ use super::super::records::{
 use super::super::schema::{self, ProjectMeta, STATE_MIGRATING, STATE_READY};
 use super::super::{ProjectError, Result};
 use super::shared::Shared;
-use super::{CommitReceipt, OpenedProject, ProjectMode};
+use super::{CommitReceipt, OpenedProject, ProjectMode, RetentionLimits};
 
 pub(super) fn receipt(meta: &ProjectMeta) -> CommitReceipt {
     CommitReceipt {
@@ -36,154 +36,357 @@ fn begin_write(db: &Database) -> Result<redb::WriteTransaction> {
 pub(super) fn apply_capture_batch(
     db: &Database,
     meta: &mut ProjectMeta,
+    retention: Option<RetentionLimits>,
     events: &[ProxyEvent],
 ) -> Result<()> {
+    // Metadata is staged until the transaction commits. A failed decode,
+    // index update, or commit must leave the in-memory counters exactly as
+    // they were before this batch.
+    let mut next_meta = meta.clone();
     let tx = begin_write(db)?;
     {
-        let mut http = tx.open_table(schema::HTTP_EXCHANGES)?;
-        let mut bodies = tx.open_table(schema::HTTP_BODIES)?;
-        let mut by_time = tx.open_table(schema::HTTP_BY_TIME)?;
-        let mut by_host = tx.open_table(schema::HTTP_BY_HOST)?;
-        let mut by_status = tx.open_table(schema::HTTP_BY_STATUS)?;
-        let mut in_flight = tx.open_table(schema::HTTP_IN_FLIGHT)?;
-        let mut ws_messages = tx.open_table(schema::WS_MESSAGES)?;
-        let mut ws_payloads = tx.open_table(schema::WS_PAYLOADS)?;
-        let mut ws_by_time = tx.open_table(schema::WS_BY_TIME)?;
-        let mut ws_by_connection = tx.open_table(schema::WS_BY_CONNECTION)?;
-        let mut ws_connections = tx.open_table(schema::WS_CONNECTIONS)?;
+        {
+            let mut http = tx.open_table(schema::HTTP_EXCHANGES)?;
+            let mut bodies = tx.open_table(schema::HTTP_BODIES)?;
+            let mut by_time = tx.open_table(schema::HTTP_BY_TIME)?;
+            let mut by_host = tx.open_table(schema::HTTP_BY_HOST)?;
+            let mut by_status = tx.open_table(schema::HTTP_BY_STATUS)?;
+            let mut in_flight = tx.open_table(schema::HTTP_IN_FLIGHT)?;
+            let mut ws_messages = tx.open_table(schema::WS_MESSAGES)?;
+            let mut ws_payloads = tx.open_table(schema::WS_PAYLOADS)?;
+            let mut ws_by_time = tx.open_table(schema::WS_BY_TIME)?;
+            let mut ws_by_connection = tx.open_table(schema::WS_BY_CONNECTION)?;
+            let mut ws_connections = tx.open_table(schema::WS_CONNECTIONS)?;
 
-        for event in events {
-            match event {
-                ProxyEvent::Started {
-                    id,
-                    timestamp,
-                    request,
-                } => {
-                    if http.get(*id)?.is_some() {
-                        continue;
+            for event in events {
+                match event {
+                    ProxyEvent::Started {
+                        id,
+                        timestamp,
+                        request,
+                    } => {
+                        if http.get(*id)?.is_some() {
+                            continue;
+                        }
+                        let number = next_meta.next_http_number;
+                        next_meta.next_http_number = next_meta.next_http_number.saturating_add(1);
+                        next_meta.next_http_id = next_meta.next_http_id.max(id.saturating_add(1));
+                        let record =
+                            HttpExchangeRecord::started(*id, number, *timestamp, request.clone());
+                        http.insert(*id, codec::encode(&record)?.as_slice())?;
+                        by_time.insert((record.started_at_ms, *id), ())?;
+                        let host = normalized_host(&record.request.host);
+                        if !host.contains('\0') {
+                            by_host.insert((host, *id), ())?;
+                        }
+                        in_flight.insert(*id, ())?;
+                        next_meta.http_count = next_meta.http_count.saturating_add(1);
                     }
-                    let number = meta.next_http_number;
-                    meta.next_http_number = meta.next_http_number.saturating_add(1);
-                    meta.next_http_id = meta.next_http_id.max(id.saturating_add(1));
-                    let record =
-                        HttpExchangeRecord::started(*id, number, *timestamp, request.clone());
-                    http.insert(*id, codec::encode(&record)?.as_slice())?;
-                    by_time.insert((record.started_at_ms, *id), ())?;
-                    let host = normalized_host(&record.request.host);
-                    if !host.contains('\0') {
-                        by_host.insert((host, *id), ())?;
+                    ProxyEvent::ResponseHead { id, head } => {
+                        let Some(value) = http.get(*id)? else {
+                            next_meta.event_loss_count =
+                                next_meta.event_loss_count.saturating_add(1);
+                            continue;
+                        };
+                        let mut record: HttpExchangeRecord = codec::decode(value.value())?;
+                        drop(value);
+                        if let Some(old) = record.response.as_ref()
+                            && old.status != head.status
+                        {
+                            by_status.remove((old.status, *id))?;
+                        }
+                        record.response = Some(head.clone());
+                        by_status.insert((head.status, *id), ())?;
+                        http.insert(*id, codec::encode(&record)?.as_slice())?;
                     }
-                    in_flight.insert(*id, ())?;
-                    meta.http_count = meta.http_count.saturating_add(1);
-                }
-                ProxyEvent::ResponseHead { id, head } => {
-                    let Some(value) = http.get(*id)? else {
-                        meta.event_loss_count = meta.event_loss_count.saturating_add(1);
-                        continue;
-                    };
-                    let mut record: HttpExchangeRecord = codec::decode(value.value())?;
-                    drop(value);
-                    if let Some(old) = record.response.as_ref()
-                        && old.status != head.status
-                    {
-                        by_status.remove((old.status, *id))?;
-                    }
-                    record.response = Some(head.clone());
-                    by_status.insert((head.status, *id), ())?;
-                    http.insert(*id, codec::encode(&record)?.as_slice())?;
-                }
-                ProxyEvent::Finished { id, end } => {
-                    let Some(value) = http.get(*id)? else {
-                        meta.event_loss_count = meta.event_loss_count.saturating_add(1);
-                        continue;
-                    };
-                    let mut record: HttpExchangeRecord = codec::decode(value.value())?;
-                    drop(value);
-                    record.duration_ms = Some(end.duration.as_millis() as u64);
-                    record.request_body = BodyCaptureRecord::from_body(&end.request_body);
-                    if !end.request_body.data().is_empty() {
-                        bodies.insert((*id, 0), end.request_body.data())?;
-                    }
-                    match &end.result {
-                        ExchangeResult::Response { body } => {
-                            record.phase = HttpPhaseRecord::Completed {
-                                duration_ms: end.duration.as_millis() as u64,
-                            };
-                            record.response_body = BodyCaptureRecord::from_body(body);
-                            if !body.data().is_empty() {
-                                bodies.insert((*id, 1), body.data())?;
+                    ProxyEvent::Finished { id, end } => {
+                        let Some(value) = http.get(*id)? else {
+                            next_meta.event_loss_count =
+                                next_meta.event_loss_count.saturating_add(1);
+                            continue;
+                        };
+                        let mut record: HttpExchangeRecord = codec::decode(value.value())?;
+                        drop(value);
+                        record.duration_ms = Some(end.duration.as_millis() as u64);
+                        // The record attributes the bytes that were counted for
+                        // the row being replaced; a stale row that no record
+                        // accounts for is dropped without touching the total.
+                        let counted_request = record.request_body.stored_len;
+                        record.request_body = BodyCaptureRecord::from_body(&end.request_body);
+                        replace_http_body(
+                            &mut bodies,
+                            (*id, 0),
+                            end.request_body.data(),
+                            &mut next_meta.http_body_bytes,
+                            counted_request,
+                        )?;
+                        match &end.result {
+                            ExchangeResult::Response { body } => {
+                                record.phase = HttpPhaseRecord::Completed {
+                                    duration_ms: end.duration.as_millis() as u64,
+                                };
+                                let counted_response = record.response_body.stored_len;
+                                record.response_body = BodyCaptureRecord::from_body(body);
+                                replace_http_body(
+                                    &mut bodies,
+                                    (*id, 1),
+                                    body.data(),
+                                    &mut next_meta.http_body_bytes,
+                                    counted_response,
+                                )?;
+                            }
+                            ExchangeResult::Failed { error } => {
+                                record.phase = HttpPhaseRecord::Failed {
+                                    duration_ms: end.duration.as_millis() as u64,
+                                    error: error.clone(),
+                                };
+                            }
+                            ExchangeResult::Dropped => {
+                                record.phase = HttpPhaseRecord::Dropped {
+                                    duration_ms: end.duration.as_millis() as u64,
+                                };
+                            }
+                            ExchangeResult::Tunnel { .. }
+                            | ExchangeResult::InterceptedTls { .. } => {
+                                // CONNECT tunnels are filtered before reaching the
+                                // project; keep a plain completed phase if one slips
+                                // through a future caller.
+                                record.phase = HttpPhaseRecord::Completed {
+                                    duration_ms: end.duration.as_millis() as u64,
+                                };
                             }
                         }
-                        ExchangeResult::Failed { error } => {
-                            record.phase = HttpPhaseRecord::Failed {
-                                duration_ms: end.duration.as_millis() as u64,
-                                error: error.clone(),
-                            };
-                        }
-                        ExchangeResult::Dropped => {
-                            record.phase = HttpPhaseRecord::Dropped {
-                                duration_ms: end.duration.as_millis() as u64,
-                            };
-                        }
-                        ExchangeResult::Tunnel { .. } | ExchangeResult::InterceptedTls { .. } => {
-                            // CONNECT tunnels are filtered before reaching the
-                            // project; keep a plain completed phase if one slips
-                            // through a future caller.
-                            record.phase = HttpPhaseRecord::Completed {
-                                duration_ms: end.duration.as_millis() as u64,
-                            };
-                        }
+                        http.insert(*id, codec::encode(&record)?.as_slice())?;
+                        in_flight.remove(*id)?;
                     }
-                    http.insert(*id, codec::encode(&record)?.as_slice())?;
-                    in_flight.remove(*id)?;
-                }
-                ProxyEvent::WebSocketMessage {
-                    id,
-                    timestamp,
-                    connection,
-                    direction,
-                    opcode,
-                    payload,
-                } => {
-                    if ws_messages.get(*id)?.is_some() {
-                        continue;
-                    }
-                    if ws_connections.get(connection.id)?.is_none() {
-                        let record = WsConnectionRecord::from_info(connection, connection.id);
-                        ws_connections.insert(connection.id, codec::encode(&record)?.as_slice())?;
-                        meta.next_ws_connection_id = meta
-                            .next_ws_connection_id
-                            .max(connection.id.saturating_add(1));
-                    }
-                    let number = meta.next_ws_number;
-                    meta.next_ws_number = meta.next_ws_number.saturating_add(1);
-                    meta.next_ws_id = meta.next_ws_id.max(id.saturating_add(1));
-                    let record = WsMessageRecord::from_event(
-                        *id,
-                        number,
-                        *timestamp,
-                        connection.id,
-                        *direction,
-                        *opcode,
+                    ProxyEvent::WebSocketMessage {
+                        id,
+                        timestamp,
+                        connection,
+                        direction,
+                        opcode,
                         payload,
-                    );
-                    ws_messages.insert(*id, codec::encode(&record)?.as_slice())?;
-                    if !payload.data().is_empty() {
-                        ws_payloads.insert(*id, payload.data())?;
+                    } => {
+                        if ws_messages.get(*id)?.is_some() {
+                            continue;
+                        }
+                        if ws_connections.get(connection.id)?.is_none() {
+                            let record = WsConnectionRecord::from_info(connection, connection.id);
+                            ws_connections
+                                .insert(connection.id, codec::encode(&record)?.as_slice())?;
+                            next_meta.next_ws_connection_id = next_meta
+                                .next_ws_connection_id
+                                .max(connection.id.saturating_add(1));
+                        }
+                        let number = next_meta.next_ws_number;
+                        next_meta.next_ws_number = next_meta.next_ws_number.saturating_add(1);
+                        next_meta.next_ws_id = next_meta.next_ws_id.max(id.saturating_add(1));
+                        let record = WsMessageRecord::from_event(
+                            *id,
+                            number,
+                            *timestamp,
+                            connection.id,
+                            *direction,
+                            *opcode,
+                            payload,
+                        );
+                        ws_messages.insert(*id, codec::encode(&record)?.as_slice())?;
+                        replace_ws_payload(
+                            &mut ws_payloads,
+                            *id,
+                            payload.data(),
+                            &mut next_meta.ws_body_bytes,
+                        )?;
+                        ws_by_time.insert((record.timestamp_ms, *id), ())?;
+                        ws_by_connection.insert((connection.id, *id), ())?;
+                        next_meta.ws_count = next_meta.ws_count.saturating_add(1);
                     }
-                    ws_by_time.insert((record.timestamp_ms, *id), ())?;
-                    ws_by_connection.insert((connection.id, *id), ())?;
-                    meta.ws_count = meta.ws_count.saturating_add(1);
                 }
+                next_meta.next_event_sequence = next_meta.next_event_sequence.saturating_add(1);
+                next_meta.last_committed_sequence = next_meta.next_event_sequence.saturating_sub(1);
             }
-            meta.next_event_sequence = meta.next_event_sequence.saturating_add(1);
-            meta.last_committed_sequence = meta.next_event_sequence.saturating_sub(1);
+        }
+        if let Some(limits) = retention {
+            enforce_retention(&tx, &mut next_meta, limits)?;
         }
         let mut table = tx.open_table(schema::META)?;
-        schema::write_counters(&mut table, meta)?;
+        schema::write_counters(&mut table, &next_meta)?;
     }
     tx.commit()?;
+    *meta = next_meta;
     Ok(())
+}
+
+fn replace_http_body(
+    table: &mut redb::Table<'_, (u64, u8), &[u8]>,
+    key: (u64, u8),
+    bytes: &[u8],
+    retained: &mut u64,
+    counted_old: u64,
+) -> Result<()> {
+    // `counted_old` is the byte count the exchange record attributes to this
+    // row, not the row's current length: a row that no record accounts for was
+    // never added to the total and is dropped without changing it.
+    *retained = retained.saturating_sub(counted_old);
+    if bytes.is_empty() {
+        table.remove(key)?;
+    } else {
+        table.insert(key, bytes)?;
+        *retained = retained.saturating_add(bytes.len() as u64);
+    }
+    Ok(())
+}
+
+fn replace_ws_payload(
+    table: &mut redb::Table<'_, u64, &[u8]>,
+    key: u64,
+    bytes: &[u8],
+    retained: &mut u64,
+) -> Result<()> {
+    // Duplicate messages are skipped before this is called, so the message is
+    // new and any existing payload row is stale and was never counted; drop it
+    // without touching the retained total.
+    if bytes.is_empty() {
+        table.remove(key)?;
+    } else {
+        table.insert(key, bytes)?;
+        *retained = retained.saturating_add(bytes.len() as u64);
+    }
+    Ok(())
+}
+
+/// Evict the oldest HTTP exchange or WebSocket message until both the record
+/// and retained-body limits are satisfied. Each stream's newest record is kept
+/// even when it alone exceeds a configured limit, and an in-flight HTTP
+/// exchange is not evicted because its completion events would otherwise be
+/// counted as lost captures.
+fn enforce_retention(
+    tx: &redb::WriteTransaction,
+    meta: &mut ProjectMeta,
+    limits: RetentionLimits,
+) -> Result<()> {
+    if limits.max_records == 0 && limits.max_body_bytes == 0 {
+        return Ok(());
+    }
+    let mut http = tx.open_table(schema::HTTP_EXCHANGES)?;
+    let mut bodies = tx.open_table(schema::HTTP_BODIES)?;
+    let mut by_time = tx.open_table(schema::HTTP_BY_TIME)?;
+    let mut by_host = tx.open_table(schema::HTTP_BY_HOST)?;
+    let mut by_status = tx.open_table(schema::HTTP_BY_STATUS)?;
+    let mut in_flight = tx.open_table(schema::HTTP_IN_FLIGHT)?;
+    let mut ws_messages = tx.open_table(schema::WS_MESSAGES)?;
+    let mut ws_payloads = tx.open_table(schema::WS_PAYLOADS)?;
+    let mut ws_by_time = tx.open_table(schema::WS_BY_TIME)?;
+    let mut ws_by_connection = tx.open_table(schema::WS_BY_CONNECTION)?;
+    let mut ws_connections = tx.open_table(schema::WS_CONNECTIONS)?;
+
+    loop {
+        let records = meta.http_count.saturating_add(meta.ws_count);
+        let bytes = meta.http_body_bytes.saturating_add(meta.ws_body_bytes);
+        let over_count = limits.count_exceeded(records);
+        let over_bytes = limits.bytes_exceeded(bytes);
+        // Keep each stream's newest record, mirroring the bounded UI cache.
+        if (!over_count && !over_bytes) || records <= 1 {
+            break;
+        }
+
+        // The last entry of a time index is that stream's newest record; it is
+        // never a candidate, so equal-millisecond candidates across streams
+        // cannot discard a record that is newer than the one an older stream
+        // still holds. In-flight exchanges are skipped until they complete.
+        let newest_http = by_time.last()?.map(|(key, _)| key.value());
+        let newest_ws = ws_by_time.last()?.map(|(key, _)| key.value());
+        let oldest_http =
+            oldest_evictable(&by_time, newest_http, |id| Ok(in_flight.get(id)?.is_some()))?;
+        let oldest_ws = oldest_evictable(&ws_by_time, newest_ws, |_| Ok(false))?;
+        let evict_http = match (oldest_http, oldest_ws) {
+            (Some((http_time, _)), Some((ws_time, _))) => http_time <= ws_time,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+
+        if evict_http {
+            let Some((timestamp, id)) = oldest_http else {
+                break;
+            };
+            by_time.remove((timestamp, id))?;
+            let Some(value) = http.get(id)? else {
+                // Drop dangling index entries without corrupting the counters.
+                continue;
+            };
+            let record: HttpExchangeRecord = codec::decode(value.value())?;
+            drop(value);
+            let host = normalized_host(&record.request.host);
+            if !host.contains('\0') {
+                by_host.remove((host, id))?;
+            }
+            if let Some(response) = record.response {
+                by_status.remove((response.status, id))?;
+            }
+            // Evict the rows for both body slots, but release only the bytes
+            // the record attributed to them; a stale row that was never
+            // counted is dropped without corrupting the total.
+            bodies.remove((id, 0))?;
+            bodies.remove((id, 1))?;
+            http.remove(id)?;
+            in_flight.remove(id)?;
+            meta.http_body_bytes = meta.http_body_bytes.saturating_sub(
+                record
+                    .request_body
+                    .stored_len
+                    .saturating_add(record.response_body.stored_len),
+            );
+            meta.http_count = meta.http_count.saturating_sub(1);
+            meta.retention_evictions = meta.retention_evictions.saturating_add(1);
+        } else {
+            let Some((timestamp, id)) = oldest_ws else {
+                break;
+            };
+            ws_by_time.remove((timestamp, id))?;
+            let Some(value) = ws_messages.get(id)? else {
+                continue;
+            };
+            let record: WsMessageRecord = codec::decode(value.value())?;
+            drop(value);
+            ws_by_connection.remove((record.connection_id, id))?;
+            // Release only the payload bytes the record attributed to the row.
+            ws_payloads.remove(id)?;
+            ws_messages.remove(id)?;
+            let connection_still_used = ws_by_connection
+                .range((record.connection_id, 0)..=(record.connection_id, u64::MAX))?
+                .next()
+                .is_some();
+            if !connection_still_used {
+                ws_connections.remove(record.connection_id)?;
+            }
+            meta.ws_body_bytes = meta.ws_body_bytes.saturating_sub(record.payload.stored_len);
+            meta.ws_count = meta.ws_count.saturating_sub(1);
+            meta.retention_evictions = meta.retention_evictions.saturating_add(1);
+        }
+    }
+    Ok(())
+}
+
+/// The oldest entry of a time index that is not the stream's newest record and
+/// whose record is still evictable.
+fn oldest_evictable(
+    by_time: &redb::Table<'_, (u64, u64), ()>,
+    newest: Option<(u64, u64)>,
+    mut skip: impl FnMut(u64) -> Result<bool>,
+) -> Result<Option<(u64, u64)>> {
+    for entry in by_time.iter()? {
+        let (key, _) = entry?;
+        let value = key.value();
+        if Some(value) == newest {
+            continue;
+        }
+        if skip(value.1)? {
+            continue;
+        }
+        return Ok(Some(value));
+    }
+    Ok(None)
 }
 
 fn normalized_host(host: &str) -> String {
@@ -325,6 +528,7 @@ fn read_workspace(db: &Database) -> Result<WorkspaceState> {
 }
 
 pub(super) fn clear_http(db: &Database, meta: &mut ProjectMeta) -> Result<CommitReceipt> {
+    let mut next_meta = meta.clone();
     let tx = begin_write(db)?;
     {
         tx.open_table(schema::HTTP_EXCHANGES)?
@@ -336,17 +540,20 @@ pub(super) fn clear_http(db: &Database, meta: &mut ProjectMeta) -> Result<Commit
             .retain(|_, _| false)?;
         tx.open_table(schema::HTTP_IN_FLIGHT)?
             .retain(|_, _| false)?;
-        meta.http_count = 0;
-        meta.next_http_number = 1;
-        meta.last_committed_sequence = meta.next_event_sequence.saturating_sub(1);
+        next_meta.http_count = 0;
+        next_meta.http_body_bytes = 0;
+        next_meta.next_http_number = 1;
+        next_meta.last_committed_sequence = next_meta.next_event_sequence.saturating_sub(1);
         let mut table = tx.open_table(schema::META)?;
-        schema::write_counters(&mut table, meta)?;
+        schema::write_counters(&mut table, &next_meta)?;
     }
     tx.commit()?;
+    *meta = next_meta;
     Ok(receipt(meta))
 }
 
 pub(super) fn clear_ws(db: &Database, meta: &mut ProjectMeta) -> Result<CommitReceipt> {
+    let mut next_meta = meta.clone();
     let tx = begin_write(db)?;
     {
         tx.open_table(schema::WS_MESSAGES)?.retain(|_, _| false)?;
@@ -356,13 +563,15 @@ pub(super) fn clear_ws(db: &Database, meta: &mut ProjectMeta) -> Result<CommitRe
             .retain(|_, _| false)?;
         tx.open_table(schema::WS_CONNECTIONS)?
             .retain(|_, _| false)?;
-        meta.ws_count = 0;
-        meta.next_ws_number = 1;
-        meta.last_committed_sequence = meta.next_event_sequence.saturating_sub(1);
+        next_meta.ws_count = 0;
+        next_meta.ws_body_bytes = 0;
+        next_meta.next_ws_number = 1;
+        next_meta.last_committed_sequence = next_meta.next_event_sequence.saturating_sub(1);
         let mut table = tx.open_table(schema::META)?;
-        schema::write_counters(&mut table, meta)?;
+        schema::write_counters(&mut table, &next_meta)?;
     }
     tx.commit()?;
+    *meta = next_meta;
     Ok(receipt(meta))
 }
 
@@ -371,6 +580,7 @@ pub(super) fn interrupt_in_flight(
     meta: &mut ProjectMeta,
     reason: &str,
 ) -> Result<()> {
+    let mut next_meta = meta.clone();
     let tx = begin_write(db)?;
     let count;
     {
@@ -400,13 +610,16 @@ pub(super) fn interrupt_in_flight(
             .retain(|_, _| false)?;
         count = ids.len() as u64;
         if count > 0 {
-            meta.event_loss_count = meta.event_loss_count.saturating_add(count);
-            meta.last_committed_sequence = meta.next_event_sequence.saturating_sub(1);
+            next_meta.event_loss_count = next_meta.event_loss_count.saturating_add(count);
+            next_meta.last_committed_sequence = next_meta.next_event_sequence.saturating_sub(1);
             let mut table = tx.open_table(schema::META)?;
-            schema::write_counters(&mut table, meta)?;
+            schema::write_counters(&mut table, &next_meta)?;
         }
     }
     tx.commit()?;
+    if count > 0 {
+        *meta = next_meta;
+    }
     Ok(())
 }
 
@@ -481,39 +694,42 @@ pub(super) fn open_project(
         "application terminated before exchange completed",
     )?;
     let db = Arc::new(db);
-    let opened = build_snapshot(&db, &meta, ui_limit, ui_bytes);
+    let opened = build_snapshot(&db, ui_limit, ui_bytes)?;
     Ok((db, meta, opened))
 }
 
 pub(super) fn build_snapshot(
     db: &Database,
-    meta: &ProjectMeta,
     ui_limit: usize,
     ui_bytes: usize,
-) -> OpenedProject {
+) -> Result<OpenedProject> {
     let limit = ui_limit.max(1);
     let (http_budget, ws_budget) = snapshot_budgets(ui_bytes);
-    let (http, http_total) = queries::load_http_snapshot(db, limit, http_budget.max(1))
-        .unwrap_or_else(|err| {
-            log::warn!("could not load the HTTP snapshot: {err}");
-            (Vec::new(), meta.http_count)
-        });
+    let (http, http_total) =
+        queries::load_http_snapshot(db, limit, http_budget.max(1)).map_err(|source| {
+            ProjectError::Snapshot {
+                component: "HTTP history",
+                source: Box::new(source),
+            }
+        })?;
     let (ws, ws_total) =
-        queries::load_ws_snapshot(db, limit, ws_budget.max(1)).unwrap_or_else(|err| {
-            log::warn!("could not load the WebSocket snapshot: {err}");
-            (Vec::new(), meta.ws_count)
-        });
-    let workspace = read_workspace(db).unwrap_or_else(|err| {
-        log::warn!("could not load project workspace state: {err}");
-        WorkspaceState::default()
-    });
-    OpenedProject {
+        queries::load_ws_snapshot(db, limit, ws_budget.max(1)).map_err(|source| {
+            ProjectError::Snapshot {
+                component: "WebSocket history",
+                source: Box::new(source),
+            }
+        })?;
+    let workspace = read_workspace(db).map_err(|source| ProjectError::Snapshot {
+        component: "workspace state",
+        source: Box::new(source),
+    })?;
+    Ok(OpenedProject {
         http,
         ws,
         workspace,
         http_total,
         ws_total,
-    }
+    })
 }
 
 fn now_ms() -> u64 {

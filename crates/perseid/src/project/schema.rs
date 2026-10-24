@@ -56,6 +56,9 @@ pub const KEY_CAPTURE_LOSS_COUNT: &str = "capture_loss_count";
 pub const KEY_EVENT_LOSS_COUNT: &str = "event_loss_count";
 pub const KEY_HTTP_COUNT: &str = "http_count";
 pub const KEY_WS_COUNT: &str = "ws_count";
+pub const KEY_HTTP_BODY_BYTES: &str = "http_body_bytes";
+pub const KEY_WS_BODY_BYTES: &str = "ws_body_bytes";
+pub const KEY_RETENTION_EVICTIONS: &str = "retention_evictions";
 
 pub const STATE_INITIALIZING: &str = "initializing";
 pub const STATE_READY: &str = "ready";
@@ -81,6 +84,12 @@ pub struct ProjectMeta {
     pub event_loss_count: u64,
     pub http_count: u64,
     pub ws_count: u64,
+    /// Retained request/response body bytes for temporary-project retention.
+    pub http_body_bytes: u64,
+    /// Retained WebSocket payload bytes for temporary-project retention.
+    pub ws_body_bytes: u64,
+    /// Records removed by temporary-project retention limits.
+    pub retention_evictions: u64,
 }
 
 impl ProjectMeta {
@@ -101,6 +110,9 @@ impl ProjectMeta {
             event_loss_count: 0,
             http_count: 0,
             ws_count: 0,
+            http_body_bytes: 0,
+            ws_body_bytes: 0,
+            retention_evictions: 0,
         }
     }
 }
@@ -181,6 +193,15 @@ pub fn write_counters(table: &mut redb::Table<'_, &str, &[u8]>, meta: &ProjectMe
     )?;
     table.insert(KEY_HTTP_COUNT, meta.http_count.to_string().as_bytes())?;
     table.insert(KEY_WS_COUNT, meta.ws_count.to_string().as_bytes())?;
+    table.insert(
+        KEY_HTTP_BODY_BYTES,
+        meta.http_body_bytes.to_string().as_bytes(),
+    )?;
+    table.insert(KEY_WS_BODY_BYTES, meta.ws_body_bytes.to_string().as_bytes())?;
+    table.insert(
+        KEY_RETENTION_EVICTIONS,
+        meta.retention_evictions.to_string().as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -235,6 +256,9 @@ pub fn read_meta(tx: &ReadTransaction) -> Result<ProjectMeta> {
         event_loss_count: get_u64(&table, KEY_EVENT_LOSS_COUNT)?.unwrap_or(0),
         http_count: get_u64(&table, KEY_HTTP_COUNT)?.unwrap_or(0),
         ws_count: get_u64(&table, KEY_WS_COUNT)?.unwrap_or(0),
+        http_body_bytes: get_u64(&table, KEY_HTTP_BODY_BYTES)?.unwrap_or(0),
+        ws_body_bytes: get_u64(&table, KEY_WS_BODY_BYTES)?.unwrap_or(0),
+        retention_evictions: get_u64(&table, KEY_RETENTION_EVICTIONS)?.unwrap_or(0),
     })
 }
 

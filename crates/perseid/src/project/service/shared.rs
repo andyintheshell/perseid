@@ -36,6 +36,7 @@ impl Shared {
                 last_committed_sequence: meta.last_committed_sequence,
                 capture_loss_count: meta.capture_loss_count,
                 event_loss_count: meta.event_loss_count,
+                retention_evictions: meta.retention_evictions,
                 last_error: None,
             }),
             next_http_id: AtomicU64::new(meta.next_http_id),
@@ -98,6 +99,7 @@ impl Shared {
             status.last_committed_sequence = meta.last_committed_sequence;
             status.capture_loss_count = meta.capture_loss_count;
             status.event_loss_count = meta.event_loss_count;
+            status.retention_evictions = meta.retention_evictions;
             if bump_generation {
                 status.generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
             }
@@ -156,6 +158,7 @@ impl Shared {
                 last_committed_sequence: 0,
                 capture_loss_count: 0,
                 event_loss_count: 0,
+                retention_evictions: 0,
                 last_error: Some("project status unavailable".to_string()),
             });
         status.capture_loss_count = status

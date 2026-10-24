@@ -16,7 +16,7 @@ use super::persistence::{
     interrupt_in_flight, open_project, receipt, save_as, write_workspace,
 };
 use super::shared::Shared;
-use super::{Command, ProjectMode, Result, new_project_id};
+use super::{Command, ProjectMode, Result, RetentionLimits, new_project_id};
 
 /// Maximum captures folded into one write transaction.
 const CAPTURE_BATCH: usize = 128;
@@ -28,10 +28,16 @@ pub(super) fn run_writer(
     shared: Arc<Shared>,
     initial_db: Arc<Database>,
     mut meta: ProjectMeta,
+    initial_mode: ProjectMode,
+    temporary_retention: RetentionLimits,
 ) {
     let mut db = initial_db;
     let mut pending: VecDeque<Command> = VecDeque::new();
     let mut last_workspace: Option<Vec<u8>> = None;
+    let mut retention = match initial_mode {
+        ProjectMode::Temporary => Some(temporary_retention),
+        ProjectMode::Persistent { .. } => None,
+    };
     loop {
         let command = match pending.pop_front() {
             Some(command) => command,
@@ -60,7 +66,7 @@ pub(super) fn run_writer(
                     }
                 }
                 absorb_pending_loss(&shared, &mut meta);
-                match apply_capture_batch(&db, &mut meta, &events) {
+                match apply_capture_batch(&db, &mut meta, retention, &events) {
                     Ok(()) => {
                         shared.refresh_meta(&meta);
                     }
@@ -102,6 +108,9 @@ pub(super) fn run_writer(
                 let result = save_as(&mut db, &shared, &mut meta, &path);
                 match result {
                     Ok(()) => {
+                        // Saved projects keep every record; retention applies
+                        // only to the in-memory temporary backend.
+                        retention = None;
                         let _ = reply.send(Ok(()));
                     }
                     Err(err) => {
@@ -131,6 +140,7 @@ pub(super) fn run_writer(
                 Ok((new_db, new_meta, opened)) => {
                     db = new_db;
                     meta = new_meta;
+                    retention = None;
                     shared.set_database(db.clone());
                     shared.install_meta(&meta, ProjectMode::Persistent { path });
                     shared.clear_mappings();
@@ -148,12 +158,16 @@ pub(super) fn run_writer(
                 reply,
             } => {
                 let new_meta = ProjectMeta::new(new_project_id());
-                match backend::create_memory(&new_meta) {
-                    Ok(new_db) => {
-                        let new_db = Arc::new(new_db);
-                        let opened = build_snapshot(&new_db, &new_meta, ui_limit, ui_bytes);
+                let created = backend::create_memory(&new_meta).and_then(|new_db| {
+                    let new_db = Arc::new(new_db);
+                    let opened = build_snapshot(&new_db, ui_limit, ui_bytes)?;
+                    Ok((new_db, opened))
+                });
+                match created {
+                    Ok((new_db, opened)) => {
                         db = new_db;
                         meta = new_meta;
+                        retention = Some(temporary_retention);
                         shared.set_database(db.clone());
                         shared.install_meta(&meta, ProjectMode::Temporary);
                         shared.clear_mappings();

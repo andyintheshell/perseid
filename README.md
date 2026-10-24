@@ -121,9 +121,15 @@ important boundaries:
   bounded newest-first history snapshot; older stored rows are not pageable or
   searchable yet. Files are not encrypted, migrations and recent-projects are
   not implemented, and temporary-project contents are lost on exit unless saved.
-  The temporary in-memory redb store also lacks an aggregate retention cap, so
-  RAM use can grow with captured traffic; `--history-*` flags only bound the UI
-  cache.
+  Temporary projects bound captured records and retained body bytes with the
+  configurable `--temporary-retention-*` limits (defaulting to `--history-*`)
+  and evict the oldest records first. These are soft limits: each stream's
+  newest record is kept even when it alone exceeds the byte budget, in-flight
+  HTTP exchanges are kept until they complete, `0` disables a dimension, and
+  headers, indexes, and database overhead are outside the byte budget. Saved
+  projects are not automatically pruned and can grow until the disk fills. New
+  Project and Open Project ask Save/Discard/Cancel before replacing a temporary
+  project with unsaved work.
 - **Transient activity is not persisted.** Running attacks and sends, held
   interception decisions, pending network operations, and proxy lifecycle state
   are not restored. The local TLS CA certificate and private key are stored

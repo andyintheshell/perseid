@@ -24,7 +24,9 @@ Perseid aims to be:
   not a dashboard of speculative findings.
 - **Lightweight by design.** No embedded browser or web-based desktop UI;
   streamed bodies and bounded UI history are requirements. The project store
-  still needs an aggregate retention cap before total memory use is bounded.
+  bounds temporary capture retention by configurable aggregate count and
+  retained-body limits; saved files still need a disk-retention cap before
+  total disk use is bounded.
 - **Keyboard-friendly.** Fast navigation among requests, replay tabs, search,
   and comparisons.
 - **Transparent.** Inspection tools should show exactly what was sent,
@@ -137,11 +139,14 @@ bytes.
 
 Project persistence is implemented, but the first UI integration loads a bounded
 newest-first snapshot rather than paging through all saved history. Search still
-queries the loaded in-memory history. The temporary redb project also retains
-captures without an aggregate eviction cap; `--history-limit` and
-`--history-bytes` bound the UI cache, not that store. Recent-projects/quit
-prompts and schema migrations remain planned; WebSocket message
-interception/replay and a native extension point are also not implemented.
+queries the loaded in-memory history. The temporary redb project bounds capture
+retention with configurable aggregate count and retained-body limits
+(`--temporary-retention-*`, defaulting to the `--history-*` values), evicting
+the oldest records first. New and Open ask Save/Discard/Cancel when the temporary
+project has unsaved work. Persistent project files have no automatic disk cap,
+and recent-project/quit prompts and schema migrations remain planned; WebSocket
+message interception/replay and a native extension point are also not
+implemented.
 Proxy, Repeater, and Intruder network operations run off the UI thread. Proxy
 capture events use a bounded, lossy
 channel with a drop counter; the project writer has its own bounded queue and
@@ -241,10 +246,13 @@ Important implementation principles:
   through older saved records is planned.
 - Hard limits on captured body size, with bounded text and hex previews.
 - A total retained-body budget for the UI cache, independent of the exchange
-  count (half of physical memory by default, with a 256 MiB fallback). This does
-  not cap the temporary redb project's total RAM storage. Persistent project
-  files also have no automatic disk-retention limit; users clear saved history
-  explicitly. A project-wide retention cap remains necessary work.
+  count (half of physical memory by default, with a 256 MiB fallback). The
+  temporary redb project has its own aggregate retention limits for record
+  count and retained HTTP body/WebSocket payload bytes; by default they mirror
+  the history flags and can be set with `--temporary-retention-limit` and
+  `--temporary-retention-bytes`. Oldest records are evicted first and the newest
+  record is always kept. Persistent project files are not automatically pruned
+  and have no disk-retention limit; users clear saved history explicitly.
 - Concurrent proxy connection/tunnel limits and a bounded capture-event channel
   with drop counters. Loss recovery applies queued events before resolving
   in-flight rows; late or duplicate completions do not decrement unrelated
