@@ -66,7 +66,8 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
                Native egui interface
                  |       |       |
              Search   Repeater  Intruder
-                 |               (direct client)
+                 |       |       (direct client)
+                 +----> Sequencer (token sampling and randomness tests)
                  +----> Decoder and Comparer
 ```
 
@@ -76,8 +77,9 @@ Current crate layout:
 | --- | --- |
 | `crates/perseid/src/proxy/` | Embedded proxy: loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, WebSocket message capture, bounded capture events, direct Repeater client, and Intruder engine. Exposed as `perseid::proxy`. |
 | `crates/perseid/src/project/` | redb-backed temporary and file projects, versioned records/schema, serialized writer, history snapshots/queries, and project transfer. |
-| `crates/perseid/src/app/` | egui/eframe desktop shell and focused modules for chrome/input, project UI, history, Search, Repeater, Intruder, Decoder, Comparer, Target, and Proxy. |
+| `crates/perseid/src/app/` | egui/eframe desktop shell and focused modules for chrome/input, project UI, history, Search, Repeater, Intruder, Sequencer, Decoder, Comparer, Target, and Proxy. |
 | `crates/perseid/src/decoder.rs` | UI-independent byte transforms and hashes used by Decoder. |
+| `crates/perseid/src/sequencer/` | UI-independent token parsing, format decoding, statistical tests, and entropy analysis used by Sequencer. |
 
 The proxy stays behind its own module boundary even though it is compiled into
 the application crate. The UI talks to it through the `perseid::proxy` API, so
@@ -162,19 +164,22 @@ lets users keep their normal browser, extensions, and devtools.
 
 The workspace follows Burp's tool organization so existing users can find
 familiar surfaces immediately: **Target**, **Proxy**, **Intruder**,
-**Repeater**, **Decoder**, and **Comparer**, in that order. **Proxy > HTTP
-history** is the default landing view because it is the live capture surface;
-**Proxy > WebSockets history** sits beside it for complete message-level
-WebSocket traffic.
+**Repeater**, **Sequencer**, **Decoder**, and **Comparer**, in that order.
+**Proxy > HTTP history** is the default landing view because it is the live
+capture surface; **Proxy > WebSockets history** sits beside it for complete
+message-level WebSocket traffic.
 
 The visual language is a warm, low-contrast light theme: near-white surfaces,
 pale orange selection states, and a burnt-orange accent. The palette lives in
 one theme module so future views stay consistent. HiDPI text and controls are
 first-class requirements, not an afterthought.
 
-Planned tools such as Sequencer are not presented as working controls before
-their engines exist. **Comparer** is a real two-item diff workspace: one shared
-item collection, word/byte comparison, and paired Text/Hex result panes.
+Tools are not presented as working controls before their engines exist.
+**Sequencer** is a real token-randomness workspace: manual and live sampling,
+regex capture from HTTP history, character- and bit-level tests, and an
+effective-entropy result window with per-analysis settings. **Comparer** is a
+real two-item diff workspace: one shared item collection, word/byte comparison,
+and paired Text/Hex result panes.
 **Intruder** is a real fuzzing workspace:
 an editable raw request with `$$` position highlighting, Add/Clear/Auto marker
 actions, one payload set per relevant position, all four Burp attack types, a

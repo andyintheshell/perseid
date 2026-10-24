@@ -27,6 +27,7 @@ use super::intercept::InterceptEntry;
 use super::intruder::IntruderState;
 use super::repeater::RepeaterTab;
 use super::search::SearchState;
+use super::sequencer::SequencerState;
 use super::*;
 use crate::history::History;
 use crate::websocket_history::WebSocketHistory;
@@ -61,6 +62,8 @@ const SCENE_FILES: &[&str] = &[
     "perseid-decoder.png",
     "perseid-comparer.png",
     "perseid-comparer-result.png",
+    "perseid-sequencer.png",
+    "perseid-sequencer-result.png",
     "perseid-proxy-websockets.png",
     "perseid-search.png",
 ];
@@ -314,6 +317,7 @@ impl PerseidApp {
         self.intruder = IntruderState::new();
         self.decoder = DecoderState::new();
         self.comparer = ComparerState::new();
+        self.sequencer = SequencerState::new();
         self.search = SearchState::default();
         self.project.reset_for_screenshot();
 
@@ -423,15 +427,26 @@ impl PerseidApp {
                 self.comparer.seed_screenshot();
                 self.comparer.open_screenshot_result();
             }
-            // Proxy > WebSockets history with a JSON message selected.
+            // Sequencer > Manual load with a seeded token sample.
             13 => {
+                self.main_tab = MainTab::Sequencer;
+                self.sequencer.seed_screenshot();
+            }
+            // Sequencer result window for the same sample.
+            14 => {
+                self.main_tab = MainTab::Sequencer;
+                self.sequencer.seed_screenshot();
+                self.sequencer.open_screenshot_result();
+            }
+            // Proxy > WebSockets history with a JSON message selected.
+            15 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::WebSocketsHistory;
                 self.websocket_selected = Some(23);
                 self.websocket_view = MessageView::Pretty;
             }
             // Search with a decoded response body selected.
-            14 => {
+            16 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::HttpHistory;
                 self.selected = Some(2);

@@ -17,16 +17,18 @@ impl PerseidApp {
             self.search.focus_or_open();
         }
 
-        let (target, proxy, intruder, repeater, decoder, comparer) = ctx.input_mut(|input| {
-            (
-                input.consume_shortcut(&TAB_TARGET_SHORTCUT),
-                input.consume_shortcut(&TAB_PROXY_SHORTCUT),
-                input.consume_shortcut(&TAB_INTRUDER_SHORTCUT),
-                input.consume_shortcut(&TAB_REPEATER_SHORTCUT),
-                input.consume_shortcut(&TAB_DECODER_SHORTCUT),
-                input.consume_shortcut(&TAB_COMPARER_SHORTCUT),
-            )
-        });
+        let (target, proxy, intruder, repeater, sequencer, decoder, comparer) =
+            ctx.input_mut(|input| {
+                (
+                    input.consume_shortcut(&TAB_TARGET_SHORTCUT),
+                    input.consume_shortcut(&TAB_PROXY_SHORTCUT),
+                    input.consume_shortcut(&TAB_INTRUDER_SHORTCUT),
+                    input.consume_shortcut(&TAB_REPEATER_SHORTCUT),
+                    input.consume_shortcut(&TAB_SEQUENCER_SHORTCUT),
+                    input.consume_shortcut(&TAB_DECODER_SHORTCUT),
+                    input.consume_shortcut(&TAB_COMPARER_SHORTCUT),
+                )
+            });
         if target {
             self.main_tab = MainTab::Target;
         }
@@ -38,6 +40,9 @@ impl PerseidApp {
         }
         if repeater {
             self.main_tab = MainTab::Repeater;
+        }
+        if sequencer {
+            self.main_tab = MainTab::Sequencer;
         }
         if decoder {
             self.main_tab = MainTab::Decoder;

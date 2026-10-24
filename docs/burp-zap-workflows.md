@@ -99,7 +99,7 @@ The edition table below makes that distinction explicit before the rankings.
 | WebSocket testing | Proxy/history and Repeater | WebSocket add-on | Both support it; it matters most on real-time applications. |
 | Encoder/decoder | Decoder | Encode/Decode/Hash dialog | Common utility in both. |
 | Comparison | Comparer | Diff add-on | Common but situational in both. |
-| Token analysis | Sequencer | Token Generation and Analysis add-on | Niche in both. |
+| Token analysis | Sequencer | Token Generation and Analysis add-on | Niche in both; Perseid has bounded manual/live sampling and statistical analysis. |
 | Extensions/scripts | BApps | Marketplace and scripts | Power-user workflow; ZAP's is free and more automation-oriented. |
 | API/daemon/CI | Desktop-first; automation is not a first-class CE workflow | Automation Framework, Docker, GitHub Actions, API/daemon | ZAP is the stronger fit for engineers running repeatable scans in CI. |
 
@@ -198,7 +198,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | WebSocket testing | 10 | 11 | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. Saved projects retain messages, but the UI loads a bounded snapshot. No interception, editing, replay, or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | 11 | 8 | **Partial**: saved projects retain captured exchanges and supported workspace inputs; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
 | Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: temporary projects are RAM-only and currently lack an aggregate capture-retention cap; saved projects use a local redb `.perseid` file with automatic writes and no disk-retention cap. No encryption or migrations. Search is limited to loaded HTTP history; older stored rows are not pageable/searchable yet. | **M3 — in progress** |
-| Sequencer / token analysis | 12 | 13 | **Missing**: no token sampling or randomness analysis. | **P1 — M4** |
+| Sequencer / token analysis | 12 | 13 | **Partial**: manual and live regex token sampling; character- and bit-level randomness tests; effective-entropy chart and per-analysis settings. No parameter-aware capture; statistics are bounded approximations. | Maintain |
 | Extensions, scripts, and automation/API | 13 | 10 and 14 | **Missing**: no extension point, scripting layer, or automation API. Native extensions are post-parity. | **Post-parity** |
 
 Perseid's current support is documented in the
@@ -247,18 +247,21 @@ full session-handling rules, but it removes a blocker that otherwise appears
 immediately on real engagements. It should be pulled into M3 or early M4 rather
 than left implicit.
 
-### 3. Keep M4's order: protocol breadth, then Sequencer
+### 3. Finish M4's protocol work
 
-Intruder-style fuzzing, the highest-value M4 item, has landed early: it covers
-all four Burp attack types, editable payload sets, and bounded concurrency.
-That leaves:
+Intruder-style fuzzing and Sequencer, the two testing-tool gaps, have landed:
+Intruder covers all four Burp attack types, editable payload sets, and bounded
+concurrency; Sequencer covers manual and live regex sampling, character- and
+bit-level tests, effective-entropy results, and per-analysis settings. That
+leaves:
 
 1. **WebSocket message interception and replay** next. Capture/history for
    plain `ws://` and decrypted `wss://` has landed; editing and resending are the
    remaining parts of the same target-dependent workflow.
-2. **Sequencer** is the lowest-frequency M4 item in both rankings. It is still
-   part of CE parity, but it should not delay WebSocket replay, session handling,
-   or Intruder refinements such as payload processing.
+2. **Session handling and Intruder refinements** such as payload processing
+   should follow rather than being displaced by further Sequencer work. Its
+   lowest-frequency ranking still makes it a maintain-and-refine tool, not a
+   reason to delay the remaining protocol work.
 
 ### 4. Treat evidence export as a cheap early win, not a reporting suite
 

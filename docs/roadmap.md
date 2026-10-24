@@ -8,14 +8,15 @@ toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
 **Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
-milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Decoder,
-Comparer, WebSocket capture/history, and the first local project-persistence
-workflow are available. The remaining M3 work is paging/search over all saved
-history, project workflow polish, and project-wide retention controls. The
-temporary in-memory project currently has no aggregate capture-retention cap,
-and saved files have no automatic disk cap. HTTP/2, WebSocket history, and
-Intruder arrived ahead of the protocol milestone. This is a sequence of
-capabilities, not a schedule or release promise.
+milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
+Decoder, Comparer, WebSocket capture/history, and the first local
+project-persistence workflow are available. The remaining M3 work is
+paging/search over all saved history, project workflow polish, and project-wide
+retention controls. The temporary in-memory project currently has no aggregate
+capture-retention cap, and saved files have no automatic disk cap. HTTP/2,
+WebSocket history, Intruder, and Sequencer arrived ahead of the protocol
+milestone. This is a sequence of capabilities, not a schedule or release
+promise.
 
 ## Milestones
 
@@ -75,15 +76,17 @@ capabilities, not a schedule or release promise.
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
   and user-controlled concurrency.
 
-  *Status: HTTP/2, WebSocket capture/history, and Intruder-style fuzzing landed
-  ahead of this milestone. WebSockets support plain `ws://`, decrypted `wss://`,
-  complete text/binary message reassembly, masking removal, a bounded UI history
-  snapshot, and Pretty/Raw/Hex inspection. WebSocket message interception,
-  editing, and replay remain. Intruder supports `$$` positions, editable payload sets, Sniper/
-  Battering ram/Pitchfork/Cluster bomb attacks, up to 32 concurrent requests,
-  live result inspection, and enforced-scope checks for every generated request.
-  Payload processing rules and saved attacks remain. Sequencer is still
-  missing.*
+  *Status: HTTP/2, WebSocket capture/history, Intruder-style fuzzing, and
+  Sequencer landed ahead of this milestone. WebSockets support plain `ws://`,
+  decrypted `wss://`, complete text/binary message reassembly, masking removal,
+  a bounded UI history snapshot, and Pretty/Raw/Hex inspection. WebSocket
+  message interception, editing, and replay remain. Intruder supports `$$`
+  positions, editable payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb
+  attacks, up to 32 concurrent requests, live result inspection, and
+  enforced-scope checks for every generated request. Payload processing rules
+  and saved attacks remain. Sequencer supports manual and live regex sampling,
+  character- and bit-level tests, effective-entropy results, and per-analysis
+  settings, with bounded in-memory samples.*
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a

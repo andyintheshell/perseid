@@ -26,6 +26,8 @@ FULL_WINDOW_SCENES = [
     "perseid-proxy-tls.png",
     "perseid-intruder.png",
     "perseid-repeater.png",
+    "perseid-sequencer.png",
+    "perseid-sequencer-result.png",
     "perseid-decoder.png",
     "perseid-comparer.png",
     "perseid-comparer-result.png",
