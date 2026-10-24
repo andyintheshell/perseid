@@ -25,6 +25,7 @@ impl PerseidApp {
 
         let mut selected_changed = false;
         let mut received_intercept = false;
+        let mut intercept_items = Vec::new();
         let mut queue_drained = false;
         let stopped;
         {
@@ -91,7 +92,7 @@ impl PerseidApp {
                 let Some(item) = proxy.try_recv_intercept() else {
                     break;
                 };
-                self.intercept_queue.push_back(InterceptEntry::new(item));
+                intercept_items.push(item);
                 received_intercept = true;
             }
             // Drain what the proxy queued before declaring it stopped, then
@@ -111,6 +112,10 @@ impl PerseidApp {
             }
             selected_changed = true;
             self.clear_intercept_queue();
+        } else {
+            for item in intercept_items {
+                self.receive_intercept_item(item);
+            }
         }
         if selected_changed {
             self.detail = None;
@@ -130,7 +135,7 @@ impl PerseidApp {
             self.websocket_selected = None;
             self.websocket_detail = None;
         }
-        if received_intercept {
+        if received_intercept && !self.intercept_queue.is_empty() {
             self.intercept_scroll_to_active = true;
         }
         if received_intercept || !self.intercept_queue.is_empty() {

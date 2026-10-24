@@ -705,15 +705,10 @@ async fn paused_capture_ignores_new_exchanges_until_resumed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_connections_above_the_limit() {
-    let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin_addr = origin.local_addr().unwrap();
-    // Hold the origin connection open until the test releases it, so the
-    // first exchange cannot finish and free the permit early.
-    let (release_tx, release_rx) = oneshot::channel();
-    let origin_task = tokio::spawn(async move {
-        let (_stream, _) = origin.accept().await.unwrap();
-        let _ = release_rx.await;
-    });
+    // Keep the first downstream TCP connection open after its exchange
+    // completes; the connection permit is held for that socket's lifetime.
+    let (origin_addr, origin_request) =
+        spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
 
     let proxy = Proxy::start(ProxyConfig {
         listen: "127.0.0.1:0".parse().expect("valid test address"),
@@ -730,6 +725,22 @@ async fn rejects_connections_above_the_limit() {
         .recv_timeout(TIMEOUT)
         .expect("first request should start");
     assert!(matches!(first_event, ProxyEvent::Started { .. }));
+    let captured_request = tokio::time::timeout(TIMEOUT, origin_request)
+        .await
+        .expect("first request should reach the origin")
+        .expect("the origin should capture the first request");
+    assert!(String::from_utf8_lossy(&captured_request).contains("/hold"));
+    assert!(
+        read_http_head(&mut first)
+            .await
+            .starts_with("HTTP/1.1 200 OK")
+    );
+    let mut body = [0; 2];
+    tokio::time::timeout(TIMEOUT, first.read_exact(&mut body))
+        .await
+        .expect("the first response body should arrive")
+        .expect("the first response body should be readable");
+    assert_eq!(&body, b"ok");
 
     let mut second = TcpStream::connect(proxy.local_addr()).await.unwrap();
     second
@@ -747,8 +758,6 @@ async fn rejects_connections_above_the_limit() {
     assert_eq!(proxy.rejected_connections(), 1);
 
     drop(first);
-    let _ = release_tx.send(());
-    origin_task.await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

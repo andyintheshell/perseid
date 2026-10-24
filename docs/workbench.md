@@ -322,10 +322,12 @@ their body bytes pass through unchanged. HTTP/2 requests use an origin-form
 request line and a synthetic `Host` header for `:authority`; HTTP/2 responses
 have no reason phrase.
 
-Forwarding applies match/replace rules and rechecks scope. Dropped exchanges
-remain in history without a response status. Turning interception off **does
-not release already held messages**: forward or drop them explicitly. Closing
-the app aborts unresolved exchanges.
+Turning interception off attempts to forward every held request and response
+in table order, including edits in each message's draft, matching Burp's
+behavior. A message with an invalid edited head remains held with an error; fix
+the draft and use **Forward**, or use **Drop**. Forwarding applies match/replace
+rules and rechecks scope. Dropped exchanges remain in history without a
+response status. Closing the app aborts unresolved exchanges.
 
 The interception editor works on the held body bytes, not a decompressed copy.
 Do not assume a compressed or binary body is safely editable just because its
