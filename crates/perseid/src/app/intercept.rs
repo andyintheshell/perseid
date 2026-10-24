@@ -284,7 +284,7 @@ impl PerseidApp {
                     if ui
                         .add(toggle)
                         .on_hover_text(if on {
-                            "Turn interception off and forward all held messages, including draft edits."
+                            "Turn off to forward held messages; invalid draft heads stay held with an error."
                         } else {
                             "Hold HTTP requests, and responses when enabled, before they are forwarded."
                         })
@@ -920,6 +920,33 @@ mod tests {
         app.set_intercept_enabled(false);
 
         assert!(app.intercept_queue.is_empty());
+    }
+
+    #[test]
+    fn turning_interception_off_keeps_invalid_drafts_held_for_correction() {
+        let mut app = PerseidApp::test_app();
+        app.intercept_enabled = true;
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let item = InterceptItem::new_request(
+            1,
+            request_info(),
+            "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+        let mut entry = InterceptEntry::new(item);
+        entry.draft.head = "not a valid request head".to_string();
+        app.intercept_queue.push_back(entry);
+
+        app.set_intercept_enabled(false);
+
+        assert_eq!(app.intercept_queue.len(), 1);
+        assert!(app.intercept_queue[0].draft.error.is_some());
+        assert!(
+            rx.try_recv().is_err(),
+            "invalid draft must not be forwarded"
+        );
     }
 
     #[test]
