@@ -161,6 +161,18 @@ impl InterceptDraft {
 }
 
 impl PerseidApp {
+    /// Change the master interception policy. Disable the live proxy policy
+    /// before forwarding held messages so traffic arriving during the drain is
+    /// no longer intercepted.
+    fn set_intercept_enabled(&mut self, enabled: bool) {
+        let was_enabled = self.intercept_enabled;
+        self.intercept_enabled = enabled;
+        self.apply_proxy_settings();
+        if was_enabled && !enabled {
+            self.decide_intercept(true, true);
+        }
+    }
+
     /// Drop all held messages and their selection state, e.g. when the proxy
     /// is restarted or stops. Dropping an [`InterceptItem`] aborts its
     /// exchange, which is the intended behavior for a stopped proxy.
@@ -170,6 +182,16 @@ impl PerseidApp {
         self.intercept_active = None;
         self.intercept_anchor = None;
         self.intercept_scroll_to_active = false;
+    }
+
+    /// Add a message delivered by the proxy. A message can arrive here after
+    /// interception was disabled if it was already in flight at the policy
+    /// change, so release it immediately rather than leaving it held unseen.
+    pub(super) fn receive_intercept_item(&mut self, item: InterceptItem) {
+        self.intercept_queue.push_back(InterceptEntry::new(item));
+        if !self.intercept_enabled {
+            self.decide_intercept(true, true);
+        }
     }
 
     /// Reconcile selection with the messages that are still waiting.
@@ -213,6 +235,7 @@ impl PerseidApp {
             self.sync_intercept_selection();
         }
         let mut settings_changed = false;
+        let mut interception_enabled_change = None;
         let mut forward_selected = false;
         let mut drop_selected = false;
         let mut forward_all = false;
@@ -261,14 +284,13 @@ impl PerseidApp {
                     if ui
                         .add(toggle)
                         .on_hover_text(if on {
-                            "Turn interception off. Already held messages still need Forward or Drop."
+                            "Turn interception off and forward all held messages, including draft edits."
                         } else {
                             "Hold HTTP requests, and responses when enabled, before they are forwarded."
                         })
                         .clicked()
                     {
-                        self.intercept_enabled = !self.intercept_enabled;
-                        settings_changed = true;
+                        interception_enabled_change = Some(!self.intercept_enabled);
                     }
 
                     let mut responses = self.intercept_responses;
@@ -379,7 +401,9 @@ impl PerseidApp {
             self.sync_intercept_selection();
         }
 
-        if settings_changed {
+        if let Some(enabled) = interception_enabled_change {
+            self.set_intercept_enabled(enabled);
+        } else if settings_changed {
             self.apply_proxy_settings();
         }
     }
@@ -584,7 +608,7 @@ impl PerseidApp {
 
     /// Forward or drop the current selection, or every held message when
     /// `all` is set. Messages are processed in table order.
-    fn decide_intercept(&mut self, forward: bool, all: bool) {
+    pub(super) fn decide_intercept(&mut self, forward: bool, all: bool) {
         let targets: BTreeSet<InterceptKey> = if all {
             self.intercept_queue
                 .iter()
@@ -783,6 +807,19 @@ fn status_color(status: u16) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::RequestInfo;
+
+    fn request_info() -> RequestInfo {
+        RequestInfo {
+            method: "POST".to_string(),
+            uri: "http://example.com/".to_string(),
+            scheme: "http".to_string(),
+            host: "example.com".to_string(),
+            path: "/".to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: Vec::new(),
+        }
+    }
 
     fn draft_with_raw(raw: &str) -> InterceptDraft {
         let head = "POST /items HTTP/1.1\nHost: example.com\n\n";
@@ -799,6 +836,110 @@ mod tests {
             pretty_dirty: false,
             error: Some("stale error".to_string()),
         }
+    }
+
+    #[test]
+    fn turning_interception_off_forwards_held_requests_and_responses_with_drafts() {
+        let mut app = PerseidApp::test_app();
+        app.intercept_enabled = true;
+        app.intercept_responses = true;
+
+        let (request_tx, mut request_rx) = tokio::sync::oneshot::channel();
+        let request = InterceptItem::new_request(
+            1,
+            request_info(),
+            "POST /original HTTP/1.1\r\nHost: example.com\r\nContent-Length: 3\r\n\r\n".to_string(),
+            Some(b"old".to_vec()),
+            request_tx,
+        );
+        let mut request = InterceptEntry::new(request);
+        request.draft.head =
+            "POST /edited HTTP/1.1\r\nHost: example.com\r\nContent-Length: 6\r\n\r\n".to_string();
+        request.draft.body = "edited".to_string();
+        app.intercept_queue.push_back(request);
+
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        let response = InterceptItem::new_response(
+            2,
+            request_info(),
+            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n".to_string(),
+            Some(b"old".to_vec()),
+            response_tx,
+        );
+        let mut response = InterceptEntry::new(response);
+        response.draft.head = "HTTP/1.1 201 Created\r\nContent-Length: 6\r\n\r\n".to_string();
+        response.draft.body = "edited".to_string();
+        app.intercept_queue.push_back(response);
+
+        app.set_intercept_enabled(false);
+
+        assert!(!app.intercept_enabled);
+        assert!(!app.proxy_settings().intercept_requests);
+        assert!(!app.proxy_settings().intercept_responses);
+        assert!(app.intercept_queue.is_empty());
+
+        let request_decision = format!("{:?}", request_rx.try_recv().unwrap());
+        assert!(request_decision.contains("Forward {"));
+        assert!(request_decision.contains("POST /edited HTTP/1.1"));
+        assert!(request_decision.contains("body: Some([101, 100, 105, 116, 101, 100])"));
+
+        let response_decision = format!("{:?}", response_rx.try_recv().unwrap());
+        assert!(response_decision.contains("Forward {"));
+        assert!(response_decision.contains("HTTP/1.1 201 Created"));
+        assert!(response_decision.contains("body: Some([101, 100, 105, 116, 101, 100])"));
+    }
+
+    #[test]
+    fn turning_interception_off_removes_closed_and_already_resolved_items() {
+        let mut app = PerseidApp::test_app();
+        app.intercept_enabled = true;
+
+        let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+        drop(closed_rx);
+        app.intercept_queue
+            .push_back(InterceptEntry::new(InterceptItem::new_request(
+                1,
+                request_info(),
+                "GET /closed HTTP/1.1\r\nHost: example.com\r\n\r\n".to_string(),
+                None,
+                closed_tx,
+            )));
+
+        let (resolved_tx, mut resolved_rx) = tokio::sync::oneshot::channel();
+        let mut resolved = InterceptItem::new_response(
+            2,
+            request_info(),
+            "HTTP/1.1 200 OK\r\n\r\n".to_string(),
+            None,
+            resolved_tx,
+        );
+        resolved.forward("HTTP/1.1 200 OK\r\n\r\n", None).unwrap();
+        let _ = resolved_rx.try_recv().unwrap();
+        app.intercept_queue.push_back(InterceptEntry::new(resolved));
+
+        app.set_intercept_enabled(false);
+
+        assert!(app.intercept_queue.is_empty());
+    }
+
+    #[test]
+    fn messages_arriving_after_interception_is_off_are_forwarded_immediately() {
+        let mut app = PerseidApp::test_app();
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let item = InterceptItem::new_request(
+            1,
+            request_info(),
+            "GET /late HTTP/1.1\r\nHost: example.com\r\n\r\n".to_string(),
+            None,
+            tx,
+        );
+
+        app.receive_intercept_item(item);
+
+        assert!(app.intercept_queue.is_empty());
+        let decision = format!("{:?}", rx.try_recv().unwrap());
+        assert!(decision.contains("Forward {"));
+        assert!(decision.contains("GET /late HTTP/1.1"));
     }
 
     #[test]
