@@ -10,8 +10,8 @@
 //!
 //! This module holds the application state and the eframe shell. The tabs,
 //! shared top-level panels, and supporting pieces are split by area:
-//! [`chrome`], [`comparer`], [`decoder`], [`events`], [`input`], [`inspector`],
-//! [`intercept`], [`intruder`], [`listing`], [`project_ui`], [`proxy`],
+//! [`chrome`], [`comparer`], [`curl`], [`decoder`], [`events`], [`input`],
+//! [`inspector`], [`intercept`], [`intruder`], [`listing`], [`project_ui`], [`proxy`],
 //! [`proxy_control`], [`repeater`], [`rules`], [`search`], [`selection`],
 //! [`sequencer`], [`target`], [`tls`], [`windows`], [`widgets`],
 //! [`message_view`], [`util`], [`scale`], and the feature-gated
@@ -19,6 +19,7 @@
 
 mod chrome;
 mod comparer;
+mod curl;
 mod decoder;
 mod events;
 mod input;

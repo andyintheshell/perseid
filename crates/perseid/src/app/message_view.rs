@@ -124,7 +124,37 @@ pub(super) fn message_text_labeled(
     copy_label: &str,
 ) {
     let mut readonly = text;
-    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label, None);
+    let _ = message_frame(
+        ui,
+        id,
+        pane,
+        mode,
+        &mut readonly,
+        MessageContext::new(copy_label),
+    );
+}
+
+/// Render a captured HTTP request pane with the Copy as curl context action.
+pub(super) fn request_message_text_with_curl(
+    ui: &mut egui::Ui,
+    id: u64,
+    mode: MessageView,
+    item: &HistoryItem,
+    text: &str,
+) {
+    let mut readonly = text;
+    let _ = message_frame(
+        ui,
+        id,
+        MessagePane::Request,
+        mode,
+        &mut readonly,
+        MessageContext {
+            copy_label: "Copy request",
+            matches: None,
+            curl_item: Some(item),
+        },
+    );
 }
 
 /// Render read-only message text with search-match backgrounds.
@@ -141,7 +171,18 @@ pub(super) fn message_text_with_matches(
         MessagePane::Response => "Copy response",
     };
     let mut readonly = text;
-    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label, Some(matches));
+    let _ = message_frame(
+        ui,
+        id,
+        pane,
+        mode,
+        &mut readonly,
+        MessageContext {
+            copy_label,
+            matches: Some(matches),
+            curl_item: None,
+        },
+    );
 }
 
 /// Render the shared message frame with an editable text buffer.
@@ -159,7 +200,23 @@ pub(super) fn message_editor(
         MessagePane::Request => "Copy request",
         MessagePane::Response => "Copy response",
     };
-    message_frame(ui, id, pane, mode, text, copy_label, None)
+    message_frame(ui, id, pane, mode, text, MessageContext::new(copy_label))
+}
+
+struct MessageContext<'a> {
+    copy_label: &'a str,
+    matches: Option<&'a [Range<usize>]>,
+    curl_item: Option<&'a HistoryItem>,
+}
+
+impl<'a> MessageContext<'a> {
+    fn new(copy_label: &'a str) -> Self {
+        Self {
+            copy_label,
+            matches: None,
+            curl_item: None,
+        }
+    }
 }
 
 fn message_frame(
@@ -168,8 +225,7 @@ fn message_frame(
     pane: MessagePane,
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
-    copy_label: &str,
-    matches: Option<&[Range<usize>]>,
+    context: MessageContext<'_>,
 ) -> bool {
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
@@ -190,7 +246,7 @@ fn message_frame(
                 // proportional to the visible page rather than the whole dump.
                 message_hex(ui, id, pane, mode, text.as_str());
             } else {
-                let output = message_numbered(ui, id, pane, mode, text, matches);
+                let output = message_numbered(ui, id, pane, mode, text, context.matches);
                 selection = output.selection;
                 changed = output.changed;
             }
@@ -230,9 +286,12 @@ fn message_frame(
             ui.ctx().copy_text(selected.to_owned());
             ui.close();
         }
-        if ui.button(copy_label).clicked() {
+        if ui.button(context.copy_label).clicked() {
             ui.ctx().copy_text(text.as_str().to_owned());
             ui.close();
+        }
+        if let Some(item) = context.curl_item {
+            super::curl::context_menu(ui, item);
         }
     });
     changed
@@ -560,6 +619,27 @@ mod tests {
         })
     }
 
+    fn run_curl_request_frame(
+        ctx: &Context,
+        events: Vec<Event>,
+        item: &HistoryItem,
+    ) -> egui::FullOutput {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| {
+            request_message_text_with_curl(
+                ui,
+                item.id,
+                MessageView::Raw,
+                item,
+                "GET /path?q=1 HTTP/1.1\r\n\r\n",
+            );
+        })
+    }
+
     fn run_message_frame(
         ctx: &Context,
         events: Vec<Event>,
@@ -753,6 +833,50 @@ mod tests {
         assert!(
             ctx.any_popup_open(),
             "right-clicking the message should open its context menu"
+        );
+    }
+
+    #[test]
+    fn request_detail_context_menu_offers_copy_as_curl() {
+        use std::time::{Duration, SystemTime};
+
+        use crate::history::Phase;
+        use crate::proxy::{CapturedBody, ExchangeResult, RequestInfo};
+
+        let item = HistoryItem {
+            id: 1,
+            number: 1,
+            timestamp: SystemTime::now(),
+            request: RequestInfo {
+                method: "GET".into(),
+                uri: "/path?q=1".into(),
+                scheme: "http".into(),
+                host: "example.test".into(),
+                path: "/path?q=1".into(),
+                version: "HTTP/1.1".into(),
+                headers: Vec::new(),
+            },
+            request_body: CapturedBody::from_bytes(Vec::new()),
+            response: None,
+            phase: Phase::Finished {
+                duration: Duration::ZERO,
+                result: ExchangeResult::Dropped,
+            },
+        };
+        let ctx = Context::default();
+        let right_click = egui::pos2(40.0, 10.0);
+
+        run_curl_request_frame(&ctx, vec![], &item).drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![Event::PointerMoved(right_click)], &item)
+            .drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![secondary_button(right_click, true)], &item)
+            .drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![secondary_button(right_click, false)], &item)
+            .drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![], &item).drop_without_applying_deltas();
+        assert!(
+            ctx.any_popup_open(),
+            "right-clicking a captured request should open the menu with Copy as curl"
         );
     }
 

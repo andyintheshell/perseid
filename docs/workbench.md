@@ -117,6 +117,45 @@ is a quick way to verify the path without a browser or CA trust.
   rejected connections, and UI-cache evictions. A dropped-event warning means
   the history may be incomplete even if the client received its response.
 
+### Copy as curl
+
+Right-click an HTTP history row or the request detail pane and choose **Copy as
+curl**. Perseid copies a POSIX-shell command to the clipboard; it does not run the
+request. The command includes the captured method, target URL, headers, and
+explicit HTTP-version option (`--http1.0`, `--http1.1`, or `--http2` where
+applicable). It does **not** add a proxy by default. To send it through Perseid,
+add `--proxy 'http://127.0.0.1:8080'` yourself and ensure curl trusts the CA for
+HTTPS interception.
+
+Non-empty bodies are base64-encoded in the command and decoded by Python 3 into
+curl's standard input, preserving binary and non-UTF-8 bytes. Bodyless requests
+do not use the decoder. The action is disabled until capture finishes and for a
+truncated body, because either case could produce a command that does not
+represent the captured request. When a body is present, the command omits
+captured `Content-Length` and `Transfer-Encoding` framing headers so curl can
+frame the copied bytes; it prevents curl from adding a default content type when
+none was captured.
+
+Review the command before running or sharing it: copied headers may contain
+cookies, bearer tokens, or other credentials, and a command pasted into a shell
+may be retained in that shell's history.
+
+For example, a captured HTTP/2 upload could be copied as:
+
+```sh
+python3 -c 'import base64,sys;sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read()))' <<'PERSEID_CURL_BODY' | curl \
+  --request 'POST' \
+  --url 'https://example.test/api/upload' \
+  --http2 \
+  --header 'content-type: application/octet-stream' \
+  --data-binary '@-'
+AQID
+PERSEID_CURL_BODY
+```
+
+The heredoc contains base64 for the captured bytes; shell quoting protects
+apostrophes and newlines in methods, URLs, and header values.
+
 ### WebSockets history
 
 **Proxy > WebSockets history** is a separate, message-level history. Plain
