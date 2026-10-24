@@ -33,9 +33,13 @@ fn timestamp(offset_ms: u64) -> SystemTime {
 }
 
 fn started(wire_id: u64, method: &str) -> ProxyEvent {
+    started_at(wire_id, wire_id, method)
+}
+
+fn started_at(wire_id: u64, offset_ms: u64, method: &str) -> ProxyEvent {
     ProxyEvent::Started {
         id: wire_id,
-        timestamp: timestamp(wire_id),
+        timestamp: timestamp(offset_ms),
         request: RequestInfo {
             method: method.to_string(),
             uri: "http://example.com/api?x=1".to_string(),
@@ -61,22 +65,39 @@ fn response_head(wire_id: u64, status: u16) -> ProxyEvent {
 }
 
 fn finished(wire_id: u64, request: &[u8], response: &[u8]) -> ProxyEvent {
+    finished_with(
+        wire_id,
+        CapturedBody::from_bytes(request.to_vec()),
+        ExchangeResult::Response {
+            body: CapturedBody::from_bytes(response.to_vec()),
+        },
+    )
+}
+
+fn finished_with(wire_id: u64, request_body: CapturedBody, result: ExchangeResult) -> ProxyEvent {
     ProxyEvent::Finished {
         id: wire_id,
         end: ExchangeEnd {
             duration: Duration::from_millis(7),
-            request_body: CapturedBody::from_bytes(request.to_vec()),
-            result: ExchangeResult::Response {
-                body: CapturedBody::from_bytes(response.to_vec()),
-            },
+            request_body,
+            result,
         },
     }
 }
 
 fn ws_message(wire_id: u64, wire_connection_id: u64, payload: &[u8]) -> ProxyEvent {
+    ws_message_at(wire_id, wire_id, wire_connection_id, payload)
+}
+
+fn ws_message_at(
+    wire_id: u64,
+    offset_ms: u64,
+    wire_connection_id: u64,
+    payload: &[u8],
+) -> ProxyEvent {
     ProxyEvent::WebSocketMessage {
         id: wire_id,
-        timestamp: timestamp(wire_id),
+        timestamp: timestamp(offset_ms),
         connection: WebSocketConnectionInfo {
             id: wire_connection_id,
             url: "wss://example.com/socket".to_string(),
@@ -103,6 +124,27 @@ fn capture_all(project: &ProjectHandle, events: &[ProxyEvent]) -> Vec<u64> {
         .filter_map(|event| project.capture(event).event)
         .map(|event| event.id())
         .collect()
+}
+
+/// A raw in-memory project for tests that drive the writer's batch application
+/// directly, bypassing the service's ID normalization.
+fn batch_project() -> (redb::Database, ProjectMeta) {
+    let meta = ProjectMeta::new(new_project_id());
+    let db = super::super::backend::create_memory(&meta).expect("memory project");
+    (db, meta)
+}
+
+fn apply_batch(db: &redb::Database, meta: &mut ProjectMeta, events: &[ProxyEvent]) -> Result<()> {
+    super::persistence::apply_capture_batch(db, meta, None, events)
+}
+
+fn insert_stale_ws_payload(db: &redb::Database, id: u64, payload: &[u8]) {
+    let tx = db.begin_write().expect("begin write");
+    tx.open_table(schema::WS_PAYLOADS)
+        .expect("payloads")
+        .insert(id, payload)
+        .expect("stale payload");
+    tx.commit().expect("commit");
 }
 
 #[test]
@@ -891,5 +933,387 @@ fn open_surfaces_corrupt_workspace_state_and_preserves_the_current_project() {
             .get_http(kept)
             .expect("read current HTTP record")
             .is_some()
+    );
+}
+
+#[test]
+fn persistent_writers_start_without_temporary_retention() {
+    let meta = ProjectMeta::new(new_project_id());
+    let db = super::super::backend::create_memory(&meta).expect("memory project");
+    let path = PathBuf::from("/tmp/persistent-writer.perseid");
+    let project = ProjectHandle::from_database(
+        db,
+        ProjectMode::Persistent { path: path.clone() },
+        RetentionLimits::new(1, 0),
+    )
+    .expect("persistent writer");
+
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"", b"one"),
+            started(2, "GET"),
+            finished(2, b"", b"two"),
+        ],
+    );
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.mode, ProjectMode::Persistent { path });
+    assert_eq!(
+        status.http_count, 2,
+        "a persistent writer never applies the temporary retention limits"
+    );
+    assert!(project.get_http(ids[0]).expect("read oldest").is_some());
+}
+
+#[test]
+fn capture_batch_ignores_duplicates_and_counts_unmatched_events() {
+    let (db, mut meta) = batch_project();
+    apply_batch(
+        &db,
+        &mut meta,
+        &[
+            started(1, "GET"),
+            started(1, "GET"),       // a replayed Started must not add a second row
+            response_head(999, 200), // no stored exchange: counted as an event loss
+            finished(999, b"", b""), // no stored exchange: counted as an event loss
+            ws_message(2, 7, b"payload"),
+            ws_message(2, 7, b"payload"), // a replayed message must not be stored twice
+        ],
+    )
+    .expect("apply batch");
+
+    assert_eq!(meta.http_count, 1);
+    assert_eq!(meta.ws_count, 1);
+    assert_eq!(meta.event_loss_count, 2);
+    assert_eq!(meta.http_body_bytes, 0);
+    assert_eq!(meta.ws_body_bytes, b"payload".len() as u64);
+
+    let read = db.begin_read().expect("begin read");
+    let http = read.open_table(schema::HTTP_EXCHANGES).expect("exchanges");
+    assert!(http.get(1u64).expect("read exchange").is_some());
+    let ws = read.open_table(schema::WS_MESSAGES).expect("messages");
+    assert!(ws.get(2u64).expect("read message").is_some());
+}
+
+#[test]
+fn capture_batch_replaces_response_heads_and_accounts_for_body_records() {
+    let (db, mut meta) = batch_project();
+    apply_batch(&db, &mut meta, &[started(1, "GET"), response_head(1, 200)]).expect("first batch");
+    apply_batch(&db, &mut meta, &[response_head(1, 201)]).expect("replacement head");
+
+    // A stale body row is replaced without double counting: it was never added
+    // to the retained byte total.
+    {
+        let tx = db.begin_write().expect("begin write");
+        tx.open_table(schema::HTTP_BODIES)
+            .expect("bodies")
+            .insert((1u64, 0u8), b"stale".as_slice())
+            .expect("stale body");
+        tx.commit().expect("commit");
+    }
+
+    apply_batch(&db, &mut meta, &[finished(1, b"one", b"one")]).expect("finished");
+    assert_eq!(meta.http_body_bytes, 6);
+    apply_batch(&db, &mut meta, &[finished(1, b"22", b"22")]).expect("replaced bodies");
+    assert_eq!(meta.http_body_bytes, 4);
+    apply_batch(&db, &mut meta, &[finished(1, b"", b"")]).expect("released bodies");
+    assert_eq!(meta.http_body_bytes, 0);
+
+    let read = db.begin_read().expect("begin read");
+    let statuses = read.open_table(schema::HTTP_BY_STATUS).expect("statuses");
+    assert!(statuses.get((200u16, 1u64)).expect("old status").is_none());
+    assert!(statuses.get((201u16, 1u64)).expect("new status").is_some());
+    let bodies = read.open_table(schema::HTTP_BODIES).expect("bodies");
+    assert!(bodies.get((1u64, 0u8)).expect("request body").is_none());
+    assert!(bodies.get((1u64, 1u8)).expect("response body").is_none());
+}
+
+#[test]
+fn capture_batch_accounts_for_websocket_payloads() {
+    let (db, mut meta) = batch_project();
+    // A payload row without a message is stale; capturing the message replaces
+    // it and only the new payload is counted.
+    insert_stale_ws_payload(&db, 2, b"stale");
+    apply_batch(&db, &mut meta, &[ws_message(2, 7, b"xy")]).expect("first message");
+    assert_eq!(meta.ws_body_bytes, 2);
+
+    // Capturing an empty payload releases the stored payload.
+    insert_stale_ws_payload(&db, 3, b"stale");
+    apply_batch(&db, &mut meta, &[ws_message(3, 7, b"")]).expect("empty payload");
+    assert_eq!(meta.ws_body_bytes, 0);
+
+    let read = db.begin_read().expect("begin read");
+    let payloads = read.open_table(schema::WS_PAYLOADS).expect("payloads");
+    assert_eq!(
+        payloads
+            .get(2u64)
+            .expect("payload 2")
+            .expect("stored payload")
+            .value(),
+        b"xy"
+    );
+    assert!(payloads.get(3u64).expect("payload 3").is_none());
+}
+
+#[test]
+fn finished_outcomes_are_persisted_with_their_terminal_phase() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let cases = [
+        (
+            11u64,
+            ExchangeResult::Failed {
+                error: "boom".to_string(),
+            },
+        ),
+        (12, ExchangeResult::Dropped),
+        (
+            13,
+            ExchangeResult::Tunnel {
+                client_to_server: 3,
+                server_to_client: 4,
+            },
+        ),
+        (14, ExchangeResult::InterceptedTls { requests: 1 }),
+    ];
+
+    let mut ids = Vec::new();
+    for (wire, result) in cases {
+        let id = project
+            .capture(&started(wire, "GET"))
+            .event
+            .expect("normalized start")
+            .id();
+        project.capture(&finished_with(
+            wire,
+            CapturedBody::from_bytes(Vec::new()),
+            result,
+        ));
+        ids.push(id);
+    }
+    wait(project.flush()).expect("flush");
+
+    let failed = project
+        .get_http(ids[0])
+        .expect("read failed exchange")
+        .expect("stored failed exchange");
+    assert_eq!(failed.error(), Some("boom"));
+    assert!(!failed.is_in_flight());
+    for id in &ids[1..] {
+        let item = project
+            .get_http(*id)
+            .expect("read exchange")
+            .expect("stored exchange");
+        assert!(!item.is_in_flight());
+        assert_eq!(item.error(), None);
+        assert_eq!(item.duration(), Some(Duration::from_millis(7)));
+    }
+    let meta = persisted_meta(&project);
+    assert_eq!(meta.http_count, 4);
+    assert_eq!(meta.event_loss_count, 0);
+}
+
+#[test]
+fn zero_retention_limits_disable_eviction() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(0, 0))
+        .expect("unbounded project");
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"body", b"body"),
+            ws_message(2, 7, b"ws"),
+        ],
+    );
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.ws_count, 1);
+    assert_eq!(status.retention_evictions, 0);
+    assert!(project.get_http(ids[0]).expect("read HTTP").is_some());
+    assert!(project.get_ws(ids[2]).expect("read WebSocket").is_some());
+}
+
+#[test]
+fn retention_does_not_evict_a_newest_record_to_break_a_timestamp_tie() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(1, 0))
+        .expect("bounded project");
+    // The WebSocket message and the HTTP exchange start in the same
+    // millisecond, and the HTTP exchange arrived later. With a record limit of
+    // one, neither stream's newest record may be evicted, so the recent HTTP
+    // exchange is not dropped in favour of the older WebSocket message.
+    let ws = project
+        .capture(&ws_message_at(1, 10, 7, b"first"))
+        .event
+        .expect("normalized WebSocket message");
+    let http = capture_all(
+        &project,
+        &[started_at(2, 10, "GET"), finished(2, b"", b"done")],
+    )[0];
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.retention_evictions, 0);
+    assert_eq!(status.event_loss_count, 0);
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.ws_count, 1);
+    assert!(project.get_http(http).expect("read HTTP").is_some());
+    assert!(project.get_ws(ws.id()).expect("read WebSocket").is_some());
+}
+
+#[test]
+fn retention_skips_in_flight_exchanges_instead_of_losing_their_completion() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(2, 0))
+        .expect("bounded project");
+    let ids = capture_all(
+        &project,
+        &[
+            started_at(1, 10, "GET"),
+            started_at(2, 20, "GET"),
+            finished(2, b"", b"two"),
+            started_at(3, 30, "GET"),
+            finished(3, b"", b"three"),
+        ],
+    );
+    let in_flight = ids[0];
+    let evicted = ids[1];
+    let newest = ids[3];
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.retention_evictions, 1);
+    assert_eq!(status.event_loss_count, 0);
+    assert!(project.get_http(in_flight).expect("read").is_some());
+    assert!(
+        project.get_http(evicted).expect("read evicted").is_none(),
+        "the older in-flight exchange is kept, so the next-oldest one is evicted instead"
+    );
+    assert!(project.get_http(newest).expect("read newest").is_some());
+
+    // The completion still lands on the retained exchange instead of being
+    // counted as a lost capture.
+    project.capture(&finished(1, b"", b"done"));
+    wait(project.flush()).expect("flush completion");
+    let item = project
+        .get_http(in_flight)
+        .expect("read completed")
+        .expect("stored completed exchange");
+    assert!(!item.is_in_flight());
+    assert_eq!(project.status().event_loss_count, 0);
+}
+
+#[test]
+fn retention_evicts_websocket_messages_and_prunes_unused_connections() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(2, 0))
+        .expect("bounded project");
+    let ids = capture_all(
+        &project,
+        &[
+            ws_message_at(1, 10, 1, b"first"),
+            ws_message_at(2, 20, 2, b"second"),
+            ws_message_at(3, 30, 2, b"third"),
+        ],
+    );
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.ws_count, 2);
+    assert_eq!(status.retention_evictions, 1);
+    assert!(project.get_ws(ids[0]).expect("read evicted").is_none());
+    assert!(project.get_ws(ids[1]).expect("read retained").is_some());
+    assert!(project.get_ws(ids[2]).expect("read newest").is_some());
+
+    let db = project.current_db().expect("current database");
+    let read = db.begin_read().expect("begin read");
+    let connections = read
+        .open_table(schema::WS_CONNECTIONS)
+        .expect("connections");
+    assert!(
+        connections.get(1u64).expect("read pruned").is_none(),
+        "a connection without messages is pruned with its last message"
+    );
+    assert!(connections.get(2u64).expect("read used").is_some());
+}
+
+#[test]
+fn retention_discards_dangling_time_index_entries() {
+    let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(1, 0))
+        .expect("bounded project");
+    let first = capture_all(
+        &project,
+        &[
+            started_at(1, 10, "GET"),
+            response_head(1, 200),
+            finished(1, b"", b"one"),
+        ],
+    )[0];
+    let second = capture_all(
+        &project,
+        &[
+            started_at(2, 20, "GET"),
+            response_head(2, 201),
+            finished(2, b"", b"two"),
+        ],
+    )[0];
+    wait(project.flush()).expect("flush");
+    assert!(project.get_http(first).expect("read").is_none());
+    assert!(project.get_http(second).expect("read").is_some());
+
+    // A crashed index update can leave an entry whose record is gone; it must
+    // be dropped without counting as a record or an eviction.
+    {
+        let db = project.current_db().expect("current database");
+        let tx = db.begin_write().expect("begin write");
+        tx.open_table(schema::HTTP_BY_TIME)
+            .expect("by time")
+            .insert((5u64, 999u64), ())
+            .expect("dangling entry");
+        tx.commit().expect("commit");
+    }
+
+    let third = capture_all(
+        &project,
+        &[
+            started_at(3, 30, "GET"),
+            response_head(3, 202),
+            finished(3, b"", b"three"),
+        ],
+    )[0];
+    wait(project.flush()).expect("flush");
+
+    let status = project.status();
+    assert_eq!(status.http_count, 1);
+    assert_eq!(status.retention_evictions, 2);
+    assert!(project.get_http(second).expect("read evicted").is_none());
+    assert!(project.get_http(third).expect("read newest").is_some());
+    assert_eq!(persisted_meta(&project).http_count, 1);
+
+    let db = project.current_db().expect("current database");
+    let read = db.begin_read().expect("begin read");
+    let by_time = read.open_table(schema::HTTP_BY_TIME).expect("by time");
+    assert!(
+        by_time
+            .get((5u64, 999u64))
+            .expect("read dangling")
+            .is_none()
+    );
+    let by_host = read.open_table(schema::HTTP_BY_HOST).expect("by host");
+    assert!(
+        by_host
+            .get(("example.com".to_string(), second))
+            .expect("host index")
+            .is_none(),
+        "the evicted exchange is removed from the host index"
+    );
+    let by_status = read.open_table(schema::HTTP_BY_STATUS).expect("by status");
+    assert!(
+        by_status
+            .get((201u16, second))
+            .expect("status index")
+            .is_none(),
+        "the evicted exchange is removed from the status index"
     );
 }

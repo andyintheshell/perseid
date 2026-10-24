@@ -727,7 +727,8 @@ impl PerseidApp {
     }
 
     /// A temporary project is worth a confirmation when it holds captured
-    /// records or non-default workbench state.
+    /// records or non-default workbench state. The committed counters lag the
+    /// capture queue by a write batch, so the live UI histories count too.
     fn has_unsaved_temporary_work(&self) -> bool {
         let Some(status) = self.project.status() else {
             return false;
@@ -736,6 +737,8 @@ impl PerseidApp {
             return false;
         }
         status.http_count.saturating_add(status.ws_count) > 0
+            || self.history.len() > 0
+            || self.websocket_history.len() > 0
             || self.workspace_snapshot() != self.project_baseline_workspace
     }
 
@@ -837,12 +840,16 @@ impl PerseidApp {
             match completion {
                 ProjectCompletion::Saved { copy, path, result } => match result {
                     Ok(()) => {
-                        self.project.last_workspace = Some(self.workspace_snapshot());
                         self.project.notify(if copy {
                             format!("Saved a copy to {}", path.display())
                         } else {
                             format!("Saved project to {}", path.display())
                         });
+                        // The save command persisted the workspace queued when
+                        // it started. Flush edits made while it was pending so
+                        // they are not marked saved and then discarded by a
+                        // switch that follows the save.
+                        self.sync_workspace(true);
                         if copy {
                             self.project.clear_switch_after_save();
                         } else if let Some(request) = self.project.take_switch_after_save() {
@@ -1422,6 +1429,564 @@ mod tests {
             PathBuf::from(path),
             source.with_file_name("session-copy.perseid")
         );
+    }
+
+    use crate::history::{HistoryItem, Phase};
+    use crate::proxy::{
+        CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo,
+        WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
+    };
+    use crate::websocket_history::WebSocketMessageItem;
+    use std::time::SystemTime;
+
+    fn screen_rect() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))
+    }
+
+    fn find_text_center(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + egui::vec2(text.galley.size().x / 2.0, text.galley.size().y / 2.0))
+            }
+            egui::Shape::Vec(shapes) => shapes
+                .iter()
+                .find_map(|shape| find_text_center(shape, label)),
+            _ => None,
+        }
+    }
+
+    /// Click the first widget whose label matches. Returns false when the
+    /// label is not rendered.
+    fn click_window_text(
+        ctx: &egui::Context,
+        label: &str,
+        mut run: impl FnMut(&egui::Context),
+    ) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        // Windows lay out their contents over several passes.
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let Some(pos) = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, label))
+        else {
+            return false;
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| run(ctx));
+        output.textures_delta.clear();
+        true
+    }
+
+    /// Click the first widget whose label matches inside a root Ui. Returns
+    /// false when the label is not rendered.
+    fn click_ui_text(ctx: &egui::Context, label: &str, mut run: impl FnMut(&mut egui::Ui)) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        // A menu popup only appears in the pass after the button click.
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let Some(pos) = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, label))
+        else {
+            return false;
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        true
+    }
+
+    fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        output
+    }
+
+    fn collect_text(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.text().to_string()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect_text(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn wait_for<T>(receiver: std::sync::mpsc::Receiver<std::result::Result<T, ProjectError>>) -> T {
+        receiver
+            .recv_timeout(Duration::from_secs(30))
+            .expect("project writer dropped the reply channel")
+            .expect("project command failed")
+    }
+
+    /// Run the project poll loop until no command is pending. Commands finish
+    /// on the writer thread, so a short bounded wait keeps the test honest.
+    fn poll_until_idle(app: &mut PerseidApp) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !app.project.pending.is_empty() {
+            app.poll_project();
+            if app.project.pending.is_empty() {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the project command did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn history_item() -> HistoryItem {
+        HistoryItem {
+            id: 1,
+            number: 1,
+            timestamp: SystemTime::UNIX_EPOCH,
+            request: RequestInfo {
+                method: "GET".to_string(),
+                uri: "http://example.test/".to_string(),
+                scheme: "http".to_string(),
+                host: "example.test".to_string(),
+                path: "/".to_string(),
+                version: "HTTP/1.1".to_string(),
+                headers: Vec::new(),
+            },
+            request_body: CapturedBody::default(),
+            response: None,
+            phase: Phase::InFlight,
+        }
+    }
+
+    fn websocket_item() -> WebSocketMessageItem {
+        WebSocketMessageItem {
+            id: 1,
+            number: 1,
+            timestamp: SystemTime::UNIX_EPOCH,
+            connection: WebSocketConnectionInfo {
+                id: 1,
+                url: "wss://example.test/socket".to_string(),
+                host: "example.test".to_string(),
+                tls: true,
+                listener_port: 8443,
+                protocol: None,
+            },
+            direction: WebSocketDirection::ToServer,
+            opcode: WebSocketOpcode::Text,
+            payload: CapturedBody::from_bytes(b"hello".to_vec()),
+        }
+    }
+
+    fn started_event(wire_id: u64) -> ProxyEvent {
+        ProxyEvent::Started {
+            id: wire_id,
+            timestamp: SystemTime::UNIX_EPOCH,
+            request: RequestInfo {
+                method: "GET".to_string(),
+                uri: "http://example.test/".to_string(),
+                scheme: "http".to_string(),
+                host: "example.test".to_string(),
+                path: "/".to_string(),
+                version: "HTTP/1.1".to_string(),
+                headers: Vec::new(),
+            },
+        }
+    }
+
+    fn finished_event(wire_id: u64) -> ProxyEvent {
+        ProxyEvent::Finished {
+            id: wire_id,
+            end: ExchangeEnd {
+                duration: Duration::from_millis(1),
+                request_body: CapturedBody::default(),
+                result: ExchangeResult::Response {
+                    body: CapturedBody::default(),
+                },
+            },
+        }
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("perseid-{label}-{}.perseid", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn live_history_counts_as_unsaved_temporary_work() {
+        // Committed counters lag the writer batch, so the prompt must also
+        // consider rows that are still only in the live UI history.
+        let mut app = PerseidApp::test_app();
+        assert!(!app.has_unsaved_temporary_work());
+        app.history.load(vec![history_item()]);
+        assert!(app.has_unsaved_temporary_work());
+        app.request_project_switch(ProjectSwitch::New);
+        assert!(app.project.switch_prompt.is_some());
+
+        let mut app = PerseidApp::test_app();
+        app.websocket_history.load(vec![websocket_item()]);
+        assert!(app.has_unsaved_temporary_work());
+    }
+
+    #[test]
+    fn saved_projects_and_missing_handles_are_never_unsaved() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        assert!(app.has_unsaved_temporary_work());
+
+        app.project.handle = None;
+        assert!(!app.has_unsaved_temporary_work());
+
+        // A persistent project never prompts, even with non-default state.
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        let file = temp_path("ui-persistent");
+        wait_for(app.project.handle().expect("handle").save_as(file.clone()));
+        assert!(!app.has_unsaved_temporary_work());
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn a_busy_project_refuses_a_switch_with_a_notice() {
+        let mut app = PerseidApp::test_app();
+        let (_sender, receiver) = std::sync::mpsc::channel();
+        app.project.pending.push(PendingProject::Save {
+            copy: false,
+            path: PathBuf::from("/tmp/demo.perseid"),
+            receiver,
+        });
+
+        app.request_project_switch(ProjectSwitch::New);
+
+        assert!(app.project.switch_prompt.is_none());
+        assert_eq!(app.project.pending.len(), 1);
+        let (text, error) = app.project.notice().expect("busy notice");
+        assert!(error);
+        assert!(text.contains("Wait for the current project operation to finish"));
+    }
+
+    #[test]
+    fn the_file_menu_new_project_queues_a_switch() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+
+        assert!(click_ui_text(&ctx, "File", |ui| app.project_menu(ui)));
+        assert!(click_ui_text(&ctx, "New Project", |ui| app.project_menu(ui)));
+        assert!(matches!(
+            app.project.pending.as_slice(),
+            [PendingProject::New { .. }]
+        ));
+    }
+
+    #[test]
+    fn switch_prompt_buttons_cancel_discard_and_save() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+
+        app.request_project_switch(ProjectSwitch::New);
+        assert!(click_window_text(&ctx, "Cancel", |ctx| app.project_windows(ctx)));
+        assert!(app.project.switch_prompt.is_none());
+        assert!(app.project.pending.is_empty());
+        assert!(app.scope_enabled);
+
+        app.request_project_switch(ProjectSwitch::New);
+        assert!(click_window_text(&ctx, "Discard", |ctx| app.project_windows(ctx)));
+        assert!(app.project.switch_prompt.is_none());
+        assert!(matches!(
+            app.project.pending.as_slice(),
+            [PendingProject::New { .. }]
+        ));
+        app.project.pending.clear();
+
+        app.request_project_switch(ProjectSwitch::New);
+        assert!(click_window_text(&ctx, "Save…", |ctx| app.project_windows(ctx)));
+        assert!(app.project.switch_prompt.is_none());
+        assert_eq!(app.project.switch_after_save, Some(ProjectSwitch::New));
+        assert_eq!(
+            app.project.dialog.as_ref().expect("save dialog").kind,
+            ProjectDialogKind::SaveAs
+        );
+
+        // Cancelling the Save As also cancels the switch it was meant to enable.
+        assert!(click_window_text(&ctx, "Cancel", |ctx| app.project_windows(ctx)));
+        assert!(app.project.dialog.is_none());
+        assert!(app.project.switch_after_save.is_none());
+        assert!(app.project.pending.is_empty());
+        app.shutdown_project();
+    }
+
+    #[test]
+    fn open_dialog_submits_a_normalized_path_and_queues_the_switch() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.project.open_dialog(ProjectDialogKind::Open, None);
+        app.project.dialog.as_mut().expect("dialog").path = "/tmp/perseid-ui-open".to_string();
+
+        assert!(click_window_text(&ctx, "Open", |ctx| app.project_windows(ctx)));
+
+        assert!(app.project.dialog.is_none());
+        match app.project.pending.first() {
+            Some(PendingProject::Open { path, .. }) => {
+                assert_eq!(path, &PathBuf::from("/tmp/perseid-ui-open.perseid"));
+            }
+            _ => panic!("expected a pending open"),
+        }
+        app.shutdown_project();
+    }
+
+    #[test]
+    fn a_dialog_with_an_empty_path_reports_an_error_and_stays_open() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.project.open_dialog(ProjectDialogKind::Open, None);
+        app.project.dialog.as_mut().expect("dialog").path = "   ".to_string();
+
+        assert!(click_window_text(&ctx, "Open", |ctx| app.project_windows(ctx)));
+
+        let dialog = app.project.dialog.as_ref().expect("dialog stays open");
+        assert_eq!(dialog.error.as_deref(), Some("Enter a project file path."));
+        assert!(app.project.pending.is_empty());
+    }
+
+    #[test]
+    fn save_dialogs_queue_and_complete_their_saves() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        let save_path = temp_path("ui-save");
+        let copy_path = temp_path("ui-copy");
+
+        app.project.open_dialog(ProjectDialogKind::SaveAs, None);
+        app.project.dialog.as_mut().expect("dialog").path = save_path.display().to_string();
+        assert!(click_window_text(&ctx, "Save", |ctx| app.project_windows(ctx)));
+        assert!(app.project.dialog.is_none());
+        match app.project.pending.first() {
+            Some(PendingProject::Save { copy, path, .. }) => {
+                assert!(!copy);
+                assert_eq!(path, &save_path);
+            }
+            _ => panic!("expected a pending save"),
+        }
+        poll_until_idle(&mut app);
+        assert!(app.project.pending.is_empty());
+        let (text, error) = app.project.notice().expect("save notice");
+        assert!(!error, "save notice was an error: {text}");
+        assert!(
+            text.contains("Saved project to"),
+            "unexpected notice: {text}"
+        );
+        assert!(save_path.exists());
+
+        app.project.open_dialog(ProjectDialogKind::SaveCopy, None);
+        app.project.dialog.as_mut().expect("dialog").path = copy_path.display().to_string();
+        assert!(click_window_text(&ctx, "Save Copy", |ctx| app.project_windows(ctx)));
+        match app.project.pending.first() {
+            Some(PendingProject::Save { copy: true, .. }) => {}
+            _ => panic!("expected a pending save copy"),
+        }
+        poll_until_idle(&mut app);
+        let (text, error) = app.project.notice().expect("copy notice");
+        assert!(!error, "copy notice was an error: {text}");
+        assert!(text.contains("Saved a copy to"));
+        assert_eq!(
+            app.project.status().expect("status").mode.path(),
+            Some(save_path.as_path()),
+            "saving a copy leaves the open project unchanged"
+        );
+
+        let _ = std::fs::remove_file(&save_path);
+        let _ = std::fs::remove_file(&copy_path);
+    }
+
+    #[test]
+    fn a_completed_save_flushes_edits_made_while_it_was_pending() {
+        let mut app = PerseidApp::test_app();
+        // The writer holds a workspace with an enabled scope.
+        app.scope_enabled = true;
+        app.sync_workspace(true);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(Ok(())).expect("queue save result");
+        app.project.pending.push(PendingProject::Save {
+            copy: false,
+            path: PathBuf::from("/tmp/demo.perseid"),
+            receiver,
+        });
+        // The edit arrives after the save was queued but before it completed.
+        app.scope_enabled = false;
+        app.poll_project();
+        assert!(app.project.pending.is_empty());
+
+        // The edit must have been queued behind the save: a copy taken now
+        // contains it even though the save itself did not.
+        let copy = temp_path("ui-flush");
+        wait_for(
+            app.project
+                .handle()
+                .expect("handle")
+                .save_copy(copy.clone()),
+        );
+        let reopened = ProjectHandle::temporary().expect("temporary project");
+        let opened = wait_for(reopened.open(copy.clone(), 10, 1024));
+        assert!(
+            !opened.workspace.scope.enabled,
+            "workbench edits made while the save was pending must be flushed"
+        );
+        let _ = std::fs::remove_file(&copy);
+    }
+
+    #[test]
+    fn applying_an_opened_project_resets_selection_and_reports_status() {
+        let mut app = PerseidApp::test_app();
+        app.selected = Some(3);
+        app.websocket_selected = Some(4);
+
+        app.apply_opened_project(
+            OpenedProject {
+                http: Vec::new(),
+                ws: Vec::new(),
+                workspace: WorkspaceState::default(),
+                http_total: 5,
+                ws_total: 0,
+            },
+            Some(Path::new("/tmp/demo.perseid")),
+        );
+        assert!(app.selected.is_none());
+        assert!(app.websocket_selected.is_none());
+        let (text, error) = app.project.notice().expect("notice");
+        assert!(!error);
+        assert!(text.contains("Loaded the newest 0 of 5 exchanges"));
+
+        app.apply_opened_project(
+            OpenedProject {
+                http: Vec::new(),
+                ws: Vec::new(),
+                workspace: WorkspaceState::default(),
+                http_total: 0,
+                ws_total: 0,
+            },
+            Some(Path::new("/tmp/demo.perseid")),
+        );
+        let (text, error) = app.project.notice().expect("notice");
+        assert!(!error);
+        assert!(text.contains("Opened /tmp/demo.perseid"));
+
+        app.apply_opened_project(
+            OpenedProject {
+                http: Vec::new(),
+                ws: Vec::new(),
+                workspace: WorkspaceState::default(),
+                http_total: 0,
+                ws_total: 0,
+            },
+            None,
+        );
+        let (text, error) = app.project.notice().expect("notice");
+        assert!(!error);
+        assert!(text.contains("Started a new temporary project"));
+    }
+
+    #[test]
+    fn project_status_widget_reports_lost_captures_and_evictions() {
+        let mut app = PerseidApp::test_app();
+        // A tiny record budget makes the third exchange evict the second.
+        app.project = ProjectUi::new(10, 1024, RetentionLimits::new(1, 0));
+        {
+            let handle = app.project.handle().expect("handle");
+            handle.capture(&started_event(1));
+            // The exchange disappears before its completion arrives; the
+            // writer counts the orphaned Finished event as a loss.
+            wait_for(handle.clear_http());
+            handle.capture(&finished_event(1));
+            handle.capture(&started_event(2));
+            handle.capture(&finished_event(2));
+            handle.capture(&started_event(3));
+            handle.capture(&finished_event(3));
+            wait_for(handle.flush());
+        }
+        let status = app.project.status().expect("status");
+        assert_eq!(status.event_loss_count, 1);
+        assert_eq!(status.retention_evictions, 1);
+
+        let output = frame(|ui| app.project_status_widget(ui));
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            collect_text(&clipped.shape, &mut texts);
+        }
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("capture records incomplete")),
+            "the status widget must report lost captures: {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("old records evicted")),
+            "the status widget must report retention evictions: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn shutdown_project_flushes_the_writer() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        app.shutdown_project();
+        assert!(app.project.handle().is_some());
     }
 }
 

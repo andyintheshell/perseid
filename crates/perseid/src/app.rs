@@ -711,14 +711,16 @@ impl eframe::App for PerseidApp {
     }
 }
 
-/// Temporary retention defaults to the UI cache limits but can be configured
-/// independently. Zero disables a dimension; saved projects never evict.
+/// Temporary retention defaults to the effective UI cache limits (clamped to
+/// at least one, as the caches are) but can be configured independently. An
+/// explicit `--temporary-retention-* 0` disables that dimension; saved projects
+/// never evict.
 fn configured_retention(args: &Args) -> RetentionLimits {
     RetentionLimits::new(
         args.temporary_retention_limit
-            .unwrap_or(args.history_limit as u64),
+            .unwrap_or(args.history_limit.max(1) as u64),
         args.temporary_retention_bytes
-            .unwrap_or(args.history_bytes as u64),
+            .unwrap_or(args.history_bytes.max(1) as u64),
     )
 }
 
@@ -736,6 +738,14 @@ mod tests {
         args.temporary_retention_limit = Some(3);
         args.temporary_retention_bytes = Some(0);
         assert_eq!(configured_retention(&args), RetentionLimits::new(3, 0));
+    }
+
+    #[test]
+    fn temporary_retention_follows_the_effective_cache_limits_when_unset() {
+        // The UI caches clamp zero to one, so the default retention limits do
+        // the same instead of silently disabling retention.
+        let args = Args::parse_from(["perseid", "--history-limit", "0", "--history-bytes", "0"]);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(1, 1));
     }
 
     fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {

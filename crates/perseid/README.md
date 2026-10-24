@@ -49,8 +49,11 @@ the UI currently opens only a bounded newest-first history snapshot. See the
 [workbench guide](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#projects-and-persistence)
 for exactly what is saved. Temporary projects evict the oldest captured
 records when they exceed the configurable `--temporary-retention-limit` and
-`--temporary-retention-bytes` limits (which default to the history flags), so
-RAM use is bounded by retained records and bodies. Saved project files are not
+`--temporary-retention-bytes` limits (which default to the history flags; `0`
+disables a dimension). The limits are soft, not a hard RAM ceiling: each
+stream's newest record is kept even when it alone exceeds the byte budget,
+in-flight HTTP exchanges are kept until they complete, and headers, indexes,
+and database overhead are outside the byte budget. Saved project files are not
 automatically pruned and can grow until the disk fills. Burp Suite and Burp
 Suite Community Edition are
 trademarks of PortSwigger Ltd. Perseid is independently developed, contains no

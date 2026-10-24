@@ -249,8 +249,10 @@ fn replace_ws_payload(
 }
 
 /// Evict the oldest HTTP exchange or WebSocket message until both the record
-/// and retained-body limits are satisfied. The newest record is always kept,
-/// even when it alone exceeds a configured limit.
+/// and retained-body limits are satisfied. Each stream's newest record is kept
+/// even when it alone exceeds a configured limit, and an in-flight HTTP
+/// exchange is not evicted because its completion events would otherwise be
+/// counted as lost captures.
 fn enforce_retention(
     tx: &redb::WriteTransaction,
     meta: &mut ProjectMeta,
@@ -276,13 +278,20 @@ fn enforce_retention(
         let bytes = meta.http_body_bytes.saturating_add(meta.ws_body_bytes);
         let over_count = limits.count_exceeded(records);
         let over_bytes = limits.bytes_exceeded(bytes);
-        // Keep at least the newest record, mirroring the bounded UI cache.
+        // Keep each stream's newest record, mirroring the bounded UI cache.
         if (!over_count && !over_bytes) || records <= 1 {
             break;
         }
 
-        let oldest_http = by_time.first()?.map(|(key, _)| key.value());
-        let oldest_ws = ws_by_time.first()?.map(|(key, _)| key.value());
+        // The last entry of a time index is that stream's newest record; it is
+        // never a candidate, so equal-millisecond candidates across streams
+        // cannot discard a record that is newer than the one an older stream
+        // still holds. In-flight exchanges are skipped until they complete.
+        let newest_http = by_time.last()?.map(|(key, _)| key.value());
+        let newest_ws = ws_by_time.last()?.map(|(key, _)| key.value());
+        let oldest_http =
+            oldest_evictable(&by_time, newest_http, |id| Ok(in_flight.get(id)?.is_some()))?;
+        let oldest_ws = oldest_evictable(&ws_by_time, newest_ws, |_| Ok(false))?;
         let evict_http = match (oldest_http, oldest_ws) {
             (Some((http_time, _)), Some((ws_time, _))) => http_time <= ws_time,
             (Some(_), None) => true,
@@ -352,6 +361,27 @@ fn enforce_retention(
         }
     }
     Ok(())
+}
+
+/// The oldest entry of a time index that is not the stream's newest record and
+/// whose record is still evictable.
+fn oldest_evictable(
+    by_time: &redb::Table<'_, (u64, u64), ()>,
+    newest: Option<(u64, u64)>,
+    mut skip: impl FnMut(u64) -> Result<bool>,
+) -> Result<Option<(u64, u64)>> {
+    for entry in by_time.iter()? {
+        let (key, _) = entry?;
+        let value = key.value();
+        if Some(value) == newest {
+            continue;
+        }
+        if skip(value.1)? {
+            continue;
+        }
+        return Ok(Some(value));
+    }
+    Ok(None)
 }
 
 fn normalized_host(host: &str) -> String {

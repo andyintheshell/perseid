@@ -68,8 +68,10 @@ not yet pageable or searchable from the UI. In a temporary project, those same
 flags define the default aggregate retention limits, but the limits can be set
 independently with `--temporary-retention-limit` and
 `--temporary-retention-bytes`: when the temporary store exceeds the configured
-record count or retained-body budget, the oldest records are evicted first (the
-newest is always kept) and the status bar reports the eviction count. Saved
+record count or retained-body budget, the oldest records are evicted first and
+the status bar reports the eviction count. The limits are soft: each stream's
+newest record is kept even when it alone exceeds the byte budget, in-flight
+exchanges are kept until they complete, and `0` disables a dimension. Saved
 project files are not pruned automatically. `--capture-limit` still
 caps each stored body, and clearing history deletes stored records from the
 active project.
@@ -616,7 +618,7 @@ separate Space, matching the system green-button behavior.
 | Captured bodies | 1 MiB retained per request/response by default; forwarding can stream larger bodies. |
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
 | History UI cache | 2,000 HTTP exchanges and 2,000 WebSocket messages; each cache uses the configured retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). These are UI-cache limits; the temporary store has separate aggregate retention settings. |
-| Temporary retention | Combined HTTP + WebSocket records default to `--history-limit`; retained HTTP body + WebSocket payload bytes default to `--history-bytes`. Override with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest records are evicted first and the newest is always kept. |
+| Temporary retention | Combined HTTP + WebSocket records default to `--history-limit`; retained HTTP body + WebSocket payload bytes default to `--history-bytes`. Override with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest records are evicted first; each stream's newest record and any in-flight exchange are always kept, so the limits can be exceeded temporarily. |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
@@ -625,7 +627,7 @@ separate Space, matching the system green-button behavior.
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
-| Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above; the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
+| Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
 | Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, are never pruned automatically, and are not encrypted. |
 | Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
