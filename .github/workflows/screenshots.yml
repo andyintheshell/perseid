@@ -11,6 +11,7 @@ on:
       - "rust-toolchain.toml"
       - "scripts/screenshots.sh"
       - "scripts/check_screenshots.py"
+      - "scripts/test_check_screenshots.py"
       - ".github/workflows/screenshots.yml"
   # Do not path-filter pull requests at the workflow level. A workflow-level
   # skip leaves its checks pending, which blocks a PR when that workflow is
@@ -63,6 +64,7 @@ jobs:
             rust-toolchain.toml \
             scripts/screenshots.sh \
             scripts/check_screenshots.py \
+            scripts/test_check_screenshots.py \
             .github/workflows/screenshots.yml; then
             echo "screenshots=false" >> "$GITHUB_OUTPUT"
           else
@@ -101,6 +103,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Test screenshot verifier
+        run: python3 -m unittest discover -s scripts -p 'test_check_screenshots.py'
 
       - name: Build with screenshot mode
         run: cargo build -p perseid --features screenshots --locked
