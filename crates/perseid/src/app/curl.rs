@@ -117,6 +117,23 @@ pub(super) fn generate(item: &HistoryItem) -> Result<String, CurlError> {
     Ok(command)
 }
 
+pub(super) fn context_menu(ui: &mut egui::Ui, item: &HistoryItem) {
+    ui.separator();
+    let curl_error = validate(item).err();
+    let curl_button = ui.add_enabled(curl_error.is_none(), egui::Button::new("Copy as curl"));
+    let curl_button = match curl_error {
+        Some(error) => curl_button.on_disabled_hover_text(error.message()),
+        None => curl_button
+            .on_hover_text("Copy a POSIX-shell curl command to the clipboard; it will not run"),
+    };
+    if curl_button.clicked() {
+        if let Ok(command) = generate(item) {
+            ui.ctx().copy_text(command);
+        }
+        ui.close();
+    }
+}
+
 fn version_option(version: &str) -> Option<&'static str> {
     match version {
         "HTTP/0.9" => Some("--http0.9"),
@@ -279,6 +296,39 @@ mod tests {
         let mut request = item("GET", "/", "https", "example.test");
         request.request.version = "HTTP/2".into();
         assert!(generate(&request).unwrap().contains("--http2"));
+    }
+
+    #[test]
+    fn recognized_http_versions_map_to_curl_options() {
+        for (version, option) in [
+            ("HTTP/0.9", "--http0.9"),
+            ("HTTP/1.0", "--http1.0"),
+            ("HTTP/1.1", "--http1.1"),
+            ("HTTP/2", "--http2"),
+            ("HTTP/2.0", "--http2"),
+            ("HTTP/3", "--http3"),
+        ] {
+            assert_eq!(version_option(version), Some(option));
+        }
+        assert_eq!(version_option("unknown"), None);
+    }
+
+    #[test]
+    fn unsupported_requests_have_actionable_context_errors() {
+        let tunnel = item("CONNECT", "example.test:443", "https", "example.test:443");
+        assert_eq!(validate(&tunnel), Err(CurlError::ConnectTunnel));
+
+        let invalid = item("GET", "/", "ftp", "example.test");
+        assert_eq!(validate(&invalid), Err(CurlError::InvalidUrl));
+
+        for error in [
+            CurlError::ConnectTunnel,
+            CurlError::IncompleteBody,
+            CurlError::TruncatedBody,
+            CurlError::InvalidUrl,
+        ] {
+            assert!(!error.message().is_empty());
+        }
     }
 
     #[test]

@@ -291,22 +291,7 @@ fn message_frame(
             ui.close();
         }
         if let Some(item) = context.curl_item {
-            ui.separator();
-            let curl_error = super::curl::validate(item).err();
-            let curl_button =
-                ui.add_enabled(curl_error.is_none(), egui::Button::new("Copy as curl"));
-            let curl_button = match curl_error {
-                Some(error) => curl_button.on_disabled_hover_text(error.message()),
-                None => curl_button.on_hover_text(
-                    "Copy a POSIX-shell curl command to the clipboard; it will not run",
-                ),
-            };
-            if curl_button.clicked() {
-                if let Ok(command) = super::curl::generate(item) {
-                    ui.ctx().copy_text(command);
-                }
-                ui.close();
-            }
+            super::curl::context_menu(ui, item);
         }
     });
     changed
@@ -634,6 +619,27 @@ mod tests {
         })
     }
 
+    fn run_curl_request_frame(
+        ctx: &Context,
+        events: Vec<Event>,
+        item: &HistoryItem,
+    ) -> egui::FullOutput {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| {
+            request_message_text_with_curl(
+                ui,
+                item.id,
+                MessageView::Raw,
+                item,
+                "GET /path?q=1 HTTP/1.1\r\n\r\n",
+            );
+        })
+    }
+
     fn run_message_frame(
         ctx: &Context,
         events: Vec<Event>,
@@ -827,6 +833,50 @@ mod tests {
         assert!(
             ctx.any_popup_open(),
             "right-clicking the message should open its context menu"
+        );
+    }
+
+    #[test]
+    fn request_detail_context_menu_offers_copy_as_curl() {
+        use std::time::{Duration, SystemTime};
+
+        use crate::history::Phase;
+        use crate::proxy::{CapturedBody, ExchangeResult, RequestInfo};
+
+        let item = HistoryItem {
+            id: 1,
+            number: 1,
+            timestamp: SystemTime::now(),
+            request: RequestInfo {
+                method: "GET".into(),
+                uri: "/path?q=1".into(),
+                scheme: "http".into(),
+                host: "example.test".into(),
+                path: "/path?q=1".into(),
+                version: "HTTP/1.1".into(),
+                headers: Vec::new(),
+            },
+            request_body: CapturedBody::from_bytes(Vec::new()),
+            response: None,
+            phase: Phase::Finished {
+                duration: Duration::ZERO,
+                result: ExchangeResult::Dropped,
+            },
+        };
+        let ctx = Context::default();
+        let right_click = egui::pos2(40.0, 10.0);
+
+        run_curl_request_frame(&ctx, vec![], &item).drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![Event::PointerMoved(right_click)], &item)
+            .drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![secondary_button(right_click, true)], &item)
+            .drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![secondary_button(right_click, false)], &item)
+            .drop_without_applying_deltas();
+        run_curl_request_frame(&ctx, vec![], &item).drop_without_applying_deltas();
+        assert!(
+            ctx.any_popup_open(),
+            "right-clicking a captured request should open the menu with Copy as curl"
         );
     }
 
