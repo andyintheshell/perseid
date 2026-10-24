@@ -1138,4 +1138,271 @@ mod tests {
         assert!(analysis.truncated);
         assert_eq!(analysis.sample_size, MAX_ANALYSIS_TOKENS + 1);
     }
+
+    #[test]
+    fn labels_cover_every_setting_and_result_variant() {
+        assert_eq!(Significance::TenPercent.percent_label(), "10%");
+        assert_eq!(Significance::PointOnePercent.percent_label(), "0.1%");
+        assert_eq!(Significance::PointZeroOnePercent.percent_label(), "0.01%");
+        assert_eq!(
+            Significance::PointZeroZeroOnePercent.percent_label(),
+            "0.001%"
+        );
+        assert_eq!(Significance::OnePercent.chart_label(), ">1%");
+        assert_eq!(Significance::PointOnePercent.chart_label(), ">0.1%");
+        assert_eq!(Significance::PointZeroOnePercent.chart_label(), ">0.01%");
+        assert_eq!(
+            Significance::PointZeroZeroOnePercent.chart_label(),
+            ">0.001%"
+        );
+        assert_eq!(Significance::TenPercent.alpha(), 0.10);
+        assert_eq!(Significance::OnePercent.alpha(), 0.01);
+        assert_eq!(Significance::PointOnePercent.alpha(), 0.001);
+        assert_eq!(Significance::PointZeroOnePercent.alpha(), 0.0001);
+
+        assert_eq!(Rating::VeryPoor.label(), "very poor");
+        assert_eq!(Rating::Poor.label(), "poor");
+        assert_eq!(Rating::Fair.label(), "fair");
+        assert_eq!(Rating::Good.label(), "good");
+        assert_eq!(Rating::VeryGood.label(), "very good");
+
+        assert_eq!(Reliability::VeryPoor.label(), "very poor");
+        assert_eq!(Reliability::Poor.label(), "poor");
+        assert_eq!(Reliability::Fair.label(), "fair");
+        assert_eq!(Reliability::Good.label(), "good");
+        assert_eq!(Reliability::Excellent.label(), "excellent");
+
+        assert_eq!(AnalysisKind::Character.label(), "character-level");
+        assert_eq!(AnalysisKind::Bit.label(), "bit-level");
+        assert_eq!(CharacterAnalysisMode::Always.label(), "Always");
+        assert_eq!(CharacterAnalysisMode::Never.label(), "Never");
+    }
+
+    #[test]
+    fn analyze_rejects_short_samples_and_disabled_character_tests() {
+        let error = analyze(
+            &["one".to_string()],
+            AnalysisSettings::default(),
+            "manual load",
+        )
+        .unwrap_err();
+        assert!(error.contains("at least two tokens"));
+
+        let tokens = dna_tokens(400, 8);
+        let settings = AnalysisSettings {
+            character_analysis: CharacterAnalysisMode::Never,
+            ..AnalysisSettings::default()
+        };
+        let analysis = analyze(&tokens, settings, "manual load").unwrap();
+        assert!(
+            analysis
+                .character
+                .skipped_reason()
+                .is_some_and(|reason| reason.contains("disabled"))
+        );
+        assert_eq!(analysis.primary, AnalysisKind::Bit);
+    }
+
+    #[test]
+    fn character_tests_skip_tiny_and_oversized_alphabets_and_truncate_long_tokens() {
+        let single = analyze(
+            &["AAAA".to_string(), "AAAA".to_string()],
+            AnalysisSettings {
+                format: TokenFormat::Text,
+                ..AnalysisSettings::default()
+            },
+            "manual load",
+        )
+        .unwrap();
+        assert!(
+            single
+                .character
+                .skipped_reason()
+                .is_some_and(|reason| reason.contains("fewer than two distinct"))
+        );
+
+        let alphabet: String = (0..=MAX_CHARACTER_ALPHABET)
+            .map(|code| char::from_u32(0x100 + code as u32).unwrap())
+            .collect();
+        let oversized = analyze(
+            &[alphabet.clone(), alphabet],
+            AnalysisSettings {
+                format: TokenFormat::Text,
+                ..AnalysisSettings::default()
+            },
+            "manual load",
+        )
+        .unwrap();
+        assert!(
+            oversized
+                .character
+                .skipped_reason()
+                .is_some_and(|reason| reason.contains("character set has"))
+        );
+
+        let long = "ab".repeat(MAX_ANALYSIS_CHARS);
+        let truncated = analyze(
+            &[long.clone(), long],
+            AnalysisSettings {
+                format: TokenFormat::Text,
+                character_analysis: CharacterAnalysisMode::Always,
+                ..AnalysisSettings::default()
+            },
+            "manual load",
+        )
+        .unwrap();
+        assert!(truncated.truncated);
+        assert_eq!(truncated.longest, MAX_ANALYSIS_CHARS * 2);
+        let character = match truncated.character {
+            CharacterAnalysis::Performed(result) => result,
+            CharacterAnalysis::Skipped { reason } => panic!("unexpected skip: {reason}"),
+        };
+        assert_eq!(character.positions, MAX_ANALYSIS_CHARS);
+    }
+
+    #[test]
+    fn character_positions_with_too_few_observations_are_counted_as_insufficient() {
+        let mut tokens: Vec<Vec<char>> = (0..40)
+            .map(|index| {
+                if index % 2 == 0 {
+                    "ABC".chars().collect()
+                } else {
+                    "AB".chars().collect()
+                }
+            })
+            .collect();
+        tokens.push(vec!['A', 'B', 'C', 'D']);
+        let result = match analyze_characters(
+            &tokens,
+            AnalysisSettings {
+                character_analysis: CharacterAnalysisMode::Always,
+                ..AnalysisSettings::default()
+            },
+        ) {
+            CharacterAnalysis::Performed(result) => result,
+            CharacterAnalysis::Skipped { reason } => panic!("unexpected skip: {reason}"),
+        };
+        assert_eq!(result.positions, 4);
+        assert_eq!(result.insufficient_positions, 1);
+    }
+
+    #[test]
+    fn transition_tests_skip_one_sided_matrices_and_failing_positions() {
+        let mut one_row: Vec<Vec<char>> = (0..40)
+            .map(|index| vec!['A', if index % 2 == 0 { 'A' } else { 'B' }])
+            .collect();
+        one_row.extend((0..40).map(|index| vec!['A', if index % 2 == 0 { 'B' } else { 'A' }]));
+        let result = match analyze_characters(
+            &one_row,
+            AnalysisSettings {
+                character_analysis: CharacterAnalysisMode::Always,
+                ..AnalysisSettings::default()
+            },
+        ) {
+            CharacterAnalysis::Performed(result) => result,
+            CharacterAnalysis::Skipped { reason } => panic!("unexpected skip: {reason}"),
+        };
+        assert_eq!(result.alphabet_size, 2);
+        assert_eq!(result.transition_tests, 0);
+        assert!(result.transition_note.is_some());
+
+        let mut alternating: Vec<Vec<char>> = (0..80)
+            .map(|index| {
+                (0..20)
+                    .map(|position| {
+                        if (index + position) % 2 == 0 {
+                            'A'
+                        } else {
+                            'B'
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        alternating.push(vec!['A', 'B']);
+        let result = match analyze_characters(
+            &alternating,
+            AnalysisSettings {
+                character_analysis: CharacterAnalysisMode::Always,
+                significance: Significance::TenPercent,
+                ..AnalysisSettings::default()
+            },
+        ) {
+            CharacterAnalysis::Performed(result) => result,
+            CharacterAnalysis::Skipped { reason } => panic!("unexpected skip: {reason}"),
+        };
+        assert!(result.transition_tests > 0);
+    }
+
+    #[test]
+    fn global_tests_report_skipped_checks_for_empty_input() {
+        let (tests, bits, truncated) = global_tests(&[]);
+        assert_eq!(bits, 0);
+        assert!(!truncated);
+        assert!(
+            tests
+                .iter()
+                .any(|test| test.name == "Monobit frequency" && test.skipped)
+        );
+        assert!(tests.iter().any(|test| test.name == "Runs" && test.skipped));
+        assert!(
+            tests
+                .iter()
+                .any(|test| test.name == "Longest run of ones" && test.skipped)
+        );
+        assert!(
+            tests
+                .iter()
+                .any(|test| test.name == "Zlib compression" && test.skipped)
+        );
+    }
+
+    #[test]
+    fn global_tests_truncate_after_the_bit_cap() {
+        let decoded = vec![vec![0xAA; MAX_GLOBAL_BITS / 8 + 1]];
+        let (tests, bits, truncated) = global_tests(&decoded);
+        assert!(truncated);
+        assert_eq!(bits, MAX_GLOBAL_BITS);
+        assert!(tests.iter().any(|test| test.name == "Monobit frequency"));
+    }
+
+    #[test]
+    fn bit_analysis_counts_positions_without_enough_samples() {
+        let bit = analyze_bits(&[vec![0xAA, 0xBB], vec![0xCC]], Significance::OnePercent);
+        assert_eq!(bit.positions, 16);
+        assert_eq!(bit.insufficient_positions, 8);
+        assert_eq!(bit.tested_positions, 8);
+    }
+
+    #[test]
+    fn rating_handles_zero_totals_and_no_applicable_tests() {
+        assert_eq!(
+            rating(0.0, 0.0, &[], Significance::OnePercent),
+            Rating::VeryPoor
+        );
+        assert_eq!(
+            rating(10.0, 10.0, &[], Significance::OnePercent),
+            Rating::VeryGood
+        );
+        assert_eq!(
+            rating(0.0, 10.0, &[], Significance::OnePercent),
+            Rating::VeryPoor
+        );
+    }
+
+    #[test]
+    fn alphabet_display_escapes_controls_and_truncates() {
+        let alphabet: Vec<char> = ['\n', ' ', 'a', 'b']
+            .into_iter()
+            .chain((0..50).map(|code| char::from_u32(0x200 + code).unwrap()))
+            .collect();
+        let display = display_alphabet(&alphabet);
+        assert!(display.contains("\\n"));
+        assert!(display.ends_with('…'));
+    }
+
+    #[test]
+    fn p_values_use_the_intermediate_precision() {
+        assert_eq!(format_p_value(0.0005), "0.00050");
+    }
 }

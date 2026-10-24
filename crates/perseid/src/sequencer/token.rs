@@ -242,4 +242,43 @@ mod tests {
         assert_eq!(token_length("abc"), 3);
         assert_eq!(token_length("é"), 1);
     }
+
+    #[test]
+    fn parsing_caps_the_sample_and_skips_unusable_tokens() {
+        let lines = (0..=MAX_TOKENS)
+            .map(|index| format!("t{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(parse_tokens(&lines).len(), MAX_TOKENS);
+
+        let comma_list = vec!["aa"; MAX_TOKENS + 1].join(",");
+        assert_eq!(parse_tokens(&comma_list).len(), MAX_TOKENS);
+
+        let oversized = "x".repeat(MAX_TOKEN_CHARS + 1);
+        let tokens = parse_tokens(&format!("keep,{oversized},,also-keep"));
+        assert_eq!(tokens, ["keep", "also-keep"]);
+    }
+
+    #[test]
+    fn extraction_caps_the_sample_and_skips_unusable_matches() {
+        let too_long = "x".repeat(MAX_TOKEN_CHARS + 1);
+        let regex = regex::Regex::new(r"\S+").unwrap();
+        let tokens = extract_tokens(&format!("keep {too_long} also-keep"), &regex);
+        assert_eq!(tokens, ["keep", "also-keep"]);
+
+        let many = "a".repeat(MAX_TOKENS + 1);
+        let regex = regex::Regex::new(".").unwrap();
+        assert_eq!(extract_tokens(&many, &regex).len(), MAX_TOKENS);
+
+        let whitespace = regex::Regex::new(r"\s+").unwrap();
+        assert!(extract_tokens("   \n  ", &whitespace).is_empty());
+    }
+
+    #[test]
+    fn decoding_rejects_empty_samples_and_empty_tokens() {
+        let error = decode_tokens(&[], TokenFormat::Text).unwrap_err();
+        assert!(error.contains("at least two tokens"));
+        let error = decode_tokens(&["".to_string()], TokenFormat::Text).unwrap_err();
+        assert!(error.contains("decodes to no bytes"));
+    }
 }

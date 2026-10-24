@@ -453,4 +453,29 @@ mod tests {
         assert!(compression_ratio(&noise).unwrap() > 0.9);
         assert!(compression_ratio(&[]).is_none());
     }
+
+    #[test]
+    fn statistical_helpers_handle_degenerate_inputs() {
+        assert_eq!(binomial_two_sided(0, 0, 0.5), 1.0);
+        assert_eq!(binomial_two_sided(0, 10, 0.0), 1.0);
+        assert_eq!(binomial_two_sided(1, 10, 0.0), 0.0);
+        assert_eq!(binomial_two_sided(10, 10, 1.0), 1.0);
+        assert_eq!(binomial_two_sided(9, 10, 1.0), 0.0);
+
+        assert_eq!(chi_square_sf(1.0, 0), 1.0);
+        assert_eq!(chi_square_sf(f64::NAN, 1), 1.0);
+        assert_eq!(chi_square_sf(0.0, 1), 1.0);
+        assert_eq!(chi_square_sf(f64::INFINITY, 1), 1.0);
+
+        assert_eq!(runs_test(&[]), None);
+        assert_eq!(runs_test(&[true]), None);
+
+        assert_eq!(longest_run_p_value(0, 9), None);
+        assert_eq!(longest_run_p_value(0, 10), Some(0.0));
+
+        let constant = vec![true; 100];
+        let (_, adjusted, lag) = pairwise_correlation_test(&constant).unwrap();
+        assert_eq!(lag, 1);
+        assert!(adjusted <= 1.0);
+    }
 }

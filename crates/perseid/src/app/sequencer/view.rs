@@ -1258,3 +1258,830 @@ fn test_status(test: &TestResult, significance: Significance) -> (&'static str, 
         ("Fail", theme::RED)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::sequencer::state::SequencerSettings;
+    use crate::sequencer::{AnalysisKind, CharacterAnalysisMode, Rating, Reliability};
+
+    fn screen_rect() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))
+    }
+
+    fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        // The first pass lays out scroll areas and windows; inspect the second
+        // pass so table rows and window contents are present.
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        output
+    }
+
+    fn run_pass(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        mut run: impl FnMut(&egui::Context),
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| run(ctx));
+        output.textures_delta.clear();
+        output
+    }
+
+    fn rendered_text(output: &egui::FullOutput) -> String {
+        fn collect(shape: &egui::Shape, text: &mut String) {
+            match shape {
+                egui::Shape::Text(shape) => {
+                    text.push_str(shape.galley.text());
+                    text.push('\n');
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, text);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut text = String::new();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut text);
+        }
+        text
+    }
+
+    fn find_text_center(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + egui::vec2(text.galley.size().x / 2.0, text.galley.size().y / 2.0))
+            }
+            egui::Shape::Vec(shapes) => shapes
+                .iter()
+                .find_map(|shape| find_text_center(shape, label)),
+            _ => None,
+        }
+    }
+
+    /// Click the first widget whose label matches. Returns false when the
+    /// label is not on screen.
+    fn click_text(ctx: &egui::Context, label: &str, mut run: impl FnMut(&mut egui::Ui)) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let Some(pos) = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, label))
+        else {
+            return false;
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        true
+    }
+
+    /// Click the first widget inside a window whose label matches.
+    fn click_window_text(
+        ctx: &egui::Context,
+        label: &str,
+        mut run: impl FnMut(&egui::Context),
+    ) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        // Windows animate and lay out their contents over the first passes.
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let Some(pos) = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, label))
+        else {
+            return false;
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| run(ctx));
+        output.textures_delta.clear();
+        true
+    }
+
+    fn entropy(bits: f64) -> Vec<EntropyPoint> {
+        Significance::ALL
+            .iter()
+            .map(|significance| EntropyPoint {
+                significance: *significance,
+                bits,
+            })
+            .collect()
+    }
+
+    fn character_result(
+        transition_tests: usize,
+        transition_note: Option<&str>,
+        small_sample: bool,
+    ) -> CharacterResult {
+        CharacterResult {
+            alphabet: "AB".to_string(),
+            alphabet_size: 2,
+            positions: 4,
+            tested_positions: 4,
+            insufficient_positions: 0,
+            count_tests: 4,
+            count_failures: 1,
+            transition_tests,
+            transition_failures: 0,
+            transition_note: transition_note.map(str::to_string),
+            small_sample,
+            total_bits: 12.0,
+            entropy: entropy(12.0),
+        }
+    }
+
+    fn global_tests() -> Vec<TestResult> {
+        vec![
+            TestResult {
+                name: "Monobit frequency",
+                detail: "Mostly random.".to_string(),
+                p_value: Some(0.42),
+                informational: false,
+                skipped: false,
+            },
+            TestResult {
+                name: "Runs",
+                detail: "Not enough data.".to_string(),
+                p_value: None,
+                informational: false,
+                skipped: true,
+            },
+            TestResult {
+                name: "Zlib compression",
+                detail: "Compressed size is 90.0%.".to_string(),
+                p_value: None,
+                informational: true,
+                skipped: false,
+            },
+            TestResult {
+                name: "Poker",
+                detail: "Strongly non-random.".to_string(),
+                p_value: Some(0.000_001),
+                informational: false,
+                skipped: false,
+            },
+        ]
+    }
+
+    fn bit_analysis(
+        entropy_points: Vec<EntropyPoint>,
+        failing_positions: Vec<usize>,
+        global_truncated: bool,
+    ) -> BitAnalysis {
+        BitAnalysis {
+            positions: 64,
+            tested_positions: 56,
+            insufficient_positions: 8,
+            balance_failures: 1,
+            runs_failures: 2,
+            correlation_failures: 3,
+            total_bits: 56,
+            entropy: entropy_points,
+            failing_positions,
+            global_tests: global_tests(),
+            global_bits: 1024,
+            global_truncated,
+        }
+    }
+
+    fn analysis(
+        character: CharacterAnalysis,
+        bit: Option<BitAnalysis>,
+        truncated: bool,
+    ) -> Analysis {
+        Analysis {
+            source: "unit test".to_string(),
+            settings: AnalysisSettings::default(),
+            format: TokenFormat::Hex,
+            sample_size: 10,
+            shortest: 16,
+            longest: 16,
+            truncated,
+            character,
+            bit,
+            primary: AnalysisKind::Bit,
+            entropy: entropy(12.5),
+            total_possible_bits: 56.0,
+            primary_entropy: 12.5,
+            rating: Rating::Good,
+            reliability: Reliability::Fair,
+        }
+    }
+
+    #[test]
+    fn nice_axis_uses_readable_steps() {
+        assert_eq!(nice_axis(0.0), (0.0, 1.0));
+        assert_eq!(nice_axis(10.0), (10.0, 1.0));
+        assert_eq!(nice_axis(11.0), (15.0, 5.0));
+        assert_eq!(nice_axis(51.0), (60.0, 10.0));
+        assert_eq!(nice_axis(101.0), (150.0, 50.0));
+        assert_eq!(nice_axis(501.0), (600.0, 100.0));
+        assert_eq!(nice_axis(1_001.0), (1_500.0, 500.0));
+    }
+
+    #[test]
+    fn test_status_distinguishes_every_result_kind() {
+        let significance = Significance::OnePercent;
+        let tests = global_tests();
+        assert_eq!(test_status(&tests[0], significance), ("Pass", theme::GREEN));
+        assert_eq!(
+            test_status(&tests[1], significance),
+            ("Skipped", theme::TEXT_MUTED)
+        );
+        assert_eq!(test_status(&tests[2], significance), ("Info", theme::BLUE));
+        assert_eq!(test_status(&tests[3], significance), ("Fail", theme::RED));
+    }
+
+    #[test]
+    fn summary_tab_renders_warnings_and_both_length_layouts() {
+        let skipped = analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Character analysis needs a bigger sample.".to_string(),
+            },
+            Some(bit_analysis(entropy(10.0), Vec::new(), true)),
+            true,
+        );
+        let text = rendered_text(&frame(|ui| summary_tab(ui, &skipped)));
+        assert!(text.contains("Character analysis needs a bigger sample."));
+        assert!(text.contains("sample was truncated"));
+        assert!(text.contains("Token length: 16."));
+        assert!(text.contains("good"));
+
+        let mut performed = analysis(
+            CharacterAnalysis::Performed(character_result(2, None, false)),
+            None,
+            false,
+        );
+        performed.shortest = 8;
+        performed.longest = 16;
+        let text = rendered_text(&frame(|ui| summary_tab(ui, &performed)));
+        assert!(text.contains("Token length: 8 to 16 characters."));
+        assert!(!text.contains("sample was truncated"));
+    }
+
+    #[test]
+    fn character_tab_renders_skipped_performed_and_notes() {
+        let skipped = analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Character analysis was disabled.".to_string(),
+            },
+            None,
+            false,
+        );
+        let text = rendered_text(&frame(|ui| character_tab(ui, &skipped)));
+        assert!(text.contains("Character analysis was disabled."));
+
+        let note = analysis(
+            CharacterAnalysis::Performed(character_result(0, Some("Need more pairs."), true)),
+            None,
+            false,
+        );
+        let text = rendered_text(&frame(|ui| character_tab(ui, &note)));
+        assert!(text.contains("Need more pairs."));
+        assert!(text.contains("forced on a small sample"));
+        assert!(text.contains("Count tests: 4 run, 1 failed at 1%."));
+
+        let transitions = analysis(
+            CharacterAnalysis::Performed(character_result(3, None, false)),
+            None,
+            false,
+        );
+        let text = rendered_text(&frame(|ui| character_tab(ui, &transitions)));
+        assert!(text.contains("Transition tests: 3 run, 0 failed at 1%."));
+        assert!(!text.contains("forced on a small sample"));
+    }
+
+    #[test]
+    fn bit_tab_renders_skipped_truncated_and_failing_positions() {
+        let disabled = analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Skipped.".to_string(),
+            },
+            None,
+            false,
+        );
+        let text = rendered_text(&frame(|ui| bit_tab(ui, &disabled)));
+        assert!(text.contains("Bit-level analysis was disabled"));
+
+        let failing = analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Skipped.".to_string(),
+            },
+            Some(bit_analysis(Vec::new(), (0..60).collect(), true)),
+            false,
+        );
+        let text = rendered_text(&frame(|ui| bit_tab(ui, &failing)));
+        assert!(text.contains("0 of 56 bits."));
+        assert!(text.contains("and 12 more"));
+        assert!(text.contains("truncated to the analysis limit"));
+        assert!(text.contains("Pass"));
+        assert!(text.contains("Skipped"));
+        assert!(text.contains("Info"));
+        assert!(text.contains("Fail"));
+        assert!(text.contains("<0.00001"));
+        assert!(text.contains("-"));
+
+        let complete = analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Skipped.".to_string(),
+            },
+            Some(bit_analysis(entropy(9.5), vec![3], false)),
+            false,
+        );
+        let text = rendered_text(&frame(|ui| bit_tab(ui, &complete)));
+        assert!(text.contains("Failing bit positions: 3."));
+        assert!(!text.contains("and 0 more"));
+        assert!(!text.contains("truncated to the analysis limit"));
+    }
+
+    #[test]
+    fn analysis_settings_tab_reports_changed_settings() {
+        let analysis = analysis(
+            CharacterAnalysis::Performed(character_result(2, None, false)),
+            None,
+            false,
+        );
+        let mut settings = analysis.settings;
+        let mut rerun = true;
+        let text = rendered_text(&frame(|ui| {
+            rerun = analysis_settings_tab(ui, &mut settings, &analysis);
+        }));
+        assert!(!rerun);
+        assert!(text.contains("Re-run analysis"));
+        assert!(!text.contains("Settings have changed"));
+
+        settings.bit_analysis = false;
+        let text = rendered_text(&frame(|ui| {
+            rerun = analysis_settings_tab(ui, &mut settings, &analysis);
+        }));
+        assert!(!rerun);
+        assert!(text.contains("Settings have changed"));
+    }
+
+    #[test]
+    fn entropy_chart_and_table_handle_empty_and_large_samples() {
+        let empty = frame(|ui| entropy_chart(ui, &[], 0.0));
+        assert!(!empty.shapes.is_empty());
+
+        let large = frame(|ui| {
+            entropy_chart(ui, &entropy(2_000.0), 100.0);
+            entropy_table(ui, "perseid.test.entropy.empty", &entropy(5.0), 0.0);
+        });
+        let text = rendered_text(&large);
+        assert!(text.contains("0.0%"));
+        assert!(text.contains("5 bits"));
+    }
+
+    #[test]
+    fn sequencer_pages_render_tokens_and_capture_states() {
+        let mut history = History::new(10, 1024 * 1024);
+        history.load(Vec::new());
+
+        for section in [
+            SequencerSection::LiveCapture,
+            SequencerSection::ManualLoad,
+            SequencerSection::Settings,
+        ] {
+            let mut state = SequencerState::new();
+            state.section = section;
+            state.add_tokens(["deadbeef".to_string(), "cafebabe".to_string()]);
+            state.feedback = Some(Feedback {
+                error: section == SequencerSection::Settings,
+                text: "unit-test feedback".to_string(),
+            });
+            state.capture.active = section == SequencerSection::LiveCapture;
+            state.capture.responses_scanned = 7;
+
+            let text = rendered_text(&frame(|ui| state.ui(ui, &history)));
+            assert!(text.contains("unit-test feedback"));
+            if section != SequencerSection::Settings {
+                assert!(text.contains("deadbeef"));
+            }
+            match section {
+                SequencerSection::LiveCapture => {
+                    assert!(text.contains("Stop capture"));
+                    assert!(text.contains("Responses scanned:"));
+                    assert!(text.contains("7"));
+                }
+                SequencerSection::ManualLoad => assert!(text.contains("Manual load")),
+                SequencerSection::Settings => assert!(text.contains("Sequencer settings")),
+            }
+        }
+
+        let mut state = SequencerState::new();
+        state.section = SequencerSection::LiveCapture;
+        let text = rendered_text(&frame(|ui| state.ui(ui, &history)));
+        assert!(text.contains("Start live capture"));
+    }
+
+    #[test]
+    fn result_window_renders_every_tab_and_keeps_the_analysis() {
+        let ctx = egui::Context::default();
+        let mut state = SequencerState::new();
+        let both = analysis(
+            CharacterAnalysis::Performed(character_result(2, None, false)),
+            Some(bit_analysis(entropy(10.0), vec![1, 2], false)),
+            false,
+        );
+        state.result = Some(both);
+        state.result_open = true;
+        state.result_title = "Perseid Sequencer [unit test analysis #1]".to_string();
+
+        for (tab, expected) in [
+            (ResultTab::Summary, "Overall result"),
+            (ResultTab::Character, "Character-level analysis"),
+            (ResultTab::Bit, "Bit-level analysis"),
+            (ResultTab::Settings, "Analysis settings"),
+        ] {
+            state.result_tab = tab;
+            let output = run_pass(&ctx, Vec::new(), |ctx| state.result_window(ctx));
+            let text = rendered_text(&output);
+            assert!(text.contains(expected), "missing {expected:?}");
+            assert!(text.contains("Perseid Sequencer [unit test analysis #1]"));
+            assert!(state.result_open);
+            assert!(state.result.is_some());
+        }
+    }
+
+    #[test]
+    fn result_window_closes_on_escape_or_missing_analysis() {
+        let ctx = egui::Context::default();
+        let mut state = SequencerState::new();
+        state.result = Some(analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Skipped.".to_string(),
+            },
+            None,
+            false,
+        ));
+        state.result_open = true;
+        let escape = egui::Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run_pass(&ctx, vec![escape], |ctx| state.result_window(ctx));
+        assert!(!state.result_open);
+        assert!(state.result.is_none());
+
+        state.result_open = true;
+        state.result = None;
+        run_pass(&ctx, Vec::new(), |ctx| state.result_window(ctx));
+        assert!(!state.result_open);
+    }
+
+    #[test]
+    fn load_window_keeps_errors_and_cancels_on_escape() {
+        let ctx = egui::Context::default();
+        let mut state = SequencerState::new();
+        run_pass(&ctx, Vec::new(), |ctx| state.load_window(ctx));
+
+        state.load = Some(LoadDialog {
+            path: "/missing/tokens.txt".to_string(),
+            error: Some("could not read /missing/tokens.txt".to_string()),
+        });
+        let output = run_pass(&ctx, Vec::new(), |ctx| state.load_window(ctx));
+        assert!(state.load.is_some());
+        assert!(rendered_text(&output).contains("could not read /missing/tokens.txt"));
+
+        let escape = egui::Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run_pass(&ctx, vec![escape], |ctx| state.load_window(ctx));
+        assert!(state.load.is_none());
+    }
+
+    #[test]
+    fn clicking_load_reads_files_reports_errors_and_cancels() {
+        let ctx = egui::Context::default();
+        let mut state = SequencerState::new();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "perseid-sequencer-view-{}-{nonce}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&path, "alpha\nbeta").unwrap();
+
+        state.load = Some(LoadDialog {
+            path: path.display().to_string(),
+            error: None,
+        });
+        assert!(click_window_text(&ctx, "Load", |ctx| state.load_window(ctx)));
+        assert!(state.load.is_none());
+        assert_eq!(state.tokens, ["alpha", "beta"]);
+        assert_eq!(
+            state.feedback.as_ref().unwrap().text,
+            format!("Loaded 2 token(s) from {}.", path.display())
+        );
+
+        state.load = Some(LoadDialog {
+            path: path.display().to_string(),
+            error: None,
+        });
+        assert!(click_window_text(&ctx, "Load", |ctx| state.load_window(ctx)));
+        assert!(state.load.is_none());
+        assert_eq!(
+            state.feedback.as_ref().unwrap().text,
+            "No new tokens were found in that file."
+        );
+
+        state.load = Some(LoadDialog {
+            path: "/missing/perseid-tokens.txt".to_string(),
+            error: None,
+        });
+        assert!(click_window_text(&ctx, "Load", |ctx| state.load_window(ctx)));
+        let dialog = state.load.as_ref().unwrap();
+        assert!(
+            dialog
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("could not read"))
+        );
+
+        assert!(click_window_text(&ctx, "Cancel", |ctx| state.load_window(ctx)));
+        assert!(state.load.is_none());
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn clicking_result_settings_changes_options_and_reruns() {
+        let ctx = egui::Context::default();
+        let mut state = SequencerState::new();
+        state.tokens = vec![
+            "aaaaaaaaaaaaaaaa".to_string(),
+            "bbbbbbbbbbbbbbbb".to_string(),
+        ];
+        state.result = Some(analysis(
+            CharacterAnalysis::Skipped {
+                reason: "Skipped.".to_string(),
+            },
+            None,
+            false,
+        ));
+        state.result_open = true;
+
+        assert!(click_window_text(&ctx, "Analysis settings", |ctx| state.result_window(ctx)));
+        assert_eq!(state.result_tab, ResultTab::Settings);
+
+        assert!(click_window_text(&ctx, "Auto detect", |ctx| state.result_window(ctx)));
+        assert!(click_window_text(&ctx, "Base64", |ctx| state.result_window(ctx)));
+        assert_eq!(state.settings.analysis.format, TokenFormat::Base64);
+
+        assert!(click_window_text(&ctx, "1%", |ctx| state.result_window(ctx)));
+        assert!(click_window_text(&ctx, "0.1%", |ctx| state.result_window(ctx)));
+        assert_eq!(
+            state.settings.analysis.significance,
+            Significance::PointOnePercent
+        );
+
+        assert!(click_window_text(&ctx, "Auto", |ctx| state.result_window(ctx)));
+        assert!(click_window_text(&ctx, "Always", |ctx| state.result_window(ctx)));
+        assert_eq!(
+            state.settings.analysis.character_analysis,
+            CharacterAnalysisMode::Always
+        );
+
+        assert!(click_window_text(&ctx, "Re-run analysis", |ctx| state.result_window(ctx)));
+        assert_eq!(state.analysis_count, 1);
+        assert_eq!(state.result_tab, ResultTab::Summary);
+        assert!(state.result.is_some());
+        assert!(state.result_open);
+    }
+
+    #[test]
+    fn settings_defaults_cover_the_shared_controls() {
+        let settings = SequencerSettings::default();
+        assert_eq!(settings.capture_part, CapturePart::Body);
+        assert_eq!(
+            settings.capture_regex,
+            super::super::state::DEFAULT_CAPTURE_REGEX
+        );
+        assert!(settings.deduplicate);
+        assert_eq!(SequencerSection::default(), SequencerSection::ManualLoad);
+        assert_eq!(ResultTab::default(), ResultTab::Summary);
+        assert_eq!(
+            CapturePart::ALL.map(CapturePart::label),
+            ["Response body", "Response headers", "Headers and body"]
+        );
+        assert_eq!(
+            CharacterAnalysisMode::ALL
+                .map(CharacterAnalysisMode::label)
+                .len(),
+            3
+        );
+        assert_eq!(TokenFormat::ALL.map(TokenFormat::label).len(), 4);
+        assert_eq!(Significance::ALL.len(), 5);
+    }
+
+    #[test]
+    fn clicking_live_capture_controls_starts_stops_and_analyzes() {
+        let ctx = egui::Context::default();
+        let history = History::new(10, 1024);
+        let mut state = SequencerState::new();
+        state.section = SequencerSection::LiveCapture;
+        state.add_tokens([
+            "deadbeefcafebabe".to_string(),
+            "0011223344556677".to_string(),
+        ]);
+
+        assert!(click_text(&ctx, "Start live capture", |ui| state.ui(ui, &history)));
+        assert!(state.capture_active());
+        assert!(click_text(&ctx, "Stop capture", |ui| state.ui(ui, &history)));
+        assert!(!state.capture_active());
+        assert!(click_text(&ctx, "Analyze now", |ui| state.ui(ui, &history)));
+        assert!(state.result_open);
+        assert!(state.result.is_some());
+    }
+
+    #[test]
+    fn clicking_manual_workspace_controls_requests_and_clears() {
+        let ctx = egui::Context::default();
+        let history = History::new(10, 1024);
+        let mut state = SequencerState::new();
+        state.add_tokens([
+            "deadbeefcafebabe".to_string(),
+            "0011223344556677".to_string(),
+        ]);
+
+        assert!(click_text(&ctx, "Paste", |ui| state.ui(ui, &history)));
+        assert_eq!(state.paste.as_ref().map(|paste| paste.frames_left), Some(3));
+        state.paste = None;
+
+        assert!(click_text(&ctx, "Load...", |ui| state.ui(ui, &history)));
+        assert!(state.load.is_some());
+        state.load = None;
+
+        assert!(click_text(&ctx, "Clear", |ui| state.ui(ui, &history)));
+        assert!(state.tokens.is_empty());
+        assert_eq!(
+            state.feedback.as_ref().unwrap().text,
+            "Cleared the token sample."
+        );
+    }
+
+    #[test]
+    fn clicking_reset_restores_sequencer_defaults() {
+        let ctx = egui::Context::default();
+        let history = History::new(10, 1024);
+        let mut state = SequencerState::new();
+        state.section = SequencerSection::Settings;
+        state.settings.analysis.format = TokenFormat::Hex;
+        state.settings.analysis.bit_analysis = false;
+        state.settings.capture_regex = "custom".to_string();
+
+        assert!(click_text(&ctx, "Reset to defaults", |ui| state.ui(ui, &history)));
+        assert_eq!(state.settings.analysis, AnalysisSettings::default());
+        assert_eq!(
+            state.settings.capture_regex,
+            super::super::state::DEFAULT_CAPTURE_REGEX
+        );
+        assert_eq!(
+            state.feedback.as_ref().unwrap().text,
+            "Sequencer settings reset to defaults."
+        );
+    }
+
+    #[test]
+    fn clicking_settings_combos_updates_capture_and_analysis_options() {
+        let ctx = egui::Context::default();
+        let history = History::new(10, 1024);
+        let mut state = SequencerState::new();
+        state.section = SequencerSection::Settings;
+
+        assert!(click_text(&ctx, "Auto detect", |ui| state.ui(ui, &history)));
+        assert!(click_text(&ctx, "Hex", |ui| state.ui(ui, &history)));
+        assert_eq!(state.settings.analysis.format, TokenFormat::Hex);
+
+        assert!(click_text(&ctx, "1%", |ui| state.ui(ui, &history)));
+        assert!(click_text(&ctx, "10%", |ui| state.ui(ui, &history)));
+        assert_eq!(
+            state.settings.analysis.significance,
+            Significance::TenPercent
+        );
+
+        assert!(click_text(&ctx, "Auto", |ui| state.ui(ui, &history)));
+        assert!(click_text(&ctx, "Never", |ui| state.ui(ui, &history)));
+        assert_eq!(
+            state.settings.analysis.character_analysis,
+            CharacterAnalysisMode::Never
+        );
+
+        assert!(click_text(&ctx, "Response body", |ui| state.ui(ui, &history)));
+        assert!(click_text(&ctx, "Response headers", |ui| state.ui(ui, &history)));
+        assert_eq!(state.settings.capture_part, CapturePart::Headers);
+
+        assert!(click_text(&ctx, "Run bit-level analysis", |ui| state.ui(ui, &history)));
+        assert!(!state.settings.analysis.bit_analysis);
+
+        assert!(click_text(&ctx, "Ignore duplicate tokens", |ui| state.ui(ui, &history)));
+        assert!(!state.settings.deduplicate);
+    }
+
+    #[test]
+    fn clicking_section_tabs_and_manual_controls_updates_the_state() {
+        let ctx = egui::Context::default();
+        let history = History::new(10, 1024);
+        let mut state = SequencerState::new();
+        state.add_tokens([
+            "deadbeefcafebabe".to_string(),
+            "0011223344556677".to_string(),
+        ]);
+
+        assert!(click_text(&ctx, "Live capture", |ui| state.ui(ui, &history)));
+        assert_eq!(state.section, SequencerSection::LiveCapture);
+        assert!(click_text(&ctx, "Sequencer settings", |ui| state.ui(ui, &history)));
+        assert_eq!(state.section, SequencerSection::Settings);
+        assert!(click_text(&ctx, "Manual load", |ui| state.ui(ui, &history)));
+        assert_eq!(state.section, SequencerSection::ManualLoad);
+
+        assert!(click_text(&ctx, "Analyze now", |ui| state.ui(ui, &history)));
+        assert!(state.result_open);
+        assert!(state.result.is_some());
+        state.result_open = false;
+        state.result = None;
+
+        assert!(click_text(&ctx, "Clear sample", |ui| state.ui(ui, &history)));
+        assert!(state.tokens.is_empty());
+        assert_eq!(
+            state.feedback.as_ref().unwrap().text,
+            "Cleared the token sample."
+        );
+    }
+}

@@ -476,6 +476,86 @@ impl PerseidApp {
     }
 }
 
+#[cfg(test)]
+impl PerseidApp {
+    /// Minimal app state for tests that exercise tab controllers without
+    /// constructing the eframe shell, proxy, or TLS material.
+    pub(super) fn test_app() -> Self {
+        Self {
+            proxy: None,
+            proxy_error: None,
+            notify: Arc::new(|| {}),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            capture_limit: crate::proxy::DEFAULT_CAPTURE_LIMIT,
+            intercept_limit: crate::proxy::DEFAULT_INTERCEPT_LIMIT,
+            history: History::new(10, 1024),
+            dropped_seen: 0,
+            paused: false,
+            intercept_enabled: false,
+            intercept_responses: false,
+            intercept_queue: VecDeque::new(),
+            intercept_selected: BTreeSet::new(),
+            intercept_active: None,
+            intercept_anchor: None,
+            intercept_scroll_to_active: false,
+            scope_enforce: false,
+            match_replace: Vec::new(),
+            rules_error: None,
+            filter: String::new(),
+            visible: Vec::new(),
+            visible_key: None,
+            selected: None,
+            scroll_to_selected: false,
+            detail: None,
+            websocket_history: WebSocketHistory::new(10, 1024),
+            websocket_filter: String::new(),
+            websocket_visible: Vec::new(),
+            websocket_visible_key: None,
+            websocket_selected: None,
+            websocket_scroll_to_selected: false,
+            websocket_detail: None,
+            websocket_view: MessageView::default(),
+            main_tab: MainTab::default(),
+            proxy_section: ProxySection::default(),
+            target_section: TargetSection::default(),
+            request_view: MessageView::default(),
+            response_view: MessageView::default(),
+            inspector: inspector::InspectorState::default(),
+            search: search::SearchState::default(),
+            repeater: None,
+            repeater_tabs: Vec::new(),
+            repeater_active: 0,
+            repeater_next_tab: 1,
+            intruder_engine: None,
+            intruder: intruder::IntruderState::new(),
+            decoder: decoder::DecoderState::new(),
+            comparer: comparer::ComparerState::new(),
+            sequencer: sequencer::SequencerState::new(),
+            project: project_ui::ProjectUi::new(10, 1024),
+            site_map: None,
+            scope: BTreeSet::new(),
+            scope_enabled: false,
+            scope_input: String::new(),
+            ca_dir: PathBuf::new(),
+            tls_ca: None,
+            tls_ca_error: None,
+            tls_intercept: false,
+            tls_setup_open: false,
+            tls_passthrough: Vec::new(),
+            tls_passthrough_input: String::new(),
+            native_ui_scale: 1.0,
+            base_ui_scale: 1.0,
+            mark: None,
+            lockup: None,
+            memory: MemoryMeter::new(),
+            memory_open: false,
+            about_open: false,
+            #[cfg(feature = "screenshots")]
+            screenshots: None,
+        }
+    }
+}
+
 impl eframe::App for PerseidApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -551,6 +631,51 @@ impl eframe::App for PerseidApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn sequencer_shortcut_selects_the_tab_and_chrome_renders_its_status() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: Key::S,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_ui| app.keyboard(&ctx));
+        output.textures_delta.clear();
+        assert_eq!(app.main_tab, MainTab::Sequencer);
+
+        let output = frame(|ui| {
+            app.main_tabs(ui);
+            app.main_content(ui);
+        });
+        assert!(!output.shapes.is_empty());
+    }
 
     #[test]
     fn tabs_follow_burp_order() {

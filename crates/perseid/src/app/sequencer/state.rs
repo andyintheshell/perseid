@@ -631,4 +631,398 @@ mod tests {
         state.poll_capture(&history);
         assert_eq!(state.tokens, ["token=deadbeef"]);
     }
+
+    fn temp_token_path(tag: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "perseid-sequencer-{tag}-{}-{nonce}.txt",
+            std::process::id()
+        ))
+    }
+
+    fn paste(ctx: &Context, state: &mut SequencerState, text: &str) {
+        let input = egui::RawInput {
+            events: vec![egui::Event::Paste(text.to_string())],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_ui| state.handle_input(ctx));
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn add_tokens_ignores_empty_oversized_and_enforces_capacity() {
+        let mut state = SequencerState::new();
+        let oversized = "x".repeat(sequencer::MAX_TOKEN_CHARS + 1);
+        assert_eq!(
+            state.add_tokens(["".to_string(), "   ".to_string(), oversized]),
+            0
+        );
+        assert!(state.tokens.is_empty());
+
+        state.tokens = vec!["seed".to_string(); MAX_TOKENS];
+        state.seen_tokens.insert("seed".to_string());
+        assert_eq!(state.add_tokens(["new".to_string()]), 0);
+        let feedback = state.feedback.as_ref().unwrap();
+        assert!(feedback.error);
+        assert!(feedback.text.contains("at most"));
+    }
+
+    #[test]
+    fn status_summary_and_sample_stats_track_the_sample() {
+        let mut state = SequencerState::new();
+        assert_eq!(state.status_summary(), None);
+        assert_eq!(state.token_stats(), (None, None));
+
+        state.add_tokens(["ab".to_string(), "abcd".to_string()]);
+        assert_eq!(state.token_stats(), (Some(2), Some(4)));
+        assert_eq!(state.status_summary(), None);
+
+        state.capture.active = true;
+        assert_eq!(
+            state.status_summary().as_deref(),
+            Some("Sequencer capturing (2 tokens)")
+        );
+    }
+
+    #[test]
+    fn clipboard_paste_adds_tokens_and_counts_pending_frames() {
+        let ctx = Context::default();
+        let mut state = SequencerState::new();
+        state.handle_input(&ctx);
+        assert!(state.paste.is_none());
+        state.request_paste(&ctx);
+        assert_eq!(state.paste.as_ref().map(|paste| paste.frames_left), Some(3));
+
+        paste(&ctx, &mut state, "one,two\nthree");
+        assert_eq!(state.tokens, ["one", "two", "three"]);
+        assert!(state.paste.is_none());
+        let feedback = state.feedback.as_ref().unwrap();
+        assert!(!feedback.error);
+        assert_eq!(feedback.text, "Pasted 3 token(s).");
+
+        state.request_paste(&ctx);
+        paste(&ctx, &mut state, "one,two\nthree");
+        let feedback = state.feedback.as_ref().unwrap();
+        assert!(feedback.error);
+        assert!(feedback.text.contains("No new tokens"));
+
+        state.paste = Some(PasteState { frames_left: 2 });
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| state.handle_input(&ctx));
+        output.textures_delta.clear();
+        assert_eq!(state.paste.as_ref().map(|paste| paste.frames_left), Some(1));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| state.handle_input(&ctx));
+        output.textures_delta.clear();
+        assert!(state.paste.is_none());
+
+        state.request_paste(&ctx);
+        let input = egui::RawInput {
+            events: vec![egui::Event::Copy],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_ui| state.handle_input(&ctx));
+        output.textures_delta.clear();
+        assert_eq!(state.paste.as_ref().map(|paste| paste.frames_left), Some(2));
+    }
+
+    #[test]
+    fn start_capture_rejects_bad_regex_and_a_full_sample() {
+        let history = History::new(10, 1024);
+        let mut state = SequencerState::new();
+        state.settings.capture_regex = "   ".to_string();
+        state.start_capture(&history);
+        assert!(!state.capture_active());
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("enter a capture regex"))
+        );
+
+        state.settings.capture_regex = "(".to_string();
+        state.start_capture(&history);
+        assert!(!state.capture_active());
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("invalid capture regex"))
+        );
+
+        state.settings = SequencerSettings::default();
+        state.tokens = vec!["seed".to_string(); MAX_TOKENS];
+        state.start_capture(&history);
+        assert!(!state.capture_active());
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("token limit"))
+        );
+    }
+
+    #[test]
+    fn start_and_stop_capture_report_scan_progress() {
+        let mut history = History::new(10, 1024);
+        history.load(vec![history_item(1, b"old response")]);
+        let mut state = SequencerState::new();
+
+        state.start_capture(&history);
+        assert!(state.capture_active());
+        assert!(state.capture.seen.contains(&1));
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("Live capture started"))
+        );
+
+        state.capture.responses_scanned = 4;
+        state.stop_capture();
+        assert!(!state.capture_active());
+        let feedback = state.feedback.as_ref().unwrap();
+        assert!(!feedback.error);
+        assert!(feedback.text.contains("after scanning 4 response(s)"));
+    }
+
+    #[test]
+    fn poll_capture_stops_when_the_expression_becomes_invalid() {
+        let mut history = History::new(10, 1024);
+        history.load(vec![history_item(1, b"token=deadbeef")]);
+        let mut state = SequencerState::new();
+        state.capture.active = true;
+        state.capture.last_revision = 0;
+        state.settings.capture_regex = "(".to_string();
+
+        state.poll_capture(&history);
+        assert!(!state.capture_active());
+        assert!(state.tokens.is_empty());
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("invalid capture regex"))
+        );
+    }
+
+    #[test]
+    fn poll_capture_clears_seen_ids_when_the_history_is_cleared() {
+        let mut history = History::new(10, 1024);
+        history.load(vec![history_item(1, b"old response")]);
+        let mut state = SequencerState::new();
+        state.start_capture(&history);
+        assert!(!state.capture.seen.is_empty());
+
+        history.clear();
+        state.poll_capture(&history);
+        assert!(state.capture.seen.is_empty());
+        assert!(state.tokens.is_empty());
+    }
+
+    #[test]
+    fn poll_capture_skips_tunnels_and_unfinished_responses() {
+        let mut history = History::new(10, 1024);
+        let mut tunnel = history_item(1, b"");
+        tunnel.request.method = "CONNECT".to_string();
+        tunnel.phase = Phase::Finished {
+            duration: Duration::from_millis(1),
+            result: ExchangeResult::Tunnel {
+                client_to_server: 10,
+                server_to_client: 20,
+            },
+        };
+        let mut pending = history_item(2, b"");
+        pending.phase = Phase::InFlight;
+        pending.response = None;
+        let mut dropped = history_item(3, b"");
+        dropped.response = None;
+        dropped.phase = Phase::Finished {
+            duration: Duration::from_millis(1),
+            result: ExchangeResult::Dropped,
+        };
+        history.load(vec![
+            tunnel,
+            pending,
+            dropped,
+            history_item(4, b"token=deadbeef"),
+        ]);
+
+        let mut state = SequencerState::new();
+        state.capture.active = true;
+        state.capture.last_revision = 0;
+        state.settings.capture_regex = r"token=[0-9a-f]+".to_string();
+        state.poll_capture(&history);
+
+        assert_eq!(state.tokens, ["token=deadbeef"]);
+        assert_eq!(state.capture.responses_scanned, 1);
+        assert!(state.capture.seen.contains(&1));
+        assert!(state.capture.seen.contains(&4));
+        assert!(!state.capture.seen.contains(&2));
+        assert!(!state.capture.seen.contains(&3));
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("from 1 new response"))
+        );
+    }
+
+    #[test]
+    fn poll_capture_prunes_stale_seen_ids() {
+        let mut history = History::new(10, 1024);
+        history.load(vec![history_item(1, b"nothing")]);
+        let mut state = SequencerState::new();
+        state.capture.active = true;
+        state.capture.last_revision = 0;
+        state.capture.seen = (1_000..1_200).collect();
+
+        state.poll_capture(&history);
+        assert_eq!(state.capture.seen.len(), 1);
+        assert!(state.capture.seen.contains(&1));
+    }
+
+    #[test]
+    fn poll_capture_reports_no_new_tokens_and_stops_at_the_limit() {
+        let mut history = History::new(10, 1024);
+        history.load(vec![history_item(1, b"token=deadbeef")]);
+        let mut state = SequencerState::new();
+        state.add_tokens(["token=deadbeef".to_string()]);
+        state.capture.active = true;
+        state.capture.last_revision = 0;
+        state.settings.capture_regex = r"token=[0-9a-f]+".to_string();
+        state.poll_capture(&history);
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("no new tokens matched"))
+        );
+
+        let mut history = History::new(10, 1024);
+        history.load(vec![history_item(1, b"token=deadbeef token=cafebabe")]);
+        let mut state = SequencerState::new();
+        state.tokens = vec!["seed".to_string(); MAX_TOKENS - 1];
+        state.capture.active = true;
+        state.capture.last_revision = 0;
+        state.settings.capture_regex = r"token=[0-9a-f]+".to_string();
+        state.poll_capture(&history);
+        assert_eq!(state.tokens.len(), MAX_TOKENS);
+        assert!(!state.capture_active());
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("live capture stopped"))
+        );
+    }
+
+    #[test]
+    fn capture_from_history_reports_unusable_exchanges() {
+        let mut item = history_item(1, b"");
+        item.response = None;
+        item.phase = Phase::InFlight;
+        let mut state = SequencerState::new();
+        assert!(
+            state
+                .capture_from_history(&item)
+                .unwrap_err()
+                .contains("no response")
+        );
+
+        state.settings.capture_regex = r"token=[0-9a-f]+".to_string();
+        let item = history_item(2, b"nothing to see");
+        assert!(
+            state
+                .capture_from_history(&item)
+                .unwrap_err()
+                .contains("no tokens matched")
+        );
+
+        let item = history_item(3, b"token=deadbeef");
+        state.add_tokens(["token=deadbeef".to_string()]);
+        assert!(
+            state
+                .capture_from_history(&item)
+                .unwrap_err()
+                .contains("already loaded")
+        );
+    }
+
+    #[test]
+    fn analyze_now_reports_short_samples_and_decoding_errors() {
+        let mut state = SequencerState::new();
+        state.analyze_now("manual load");
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("at least two tokens"))
+        );
+
+        state.add_tokens(["zz".to_string(), "yy".to_string()]);
+        state.settings.analysis.format = sequencer::TokenFormat::Hex;
+        state.analyze_now("manual load");
+        assert!(
+            state
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.text.contains("not valid hexadecimal"))
+        );
+        assert!(state.result.is_none());
+    }
+
+    #[test]
+    fn read_token_file_handles_empty_missing_oversized_and_lossy_inputs() {
+        assert!(
+            read_token_file("")
+                .unwrap_err()
+                .contains("enter a file path")
+        );
+
+        let missing = temp_token_path("missing");
+        assert!(
+            read_token_file(missing.to_str().unwrap())
+                .unwrap_err()
+                .contains("could not read")
+        );
+
+        let good = temp_token_path("good");
+        std::fs::write(&good, b"one\n\xFFtwo").unwrap();
+        let text = read_token_file(good.to_str().unwrap()).unwrap();
+        assert!(text.contains("one"));
+        assert!(text.contains('\u{FFFD}'));
+        std::fs::remove_file(&good).unwrap();
+
+        let large = temp_token_path("large");
+        let file = std::fs::File::create(&large).unwrap();
+        file.set_len(MAX_TOKEN_FILE_BYTES + 1).unwrap();
+        drop(file);
+        let error = read_token_file(large.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("token files are limited"));
+        std::fs::remove_file(&large).unwrap();
+    }
+
+    #[test]
+    fn capture_text_requires_a_response_and_body() {
+        let mut item = history_item(1, b"");
+        item.response = None;
+        item.phase = Phase::InFlight;
+        assert!(capture_text(&item, CapturePart::Headers).is_none());
+        assert!(capture_text(&item, CapturePart::Body).is_none());
+        assert!(capture_text(&item, CapturePart::Both).is_none());
+
+        let mut dropped = history_item(2, b"body bytes");
+        dropped.phase = Phase::Finished {
+            duration: Duration::from_millis(1),
+            result: ExchangeResult::Dropped,
+        };
+        assert!(capture_text(&dropped, CapturePart::Body).is_none());
+        let headers = capture_text(&dropped, CapturePart::Headers).unwrap();
+        assert!(headers.contains("HTTP/1.1 200 OK"));
+        let both = capture_text(&dropped, CapturePart::Both).unwrap();
+        assert!(both.contains("HTTP/1.1 200 OK"));
+        assert!(!both.contains("body bytes"));
+    }
 }
