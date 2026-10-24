@@ -754,6 +754,24 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::ComparerResponse);
                                 ui.close();
                             }
+                            ui.separator();
+                            let curl_error = super::curl::validate(item).err();
+                            let curl_button = ui.add_enabled(
+                                curl_error.is_none(),
+                                egui::Button::new("Copy as curl"),
+                            );
+                            let curl_button = match curl_error {
+                                Some(error) => curl_button.on_disabled_hover_text(error.message()),
+                                None => curl_button.on_hover_text(
+                                    "Copy a POSIX-shell curl command to the clipboard; it will not run",
+                                ),
+                            };
+                            if curl_button.clicked() {
+                                if let Ok(command) = super::curl::generate(item) {
+                                    ui.ctx().copy_text(command);
+                                }
+                                ui.close();
+                            }
                         });
                     });
                 });
@@ -839,11 +857,11 @@ impl PerseidApp {
             )
             .show(ui, |ui| {
                 message_toolbar(ui, MessagePane::Request, &mut request_view, Some(item));
-                message_text(
+                super::message_view::request_message_text_with_curl(
                     ui,
                     id,
-                    MessagePane::Request,
                     request_view,
+                    item,
                     message_view_text(&cache.request, request_view),
                 );
             });

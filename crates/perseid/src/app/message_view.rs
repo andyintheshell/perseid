@@ -124,7 +124,37 @@ pub(super) fn message_text_labeled(
     copy_label: &str,
 ) {
     let mut readonly = text;
-    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label, None);
+    let _ = message_frame(
+        ui,
+        id,
+        pane,
+        mode,
+        &mut readonly,
+        MessageContext::new(copy_label),
+    );
+}
+
+/// Render a captured HTTP request pane with the Copy as curl context action.
+pub(super) fn request_message_text_with_curl(
+    ui: &mut egui::Ui,
+    id: u64,
+    mode: MessageView,
+    item: &HistoryItem,
+    text: &str,
+) {
+    let mut readonly = text;
+    let _ = message_frame(
+        ui,
+        id,
+        MessagePane::Request,
+        mode,
+        &mut readonly,
+        MessageContext {
+            copy_label: "Copy request",
+            matches: None,
+            curl_item: Some(item),
+        },
+    );
 }
 
 /// Render read-only message text with search-match backgrounds.
@@ -141,7 +171,18 @@ pub(super) fn message_text_with_matches(
         MessagePane::Response => "Copy response",
     };
     let mut readonly = text;
-    let _ = message_frame(ui, id, pane, mode, &mut readonly, copy_label, Some(matches));
+    let _ = message_frame(
+        ui,
+        id,
+        pane,
+        mode,
+        &mut readonly,
+        MessageContext {
+            copy_label,
+            matches: Some(matches),
+            curl_item: None,
+        },
+    );
 }
 
 /// Render the shared message frame with an editable text buffer.
@@ -159,7 +200,23 @@ pub(super) fn message_editor(
         MessagePane::Request => "Copy request",
         MessagePane::Response => "Copy response",
     };
-    message_frame(ui, id, pane, mode, text, copy_label, None)
+    message_frame(ui, id, pane, mode, text, MessageContext::new(copy_label))
+}
+
+struct MessageContext<'a> {
+    copy_label: &'a str,
+    matches: Option<&'a [Range<usize>]>,
+    curl_item: Option<&'a HistoryItem>,
+}
+
+impl<'a> MessageContext<'a> {
+    fn new(copy_label: &'a str) -> Self {
+        Self {
+            copy_label,
+            matches: None,
+            curl_item: None,
+        }
+    }
 }
 
 fn message_frame(
@@ -168,8 +225,7 @@ fn message_frame(
     pane: MessagePane,
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
-    copy_label: &str,
-    matches: Option<&[Range<usize>]>,
+    context: MessageContext<'_>,
 ) -> bool {
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
@@ -190,7 +246,7 @@ fn message_frame(
                 // proportional to the visible page rather than the whole dump.
                 message_hex(ui, id, pane, mode, text.as_str());
             } else {
-                let output = message_numbered(ui, id, pane, mode, text, matches);
+                let output = message_numbered(ui, id, pane, mode, text, context.matches);
                 selection = output.selection;
                 changed = output.changed;
             }
@@ -230,9 +286,27 @@ fn message_frame(
             ui.ctx().copy_text(selected.to_owned());
             ui.close();
         }
-        if ui.button(copy_label).clicked() {
+        if ui.button(context.copy_label).clicked() {
             ui.ctx().copy_text(text.as_str().to_owned());
             ui.close();
+        }
+        if let Some(item) = context.curl_item {
+            ui.separator();
+            let curl_error = super::curl::validate(item).err();
+            let curl_button =
+                ui.add_enabled(curl_error.is_none(), egui::Button::new("Copy as curl"));
+            let curl_button = match curl_error {
+                Some(error) => curl_button.on_disabled_hover_text(error.message()),
+                None => curl_button.on_hover_text(
+                    "Copy a POSIX-shell curl command to the clipboard; it will not run",
+                ),
+            };
+            if curl_button.clicked() {
+                if let Ok(command) = super::curl::generate(item) {
+                    ui.ctx().copy_text(command);
+                }
+                ui.close();
+            }
         }
     });
     changed

@@ -12,7 +12,7 @@ supports today. The result is input for milestone prioritization, not a
 feature-by-feature clone list.
 
 **Vendor documentation checked:** 20 October 2026. **Perseid status:** updated
-against the `0.2.0` development branch on 23 October 2026. The usage rankings
+against the `0.2.0` development branch on 24 October 2026. The usage rankings
 remain qualitative research; use the [capability matrix](burp-parity.md) for the
 live implementation status.
 
@@ -196,7 +196,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Match/replace rewriting | 8 | Replacer add-on | **Working**: request/response head and buffered UTF-8 body rules, literal or regex, applied after interception. Rules persist in saved projects. | Maintain |
 | Comparer / diff | 9 | 12 | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. Persistent projects save inputs; computed results are rebuilt. | Maintain |
 | WebSocket testing | 10 | 11 | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. Saved projects retain messages, but the UI loads a bounded snapshot. No interception, editing, replay, or fuzzing. | **P1 — M4** |
-| Evidence capture and reporting | 11 | 8 | **Partial**: saved projects retain captured exchanges and supported workspace inputs; clipboard copy is explicit. No HAR, curl, or report export. | **P2 — after parity** |
+| Evidence capture and reporting | 11 | 8 | **Partial**: saved projects retain captured exchanges and supported workspace inputs; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
 | Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: temporary projects are RAM-only and currently lack an aggregate capture-retention cap; saved projects use a local redb `.perseid` file with automatic writes and no disk-retention cap. No encryption or migrations. Search is limited to loaded HTTP history; older stored rows are not pageable/searchable yet. | **M3 — in progress** |
 | Sequencer / token analysis | 12 | 13 | **Missing**: no token sampling or randomness analysis. | **P1 — M4** |
 | Extensions, scripts, and automation/API | 13 | 10 and 14 | **Missing**: no extension point, scripting layer, or automation API. Native extensions are post-parity. | **Post-parity** |
@@ -264,9 +264,9 @@ That leaves:
 
 Reporting ranks eighth in ZAP and eleventh in Burp CE. Perseid does not need a
 full report generator to cover most of the manual evidence workflow. Copy as
-curl, save request/response, and HAR export would cover a large part of what
-testers actually do with captured evidence. A full templated reporting system
-can wait until after parity.
+curl has landed for HTTP history; save request/response and HAR export would
+cover more of what testers do with captured evidence. A full templated reporting
+system can wait until after parity.
 
 ### 5. Do not chase ZAP's scanner
 
