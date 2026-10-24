@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+import os
 import struct
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
 import check_screenshots
 
@@ -67,20 +68,47 @@ class ScreenshotPathTests(unittest.TestCase):
             + b"IHDR"
             + struct.pack(">II", 2560, 1600)
         )
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
             directory = Path(temporary).resolve()
             path = directory / "perseid-main.png"
             contents = header + b"\x00" * 8192
             path.write_bytes(contents)
-            reader = mock_open(read_data=contents).return_value
+            real_read = os.read
+            read_sizes = []
 
-            with patch.object(Path, "open", return_value=reader):
+            def record_read_size(fd: int, size: int) -> bytes:
+                read_sizes.append(size)
+                return real_read(fd, size)
+
+            with patch.object(check_screenshots.os, "read", side_effect=record_read_size):
                 self.assertEqual(
                     check_screenshots.png_size(directory, path.name),
                     (2560, 1600, len(contents)),
                 )
 
-            reader.read.assert_called_once_with(24)
+            self.assertEqual(read_sizes, [24])
+
+    def test_symlink_swapped_after_validation_is_not_opened(self) -> None:
+        with (
+            tempfile.TemporaryDirectory(dir=Path.cwd()) as workspace,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            directory = Path(workspace).resolve()
+            path = directory / "perseid-main.png"
+            path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+            secret = Path(outside) / "secret"
+            secret.write_bytes(b"secret contents")
+            real_open = os.open
+
+            def swap_before_open(file: str | os.PathLike[str], flags: int, **kwargs: int) -> int:
+                if file == path.name and "dir_fd" in kwargs:
+                    path.unlink()
+                    path.symlink_to(secret)
+                return real_open(file, flags, **kwargs)
+
+            with patch.object(check_screenshots.os, "open", side_effect=swap_before_open):
+                with self.assertRaises(OSError):
+                    check_screenshots.png_size(directory, path.name)
 
 
 if __name__ == "__main__":

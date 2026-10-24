@@ -9,6 +9,8 @@ and scripts/screenshots.sh runs it before replacing docs/images.
 
 from __future__ import annotations
 
+import os
+import stat
 import struct
 import sys
 from pathlib import Path
@@ -63,19 +65,67 @@ def resolve_screenshot(directory: Path, name: str) -> Path:
     if Path(name).name != name or name in {".", ".."}:
         raise ValueError("screenshot name must be a single filename")
 
-    path = (directory / name).resolve(strict=True)
+    candidate = directory / name
+    path = candidate.resolve(strict=True)
     if not is_within(path, directory):
         raise ValueError("screenshot resolves outside the screenshot directory")
+    if path != candidate:
+        raise ValueError("screenshot files cannot be symlinks")
     if not path.is_file():
         raise ValueError("not a regular file")
     return path
 
 
+def open_directory_beneath(directory: Path) -> int:
+    if (
+        os.open not in os.supports_dir_fd
+        or not hasattr(os, "O_DIRECTORY")
+        or not hasattr(os, "O_NOFOLLOW")
+    ):
+        raise OSError("this platform lacks safe relative directory opens")
+
+    root = Path.cwd().resolve(strict=True)
+    try:
+        relative = directory.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("directory resolves outside the working directory") from exc
+
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory_flags |= getattr(os, "O_CLOEXEC", 0)
+    directory_fd = os.open(".", directory_flags)
+    try:
+        for component in relative.parts:
+            child_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            parent_fd = directory_fd
+            directory_fd = child_fd
+            os.close(parent_fd)
+        return directory_fd
+    except BaseException:
+        os.close(directory_fd)
+        raise
+
+
+def read_screenshot_header(directory: Path, name: str) -> tuple[bytes, int]:
+    directory_fd = open_directory_beneath(directory)
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    file_flags |= getattr(os, "O_NONBLOCK", 0)
+    try:
+        file_fd = os.open(name, file_flags, dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+
+    try:
+        file_stat = os.fstat(file_fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise ValueError("not a regular file")
+        return os.read(file_fd, 24), file_stat.st_size
+    finally:
+        os.close(file_fd)
+
+
 def png_size(directory: Path, name: str) -> tuple[int, int, int]:
-    path = resolve_screenshot(directory, name)
-    size = path.stat().st_size
-    with path.open("rb") as image:
-        data = image.read(24)
+    resolve_screenshot(directory, name)
+    data, size = read_screenshot_header(directory, name)
     if len(data) < 24:
         raise ValueError("file is too short")
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
