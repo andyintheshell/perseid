@@ -572,6 +572,7 @@ fn target_section_record(section: TargetSection) -> TargetSectionRecord {
     match section {
         TargetSection::SiteMap => TargetSectionRecord::SiteMap,
         TargetSection::Scope => TargetSectionRecord::Scope,
+        TargetSection::Issues => TargetSectionRecord::Issues,
     }
 }
 
@@ -579,6 +580,7 @@ fn target_section_from_record(section: TargetSectionRecord) -> TargetSection {
     match section {
         TargetSectionRecord::SiteMap => TargetSection::SiteMap,
         TargetSectionRecord::Scope => TargetSection::Scope,
+        TargetSectionRecord::Issues => TargetSection::Issues,
     }
 }
 
@@ -843,6 +845,9 @@ impl PerseidApp {
         self.websocket_detail = None;
         self.scroll_to_selected = false;
         self.websocket_scroll_to_selected = false;
+        // Site-map filters and node selection are view-local and can refer to
+        // hosts or exchanges that are absent from the project just opened.
+        self.site_map_ui = target::SiteMapUi::new();
     }
 
     fn workspace_snapshot(&self) -> WorkspaceState {
@@ -1230,6 +1235,19 @@ mod tests {
         assert_eq!(app.search.workspace(), workspace.search);
         assert_eq!(app.sequencer.workspace(), workspace.sequencer);
         assert_eq!(app.workspace_snapshot(), workspace);
+    }
+
+    #[test]
+    fn target_issues_section_round_trips_through_the_workspace() {
+        let mut app = PerseidApp::test_app();
+        app.target_section = TargetSection::Issues;
+
+        let workspace = app.workspace_snapshot();
+        assert_eq!(workspace.ui.target_section, TargetSectionRecord::Issues);
+
+        app.target_section = TargetSection::SiteMap;
+        app.apply_workspace(&workspace);
+        assert_eq!(app.target_section, TargetSection::Issues);
     }
 
     #[test]
