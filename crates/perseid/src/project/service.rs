@@ -101,7 +101,7 @@ pub struct CaptureOutcome {
 
 enum Command {
     Capture(ProxyEvent),
-    SetWorkspace(WorkspaceState),
+    SetWorkspace(Box<WorkspaceState>),
     ClearHttp(Sender<Result<CommitReceipt>>),
     ClearWs(Sender<Result<CommitReceipt>>),
     InterruptInFlight {
@@ -278,7 +278,7 @@ impl ProjectHandle {
     /// the caller can retry instead of believing the state was persisted.
     pub fn set_workspace(&self, workspace: WorkspaceState) -> bool {
         self.sender
-            .try_send(Command::SetWorkspace(workspace))
+            .try_send(Command::SetWorkspace(Box::new(workspace)))
             .is_ok()
     }
 

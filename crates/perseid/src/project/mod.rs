@@ -16,8 +16,18 @@ mod transfer;
 use std::path::PathBuf;
 
 pub use records::{
-    DecoderPanelWorkspace, IntruderAttackRecord, IntruderWorkspace, RepeaterWorkspace,
-    RuleDirectionRecord, RulePartRecord, RuleWorkspace, ScopeWorkspace, WorkspaceState,
+    BodyWorkspace, CapturePartRecord, CompareModeRecord, ComparerWorkspace, DecoderCodecRecord,
+    DecoderColorTagRecord, DecoderHashRecord, DecoderOperationRecord, DecoderPanelWorkspace,
+    DecoderSpanWorkspace, DecoderViewRecord, InspectorNoteWorkspace, InspectorWorkspace,
+    IntruderAttackRecord, IntruderPlanWorkspace, IntruderResultOutcomeWorkspace,
+    IntruderResultWorkspace, IntruderWorkspace, MainTabRecord, MessagePaneRecord,
+    MessageViewRecord, MessageViewsWorkspace, ProxySectionRecord, RepeaterResponseWorkspace,
+    RepeaterWorkspace, ResultViewRecord, RuleDirectionRecord, RulePartRecord, RuleWorkspace,
+    ScopeWorkspace, SearchOptionsWorkspace, SearchWorkspace, SequencerAnalysisSettingsWorkspace,
+    SequencerCharacterAnalysisRecord, SequencerResultTabRecord, SequencerSectionRecord,
+    SequencerSettingsWorkspace, SequencerSignificanceRecord, SequencerTokenFormatRecord,
+    SequencerWorkspace, SideTabRecord, TargetSectionRecord, TextSelectionWorkspace, TlsWorkspace,
+    UiWorkspace, WorkspaceState,
 };
 pub use service::{CommitReceipt, OpenedProject, ProjectHandle, ProjectMode, ProjectStatus};
 

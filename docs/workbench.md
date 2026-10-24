@@ -44,12 +44,15 @@ from the open project.
 - **Save Project Copy…** writes a consistent copy to a new path and leaves the
   current project active. Its destination must also be new.
 
-Saved projects currently persist HTTP and WebSocket captures plus scope and
-match/replace rules, Repeater request tabs, Intruder request/payload settings,
-Decoder panel contents, and Comparer input items. They do not restore Inspector
-notes, Repeater responses, Intruder results, computed Comparer results, search
-state, or transient network/interception operations. The local TLS CA stays
-outside the project file.
+Saved projects persist HTTP and WebSocket captures plus the workbench state:
+scope and match/replace rules, the selected tab/section, filters, message views,
+Inspector notes and expanded sections, Repeater tabs and their last responses,
+Intruder configuration and result rows, Decoder panels, Comparer items and
+result-window state, Search state, Sequencer samples/analysis/settings, and TLS
+interception and pass-through settings. Active network work is not restored:
+running attacks or sends, held interception messages, pending operations, and
+proxy lifecycle state stay in the current session. The local TLS CA certificate
+and private key stay outside the project file.
 
 Project files are not encrypted. Treat a `.perseid` file as sensitive traffic:
 it can contain cookies, tokens, credentials, personal data, and binary bodies.
@@ -205,8 +208,8 @@ all non-empty sections. Query, form, and percent-encoded cookie values are
 decoded for display; the message editor continues to show the representation
 being forwarded. The Inspector reflects the captured exchange and does not
 rewrite it. Its width is draggable. The **Notes** tab stores a note per exchange
-for the current session; notes are not restored from a saved project, and
-clearing history also clears them.
+and saves notes, the active rail tab, and expanded sections with a persistent
+project. Clearing history also clears them.
 
 | View | Representation |
 | --- | --- |
@@ -272,7 +275,10 @@ detail header reports the match count.
 
 Search is limited to the currently loaded HTTP history snapshot. In a saved
 project, older rows remain on disk but are not searched yet. WebSocket messages,
-Repeater traffic, and their responses are not included.
+Repeater traffic, and their responses are not included. A persistent project
+saves the query, options, result IDs, selection, and views; on open, stored
+result IDs are checked against the loaded history snapshot and unknown rows are
+dropped.
 Matching uses the decoded body representation; uncompressed retained bodies
 are searched in full, while decoded compressed previews are bounded by the
 same decoder limits as the message editor.
@@ -373,8 +379,9 @@ up to 1,000 result rows and 64 MiB of result data, evicting the oldest rows. The
 engine queues at most 64 unread results (and 64 MiB) before applying
 backpressure. Generated requests are limited to 8 MiB with 64 KiB heads, each
 request has a 60-second timeout, and response bodies use the same capture limit
-as the rest of the app. Persistent projects save the attack configuration and
-payload sets, but not result rows; temporary projects keep both only in memory.
+as the rest of the app. Persistent projects save the attack configuration,
+payload sets, result rows, and result-window state; temporary projects keep
+them only in memory.
 
 ## Repeater
 
@@ -405,8 +412,9 @@ Captured history seeds use the decoded, bounded message representation, so
 compressed, binary, or large bodies can be lossy. Review seed warnings before
 sending. Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
-with up to eight concurrent sends. Request tabs are saved with a persistent
-project, but response history is not. WebSocket replay is absent.
+with up to eight concurrent sends. Request tabs and their most recent responses
+are saved with a persistent project; pending sends are not. WebSocket replay is
+absent.
 
 Admission is bounded across **queued requests, active sends, and unread results
 together**: at most **32 pending operations** and **64 MiB of retained-data
@@ -474,7 +482,8 @@ retained data as text or hex, not just the visible hex preview.
 Manual encode/decode/hash transforms accept at most 8 MiB of input and produce
 at most 16 MiB of output, including preserved selection prefixes/suffixes. There
 is no **Send to Decoder** action from message editors yet. Persistent projects
-restore Decoder panel contents, but not operation annotations or selections.
+restore Decoder panel contents, operation annotations, the last applied
+operation, Text/Hex view, and selection.
 
 ## Comparer
 
@@ -504,8 +513,10 @@ Comparer keeps up to **200 items** of **8 MiB each** in memory. A word compare
 accepts up to **2 MiB and 250,000 words per item**; a byte compare accepts up to
 **512 KiB per item** because Myers' algorithm is more expensive on bytes.
 Oversized inputs are rejected with a message, and both modes give the diff
-algorithm a 500 ms deadline. Comparer input items are saved with a persistent
-project; computed results and view state are rebuilt/reset when it is opened.
+algorithm a 500 ms deadline. Comparer input items, table selections, and
+result-window state are saved with a persistent project. The diff itself is
+recomputed when the project opens; a result whose inputs are missing or no
+longer fit the comparison limits is closed.
 
 ## Sequencer
 
@@ -549,8 +560,9 @@ The tab holds up to **10,000 tokens**, each up to **16,384 characters**; one
 analysis uses at most **5,000 tokens**, **1,024 character positions**, and
 **4,096 bit positions**. Longer input is truncated and the result window says
 so. Live capture starts with responses that arrive after it is armed, not with
-existing history. Samples, results, settings, and analysis windows are
-in-memory only and are not saved in a project.
+existing history. Persistent projects save the token sample, settings, last
+analysis source, and result-window state; the analysis is recomputed when the
+project opens. Live capture is not resumed.
 
 ## Keyboard shortcuts
 
@@ -589,11 +601,11 @@ separate Space, matching the system green-button behavior.
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
 | Temporary storage growth | The in-memory redb project retains accepted captures without an aggregate eviction cap. `--history-limit`/`--history-bytes` only bound the UI cache; RAM can grow until history is cleared or the app exits. |
-| Persistent project | One local `.perseid` redb file; captured records and supported workspace inputs auto-save. Files are plaintext, have no automatic disk-retention cap, and are not encrypted. |
+| Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, have no automatic disk-retention cap, and are not encrypted. |
 | Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
-| Persisted workspace | Scope, match/replace, Repeater request tabs, Intruder configuration/payloads, Decoder panel contents, and Comparer inputs. Sequencer samples/results/settings, Notes, response/attack results, computed diffs, search state, and transient selections are not restored. |
+| Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New Project confirms discard; Open Project has no save/discard prompt for a temporary project. Save As/Copy refuse to overwrite an existing file. |
-| Local CA | Persisted separately from projects; its private key is never included in a `.perseid` file. |
+| Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
 | Sequencer work | At most 10,000 tokens of 16,384 characters; analysis uses 5,000 tokens, 1,024 character positions, and 4,096 bit positions. Capture is limited to the retained history. |
 | Missing tools/protocols | No WebSocket message interception/replay or HTTP/3/QUIC support. |
 

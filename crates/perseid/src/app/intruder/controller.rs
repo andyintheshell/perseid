@@ -1,14 +1,20 @@
 //! Intruder engine control and workspace persistence.
 
-use crate::project::{IntruderAttackRecord, IntruderWorkspace};
+use std::time::Duration;
+
+use crate::project::{
+    BodyWorkspace, IntruderAttackRecord, IntruderPlanWorkspace, IntruderResultOutcomeWorkspace,
+    IntruderResultWorkspace, IntruderWorkspace, TextSelectionWorkspace,
+};
 use crate::proxy::{
     AttackType, DEFAULT_REPEATER_TIMEOUT, Intruder, IntruderConfig, IntruderError, IntruderEvent,
-    MAX_INTRUDER_CONCURRENCY, RepeaterRequest, marker_ranges, split_raw_request,
+    IntruderPlan, IntruderResult, MAX_INTRUDER_CONCURRENCY, RepeaterRequest, RepeaterResult,
+    marker_ranges, split_raw_request,
 };
 use crate::view;
 
-use super::super::{MainTab, MessagePane, MessageView, PerseidApp};
-use super::state::{IntruderState, PayloadSet, authority_from_uri};
+use super::super::{MainTab, PerseidApp};
+use super::state::{IntruderState, PayloadSet, authority_from_uri, result_size};
 
 impl PerseidApp {
     /// Send the selected HTTP exchange to the Intruder workspace.
@@ -204,6 +210,124 @@ impl PerseidApp {
     }
 }
 
+fn attack_record(attack: AttackType) -> IntruderAttackRecord {
+    match attack {
+        AttackType::Sniper => IntruderAttackRecord::Sniper,
+        AttackType::BatteringRam => IntruderAttackRecord::BatteringRam,
+        AttackType::Pitchfork => IntruderAttackRecord::Pitchfork,
+        AttackType::ClusterBomb => IntruderAttackRecord::ClusterBomb,
+    }
+}
+
+fn attack_from_record(attack: IntruderAttackRecord) -> AttackType {
+    match attack {
+        IntruderAttackRecord::Sniper => AttackType::Sniper,
+        IntruderAttackRecord::BatteringRam => AttackType::BatteringRam,
+        IntruderAttackRecord::Pitchfork => AttackType::Pitchfork,
+        IntruderAttackRecord::ClusterBomb => AttackType::ClusterBomb,
+    }
+}
+
+fn plan_workspace(plan: &IntruderPlan) -> IntruderPlanWorkspace {
+    IntruderPlanWorkspace {
+        attack: attack_record(plan.attack),
+        scheme: plan.scheme.clone(),
+        host: plan.host.clone(),
+        template: plan.template.clone(),
+        payload_sets: plan.payload_sets.clone(),
+        concurrency: plan.concurrency,
+        scope: plan.scope.clone(),
+    }
+}
+
+fn plan_from_workspace(plan: &IntruderPlanWorkspace) -> IntruderPlan {
+    IntruderPlan {
+        attack: attack_from_record(plan.attack),
+        scheme: plan.scheme.clone(),
+        host: plan.host.clone(),
+        template: plan.template.clone(),
+        payload_sets: plan.payload_sets.clone(),
+        concurrency: plan.concurrency,
+        scope: plan.scope.clone(),
+    }
+}
+
+fn result_workspace(result: &IntruderResult) -> IntruderResultWorkspace {
+    IntruderResultWorkspace {
+        attack_id: result.attack_id,
+        sequence: result.sequence,
+        payloads: result.payloads.clone(),
+        duration_ms: u64::try_from(result.duration.as_millis()).unwrap_or(u64::MAX),
+        outcome: match &result.result {
+            RepeaterResult::Response {
+                version,
+                status,
+                reason,
+                headers,
+                body,
+                body_error,
+            } => IntruderResultOutcomeWorkspace::Response {
+                version: version.clone(),
+                status: *status,
+                reason: reason.clone(),
+                headers: headers.clone(),
+                body: BodyWorkspace::from_body(body),
+                body_error: body_error.clone(),
+            },
+            RepeaterResult::Failed { error } => IntruderResultOutcomeWorkspace::Failed {
+                error: error.clone(),
+            },
+        },
+    }
+}
+
+fn result_from_workspace(result: &IntruderResultWorkspace) -> IntruderResult {
+    IntruderResult {
+        attack_id: result.attack_id,
+        sequence: result.sequence,
+        payloads: result.payloads.clone(),
+        duration: Duration::from_millis(result.duration_ms),
+        result: match &result.outcome {
+            IntruderResultOutcomeWorkspace::Response {
+                version,
+                status,
+                reason,
+                headers,
+                body,
+                body_error,
+            } => RepeaterResult::Response {
+                version: version.clone(),
+                status: *status,
+                reason: reason.clone(),
+                headers: headers.clone(),
+                body: body.to_body(),
+                body_error: body_error.clone(),
+            },
+            IntruderResultOutcomeWorkspace::Failed { error } => RepeaterResult::Failed {
+                error: error.clone(),
+            },
+        },
+    }
+}
+
+fn clamp_boundary(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+fn restore_selection(
+    text: &str,
+    selection: Option<&TextSelectionWorkspace>,
+) -> Option<std::ops::Range<usize>> {
+    let selection = selection?;
+    let start = clamp_boundary(text, selection.start);
+    let end = clamp_boundary(text, selection.end);
+    (start != end).then(|| start.min(end)..start.max(end))
+}
+
 impl PerseidApp {
     pub(in crate::app) fn intruder_workspace(&self) -> IntruderWorkspace {
         let state = &self.intruder;
@@ -211,12 +335,7 @@ impl PerseidApp {
             scheme: state.scheme.clone(),
             host: state.host.clone(),
             request: state.request.clone(),
-            attack: match state.attack {
-                AttackType::Sniper => IntruderAttackRecord::Sniper,
-                AttackType::BatteringRam => IntruderAttackRecord::BatteringRam,
-                AttackType::Pitchfork => IntruderAttackRecord::Pitchfork,
-                AttackType::ClusterBomb => IntruderAttackRecord::ClusterBomb,
-            },
+            attack: attack_record(state.attack),
             payload_sets: state
                 .payload_sets
                 .iter()
@@ -226,6 +345,24 @@ impl PerseidApp {
             concurrency: state.concurrency,
             update_host: state.update_host,
             note: state.note.clone(),
+            selection: state
+                .selection
+                .as_ref()
+                .map(|range| TextSelectionWorkspace {
+                    start: range.start,
+                    end: range.end,
+                }),
+            cursor: state.cursor,
+            results: state.results.iter().map(result_workspace).collect(),
+            selected: state.selected,
+            detail_pane: state.detail_pane.into(),
+            detail_view: state.detail_view.into(),
+            attack_id: state.attack_id,
+            last_plan: state.last_plan.as_ref().map(plan_workspace),
+            total: state.total,
+            received: state.received,
+            error: state.error.clone(),
+            finished_note: state.finished_note.clone(),
         }
     }
 
@@ -234,6 +371,8 @@ impl PerseidApp {
             && workspace.host.is_empty()
             && workspace.request.is_empty()
             && workspace.payload_sets.is_empty()
+            && workspace.results.is_empty()
+            && workspace.last_plan.is_none()
         {
             self.intruder = IntruderState::new();
             return;
@@ -242,12 +381,7 @@ impl PerseidApp {
         state.scheme = workspace.scheme.clone();
         state.host = workspace.host.clone();
         state.request = workspace.request.clone();
-        state.attack = match workspace.attack {
-            IntruderAttackRecord::Sniper => AttackType::Sniper,
-            IntruderAttackRecord::BatteringRam => AttackType::BatteringRam,
-            IntruderAttackRecord::Pitchfork => AttackType::Pitchfork,
-            IntruderAttackRecord::ClusterBomb => AttackType::ClusterBomb,
-        };
+        state.attack = attack_from_record(workspace.attack);
         state.payload_sets = if workspace.payload_sets.is_empty() {
             vec![PayloadSet::default()]
         } else {
@@ -264,23 +398,35 @@ impl PerseidApp {
         state.concurrency = workspace.concurrency.clamp(1, MAX_INTRUDER_CONCURRENCY);
         state.update_host = workspace.update_host;
         state.note = workspace.note.clone();
-        state.error = None;
+        state.error = workspace.error.clone();
         state.notice = None;
-        state.selection = None;
-        state.cursor = 0;
-        state.results.clear();
-        state.result_bytes = 0;
-        state.selected = None;
+        state.selection = restore_selection(&state.request, workspace.selection.as_ref());
+        state.cursor = clamp_boundary(&state.request, workspace.cursor);
+        state.results = workspace
+            .results
+            .iter()
+            .map(result_from_workspace)
+            .collect();
+        state.result_bytes = state.results.iter().fold(0usize, |total, result| {
+            total.saturating_add(result_size(result))
+        });
+        state.selected = workspace.selected.filter(|selected| {
+            state
+                .results
+                .iter()
+                .any(|result| result.sequence == *selected)
+        });
         state.detail = None;
-        state.detail_pane = MessagePane::Response;
-        state.detail_view = MessageView::Pretty;
-        state.attack_id = None;
-        state.last_plan = None;
+        state.detail_pane = workspace.detail_pane.into();
+        state.detail_view = workspace.detail_view.into();
+        state.attack_id = workspace.attack_id;
+        state.last_plan = workspace.last_plan.as_ref().map(plan_from_workspace);
         state.started_at = None;
-        state.total = 0;
-        state.received = 0;
+        state.total = workspace.total;
+        state.received = workspace.received;
         state.running = false;
         state.stopping = false;
-        state.finished_note = None;
+        state.finished_note = workspace.finished_note.clone();
+        state.ensure_detail();
     }
 }

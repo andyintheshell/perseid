@@ -70,27 +70,30 @@ aids, not permission to test an arbitrary host.
 
 Perseid has two project modes:
 
-- **Temporary (default):** captured history and supported workbench state stay
-  in an in-memory redb project. Accepted captures currently have no aggregate
-  retention cap; the UI's `--history-limit`/`--history-bytes` cache bounds do
-  not prevent project-store RAM from growing. Data is discarded on exit unless
+- **Temporary (default):** captured history and project-scoped workbench state
+  stay in an in-memory redb project. Accepted captures currently have no
+  aggregate retention cap; the UI's `--history-limit`/`--history-bytes` cache
+  bounds do not prevent project-store RAM from growing. Data is discarded on exit unless
   you use **File > Save Project As…**. **New Project** warns before discarding;
   opening another project does not ask whether to save the temporary one.
 - **Persistent:** **Save Project As…** or **Open Project…** uses one
   user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
-  supported workspace inputs are committed automatically. **Save Project
+  project-scoped workbench state are committed automatically. **Save Project
   Copy…** creates another file. There is no encryption at rest, and no
   configurable disk-retention limit; `--history-limit` and `--history-bytes`
   bound the UI snapshot/cache, not the saved file. Clear history to remove
   stored captures.
 
-Saved workbench state includes scope, match/replace rules, Repeater request tabs,
-Intruder request/payload settings, Decoder panel contents, and Comparer input
-items. It does not include Inspector notes, Repeater responses, Intruder results,
-computed Comparer results, search state, or active network/interception tasks.
-Opening a project loads only a bounded newest-first history snapshot today;
-older records remain in the file but are not yet pageable or searchable from the
-UI. The project does not include the local TLS CA private key.
+Saved workbench state includes scope, match/replace rules, the selected
+tab/section, filters, message views, Inspector notes and sections, Repeater tabs
+and their last responses, Intruder configuration and results, Decoder panels,
+Comparer items and result-window state, Search state, Sequencer
+samples/settings/analysis, and TLS interception and pass-through hosts. It does
+not include running attacks or sends, held interception messages, pending
+network operations, or proxy lifecycle state. Opening a project loads only a
+bounded newest-first history snapshot today; older records remain in the file
+but are not yet pageable or searchable from the UI. The project does not include
+the local TLS CA certificate or private key.
 
 New project files are created owner-only (`0600`) on Unix; Windows uses the
 user's normal filesystem ACLs. This is access control, not encryption. Project

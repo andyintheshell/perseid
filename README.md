@@ -46,7 +46,7 @@ browser required.**
 | Tool | Available today |
 | --- | --- |
 | **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; host/path site map; Pretty, Raw, and Hex message views; Copy as curl for complete captures; gzip, deflate, and Brotli decoding. |
-| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and supported workbench state. Older saved history is stored but not yet pageable in the UI. |
+| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and project-scoped workbench state. Older saved history is stored but not yet pageable in the UI. |
 | **Search** | Search the currently loaded HTTP-history snapshot's request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted Pretty/Raw/Hex results. Older saved rows are not searched yet. |
 | **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
 | **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
@@ -117,16 +117,17 @@ Perseid is already usable for hands-on HTTP security testing, but there are
 important boundaries:
 
 - **Project persistence is an initial slice.** `.perseid` files save captured
-  HTTP/WebSocket history and supported workspace inputs, but the UI only loads
-  a bounded newest-first history snapshot; older stored rows are not pageable or
+  HTTP/WebSocket history and the full workbench state, but the UI only loads a
+  bounded newest-first history snapshot; older stored rows are not pageable or
   searchable yet. Files are not encrypted, migrations and recent-projects are
   not implemented, and temporary-project contents are lost on exit unless saved.
   The temporary in-memory redb store also lacks an aggregate retention cap, so
   RAM use can grow with captured traffic; `--history-*` flags only bound the UI
   cache.
-- **Not all tool state is persisted.** Repeater responses, Intruder results,
-  Inspector notes, computed Comparer results, and transient selections are not
-  restored. The local TLS CA is stored separately from project files.
+- **Transient activity is not persisted.** Running attacks and sends, held
+  interception decisions, pending network operations, and proxy lifecycle state
+  are not restored. The local TLS CA certificate and private key are stored
+  separately from project files.
 - **No WebSocket editing or replay yet.** WebSocket frames can be captured and
   inspected, but not intercepted, modified, or resent.
 - **Not an automated scanner.** There is no crawler, automated vulnerability

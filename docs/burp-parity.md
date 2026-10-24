@@ -47,15 +47,15 @@ Decoder, Comparer, and Sequencer.
 | **Scope and rewrite rules** | ✅ Working | Filter views by scope; optionally block out-of-scope proxy requests and `CONNECT` tunnels; recheck edited targets. Match/replace supports literal or regex rules on message heads and buffered UTF-8 bodies. |
 | **Target site map** | 🟡 Partial | Host/path tree derived from the currently loaded history snapshot; it is not a crawler. Cache eviction can hide entries without deleting saved records; clearing history removes the records. |
 | **HTTP history** | 🟡 Partial | Captures are stored in a persistent project when one is open; temporary redb storage retains captures in RAM without an aggregate eviction cap. The UI loads a bounded newest-first snapshot and does not yet page through older saved rows. Complete captures can be copied as curl. |
-| **Search** | ➕ Beyond CE | Search the currently loaded HTTP-history request/response heads and decoded bodies with case, regex, negative-match, in-scope, and live-update filters; results highlight in Pretty/Raw/Hex. Older saved rows, WebSocket messages, and Repeater traffic are not included. |
+| **Search** | ➕ Beyond CE | Search the currently loaded HTTP-history request/response heads and decoded bodies with case, regex, negative-match, in-scope, and live-update filters; results highlight in Pretty/Raw/Hex. Query, options, result IDs, selection, and views persist with a project; result IDs missing from the loaded snapshot are dropped. Older saved rows, WebSocket messages, and Repeater traffic are not included. |
 | **WebSocket history** | 🟡 Partial | Capture complete text and binary messages for `ws://` and decrypted `wss://`; saved projects retain them, but the UI loads a bounded snapshot. No message interception, editing, or replay. |
-| **Repeater** | 🟡 Partial | Editable HTTP/HTTPS request tabs, history seeding, target/virtual-host control, and response views. Persistent projects save request tabs and drafts, not response history. No WebSocket replay. Direct sends bypass proxy scope, interception, and rewrite rules. |
-| **Decoder** | 🟡 Partial | Stacked Text/Hex panels, common encode/decode operations, 31 hashes, Smart decode, and selection-aware transforms. Projects save panel contents, but not operation annotations or selections. Provider-specific hash variants and Send to Decoder remain missing. |
-| **Comparer** | ✅ Working | Shared item list, word- and byte-level differences, Text/Hex views, difference navigation, and synchronized scrolling. Persistent projects save input items; computed results and view state are rebuilt/reset on open. |
-| **Intruder** | ✅ Working | `$$` positions; Sniper, Battering ram, Pitchfork, and Cluster bomb; up to 32 concurrent requests with scope checks. Projects save request/payload configuration, not result rows. No payload processing. |
+| **Repeater** | 🟡 Partial | Editable HTTP/HTTPS request tabs, history seeding, target/virtual-host control, and response views. Persistent projects save request tabs and their last responses. No WebSocket replay. Direct sends bypass proxy scope, interception, and rewrite rules. |
+| **Decoder** | 🟡 Partial | Stacked Text/Hex panels, common encode/decode operations, 31 hashes, Smart decode, and selection-aware transforms. Projects save panel contents, operation annotations, view, and selection. Provider-specific hash variants and Send to Decoder remain missing. |
+| **Comparer** | ✅ Working | Shared item list, word- and byte-level differences, Text/Hex views, difference navigation, and synchronized scrolling. Persistent projects save input items, selections, and result-window state; the diff is recomputed on open. |
+| **Intruder** | ✅ Working | `$$` positions; Sniper, Battering ram, Pitchfork, and Cluster bomb; up to 32 concurrent requests with scope checks. Projects save request/payload configuration and result rows. No payload processing. |
 | **Sequencer** | 🟡 Partial | Manual token loading and live regex capture from HTTP history; character-level count/transition tests; bit-position and whole-stream tests; effective-entropy chart and per-analysis settings. Capture is expression-based rather than parameter-aware, and the statistical results are bounded approximations. |
 | **Memory display** | ✅ Working | Current and peak allocator heap with a rolling graph; this is not total process RSS. |
-| **Project persistence** | 🟡 Partial · ➕ Beyond CE | Temporary projects by default; Save As/Open/Save Copy use one local redb `.perseid` file with automatic writes. Temporary RAM storage and persistent disk storage have no aggregate retention cap. No encryption or schema migrations; saved history is not yet pageable beyond the bounded UI snapshot. Burp CE itself does not include project files. |
+| **Project persistence** | 🟡 Partial · ➕ Beyond CE | Temporary projects by default; Save As/Open/Save Copy use one local redb `.perseid` file with automatic writes for captured history and workbench state. Temporary RAM storage and persistent disk storage have no aggregate retention cap. No encryption or schema migrations; saved history is not yet pageable beyond the bounded UI snapshot. Local CA material and transient network/interception activity are not stored. Burp CE itself does not include project files. |
 
 For usage details, limits, and safety behavior, see the
 [Workbench guide](workbench.md), [HTTPS guide](tls.md), and
@@ -73,8 +73,9 @@ For usage details, limits, and safety behavior, see the
   limit. Concurrency is user-controlled and bounded, and scope checks are
   explicit.
 - **Persistence is a Perseid extra:** local `.perseid` projects are implemented
-  for supported captures and workbench inputs. They are not required to match
-  Burp CE; see the matrix for current paging, migration, and saved-state limits.
+  for captures and project-scoped workbench state, excluding CA material and
+  transient network activity. They are not required to match Burp CE; see the
+  matrix for current paging, migration, and saved-state limits.
 
 ## Milestones
 

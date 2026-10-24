@@ -20,10 +20,46 @@ mod view;
 
 use crate::app::inspector::InspectorModel;
 use crate::app::{MessagePane, MessageView};
+use crate::history::History;
+use crate::project::{SearchOptionsWorkspace, SearchWorkspace};
 use crate::view::MessageViews;
 
 use self::engine::{SearchMatcher, SearchOptions};
 use super::PerseidApp;
+
+impl From<SearchOptions> for SearchOptionsWorkspace {
+    fn from(options: SearchOptions) -> Self {
+        Self {
+            case_sensitive: options.case_sensitive,
+            regex: options.regex,
+            negative: options.negative,
+            in_scope_only: options.in_scope_only,
+            dynamic_update: options.dynamic_update,
+            proxy_history: options.proxy_history,
+            request_headers: options.request_headers,
+            request_body: options.request_body,
+            response_headers: options.response_headers,
+            response_body: options.response_body,
+        }
+    }
+}
+
+impl From<&SearchOptionsWorkspace> for SearchOptions {
+    fn from(options: &SearchOptionsWorkspace) -> Self {
+        Self {
+            case_sensitive: options.case_sensitive,
+            regex: options.regex,
+            negative: options.negative,
+            in_scope_only: options.in_scope_only,
+            dynamic_update: options.dynamic_update,
+            proxy_history: options.proxy_history,
+            request_headers: options.request_headers,
+            request_body: options.request_body,
+            response_headers: options.response_headers,
+            response_body: options.response_body,
+        }
+    }
+}
 
 /// Formatted detail for the selected search result. Rebuilt when the
 /// selection changes, just like the Proxy detail cache.
@@ -109,6 +145,53 @@ impl SearchState {
         self.ran = false;
         self.dirty = false;
         self.last_history_revision = None;
+    }
+
+    pub(super) fn workspace(&self) -> SearchWorkspace {
+        SearchWorkspace {
+            open: self.open,
+            query: self.query.clone(),
+            options: self.options.into(),
+            ran: self.ran,
+            dirty: self.dirty,
+            results: self.results.clone(),
+            selected: self.selected,
+            pane: self.pane.into(),
+            request_view: self.request_view.into(),
+            response_view: self.response_view.into(),
+            error: self.error.clone(),
+        }
+    }
+
+    pub(super) fn apply_workspace(&mut self, workspace: &SearchWorkspace, history: &History) {
+        self.open = workspace.open;
+        self.query = workspace.query.clone();
+        self.options = (&workspace.options).into();
+        self.error = workspace.error.clone();
+        self.ran = workspace.ran;
+        self.dirty = workspace.dirty;
+        self.results = workspace
+            .results
+            .iter()
+            .copied()
+            .filter(|id| history.get(*id).is_some())
+            .collect();
+        self.selected = workspace.selected.filter(|id| self.results.contains(id));
+        self.pane = workspace.pane.into();
+        self.request_view = workspace.request_view.into();
+        self.response_view = workspace.response_view.into();
+        self.detail = None;
+        self.focus_query = false;
+        self.table_width = None;
+        self.last_history_revision = Some(history.revision());
+        self.matcher = if self.ran && !self.dirty && self.error.is_none() {
+            SearchMatcher::new(&self.query, self.options.case_sensitive, self.options.regex)
+                .ok()
+                .map(|matcher| matcher.with_negative(self.options.negative))
+        } else {
+            None
+        };
+        self.ensure_detail(history);
     }
 
     /// Build the deterministic Search scene used by the documentation

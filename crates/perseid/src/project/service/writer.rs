@@ -70,7 +70,7 @@ pub(super) fn run_writer(
                     }
                 }
             }
-            Command::SetWorkspace(workspace) => match codec::encode(&workspace) {
+            Command::SetWorkspace(workspace) => match codec::encode_large(&workspace) {
                 Ok(bytes) => {
                     if last_workspace.as_deref() != Some(bytes.as_slice()) {
                         match write_workspace(&db, &bytes) {

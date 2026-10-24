@@ -567,7 +567,7 @@ pub(super) fn authority_from_uri(uri: &str) -> String {
         .to_string()
 }
 
-fn result_size(result: &IntruderResult) -> usize {
+pub(super) fn result_size(result: &IntruderResult) -> usize {
     let payloads: usize = result
         .payloads
         .iter()

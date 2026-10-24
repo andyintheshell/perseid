@@ -16,7 +16,7 @@ use egui::TextEdit;
 use super::message_view::message_text;
 use super::widgets::{empty_state, message_mode_tab, section_tab};
 use super::*;
-use crate::project::RepeaterWorkspace;
+use crate::project::{RepeaterResponseWorkspace, RepeaterWorkspace};
 use crate::view::{self, MessageViews};
 
 const REPEATER_TABS_ID: &str = "perseid.repeater.tabs";
@@ -699,13 +699,28 @@ impl PerseidApp {
                 host: tab.host.clone(),
                 request: tab.request.clone(),
                 note: tab.note.clone(),
+                response: tab
+                    .response
+                    .as_ref()
+                    .map(|response| RepeaterResponseWorkspace {
+                        views: (&response.views).into(),
+                        status: response.status,
+                        reason: response.reason.clone(),
+                        duration_ms: u64::try_from(response.duration.as_millis())
+                            .unwrap_or(u64::MAX),
+                        size: response.size,
+                        truncated: response.truncated,
+                        body_complete: response.body_complete,
+                        body_error: response.body_error.clone(),
+                    }),
+                error: tab.error.clone(),
+                response_view: tab.response_view.into(),
             })
             .collect()
     }
 
-    pub(super) fn apply_repeater_workspace(&mut self, tabs: &[RepeaterWorkspace]) {
+    pub(super) fn apply_repeater_workspace(&mut self, tabs: &[RepeaterWorkspace], active: usize) {
         self.repeater_tabs.clear();
-        self.repeater_active = 0;
         let mut next_id = 1;
         for workspace in tabs {
             let id = workspace.id.max(next_id);
@@ -716,8 +731,21 @@ impl PerseidApp {
             tab.host = workspace.host.clone();
             tab.request = workspace.request.clone();
             tab.note = workspace.note.clone();
+            tab.response = workspace.response.as_ref().map(|response| RepeaterReply {
+                views: (&response.views).into(),
+                status: response.status,
+                reason: response.reason.clone(),
+                duration: Duration::from_millis(response.duration_ms),
+                size: response.size,
+                truncated: response.truncated,
+                body_complete: response.body_complete,
+                body_error: response.body_error.clone(),
+            });
+            tab.error = workspace.error.clone();
+            tab.response_view = workspace.response_view.into();
             self.repeater_tabs.push(tab);
         }
+        self.repeater_active = active.min(self.repeater_tabs.len().saturating_sub(1));
         self.repeater_next_tab = next_id;
     }
 }
