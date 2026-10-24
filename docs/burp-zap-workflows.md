@@ -184,7 +184,7 @@ Status values: **Working** means the workflow is usable end to end today;
 
 | Workflow | Burp CE rank | ZAP rank | Perseid today | Priority |
 | --- | --- | --- | --- | --- |
-| Proxy capture and HTTP history | 1 | 2 | **Working**: persistent projects store captured records; the temporary redb store retains captures in RAM without an aggregate eviction cap. The UI shows a bounded newest-first snapshot and Search covers that loaded snapshot; older saved rows are not pageable yet. | Maintain; finish paging/search and retention |
+| Proxy capture and HTTP history | 1 | 2 | **Working**: persistent projects store captured records; the temporary redb store evicts the oldest captures at configurable aggregate count and retained-body limits. The UI shows a bounded newest-first snapshot and Search covers that loaded snapshot; older saved rows are not pageable yet. | Maintain; finish paging/search |
 | Repeater / manual request editor | 2 | 4 | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. Persistent projects save request tabs and their last responses. WebSocket replay is absent; direct sends bypass proxy scope and rewriting. | Maintain; WebSocket in M4 |
 | Intercept and edit | 3 | 2 (manual explore) | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, and binary bodies are limited; WebSocket messages are captured in history but cannot be held or edited. | Maintain |
 | Target scope and site map | 4 | 3 | **Partial**: scope filtering/blocking and saved scope work; the site map has a Burp-style host/folder tree, display filters, and Contents table but is derived from the bounded history snapshot. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve with full-history queries |
@@ -197,7 +197,7 @@ Status values: **Working** means the workflow is usable end to end today;
 | Comparer / diff | 9 | 12 | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. Persistent projects save inputs, selections, and result-window state; the diff is recomputed on open. | Maintain |
 | WebSocket testing | 10 | 11 | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. Saved projects retain messages, but the UI loads a bounded snapshot. No interception, editing, replay, or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | 11 | 8 | **Partial**: saved projects retain captured exchanges and project-scoped workbench state; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
-| Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: temporary projects are RAM-only and currently lack an aggregate capture-retention cap; saved projects use a local redb `.perseid` file with automatic writes for captures and project-scoped workbench state, and no disk-retention cap. No encryption or migrations. Search is limited to loaded HTTP history; older stored rows are not pageable/searchable yet. | **M3 — in progress** |
+| Persistence and search | No project files; search is Pro-only | ZAP session database plus a Search tab[16][29] | **Partial**: temporary projects are RAM-only with configurable aggregate count/body retention and Save/Discard/Cancel prompts before New/Open; saved projects use a local redb `.perseid` file with automatic writes for captures and project-scoped workbench state, and no disk-retention cap. No encryption or migrations. Search is limited to loaded HTTP history; older stored rows are not pageable/searchable yet. | **M3 — in progress** |
 | Sequencer / token analysis | 12 | 13 | **Partial**: manual and live regex token sampling; character- and bit-level randomness tests; effective-entropy chart and per-analysis settings. No parameter-aware capture; statistics are bounded approximations. | Maintain |
 | Extensions, scripts, and automation/API | 13 | 10 and 14 | **Missing**: no extension point, scripting layer, or automation API. Native extensions are post-parity. | **Post-parity** |
 
@@ -224,8 +224,8 @@ transforms and a replaceable downstream chain. That closes the gaps where the
 product stopped after capture or forced payload edits into an external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
-paging and searching the full saved history, recent-project/unsaved-work
-prompts, and a Send to Decoder action. Comparer now closes the "change one thing
+paging and searching the full saved history, a recent-project list and quit
+prompt, and a Send to Decoder action. Comparer now closes the "change one thing
 and compare" loop with a shared item list and paired diff views. WebSocket
 message replay remains in M4; project files already preserve Repeater request
 tabs and responses, Intruder results, and the other project-scoped workspace

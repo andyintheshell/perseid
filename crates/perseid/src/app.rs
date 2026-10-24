@@ -63,7 +63,9 @@ use crate::branding;
 use crate::ca_store;
 use crate::history::History;
 use crate::memory::MemoryMeter;
-use crate::project::{MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace};
+use crate::project::{
+    MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace, RetentionLimits, WorkspaceState,
+};
 use crate::site_map::{self, SiteMap};
 use crate::theme;
 use crate::view::{self, MessageViews};
@@ -308,6 +310,9 @@ pub struct PerseidApp {
     comparer: comparer::ComparerState,
     sequencer: sequencer::SequencerState,
     project: project_ui::ProjectUi,
+    /// Workspace captured when the current project was opened, used to detect
+    /// unsaved workbench edits before replacing a temporary project.
+    project_baseline_workspace: WorkspaceState,
     site_map: Option<(u64, SiteMap)>,
     site_map_ui: target::SiteMapUi,
     scope: BTreeSet<String>,
@@ -426,6 +431,7 @@ impl PerseidApp {
         }
         let tls_intercept = !args.no_tls_intercept && tls_ca.is_some();
         let tls_setup_open = ca_created && tls_intercept;
+        let temporary_retention = configured_retention(&args);
 
         let mut app = Self {
             proxy: None,
@@ -477,7 +483,12 @@ impl PerseidApp {
             decoder: decoder::DecoderState::new(),
             comparer: comparer::ComparerState::new(),
             sequencer: sequencer::SequencerState::new(),
-            project: project_ui::ProjectUi::new(args.history_limit, args.history_bytes),
+            project: project_ui::ProjectUi::new(
+                args.history_limit,
+                args.history_bytes,
+                temporary_retention,
+            ),
+            project_baseline_workspace: WorkspaceState::default(),
             site_map: None,
             site_map_ui: target::SiteMapUi::new(),
             scope: BTreeSet::new(),
@@ -500,6 +511,7 @@ impl PerseidApp {
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
+        app.project_baseline_workspace = app.workspace_snapshot();
         #[cfg(feature = "screenshots")]
         if let Some(dir) = args.screenshot_dir.clone() {
             match screenshots::ScreenshotDriver::new(dir) {
@@ -544,7 +556,7 @@ impl PerseidApp {
     /// Minimal app state for tests that exercise tab controllers without
     /// constructing the eframe shell, proxy, or TLS material.
     pub(super) fn test_app() -> Self {
-        Self {
+        let mut app = Self {
             proxy: None,
             proxy_error: None,
             notify: Arc::new(|| {}),
@@ -594,7 +606,12 @@ impl PerseidApp {
             decoder: decoder::DecoderState::new(),
             comparer: comparer::ComparerState::new(),
             sequencer: sequencer::SequencerState::new(),
-            project: project_ui::ProjectUi::new(10, 1024),
+            project: project_ui::ProjectUi::new(
+                10,
+                1024,
+                crate::project::RetentionLimits::default(),
+            ),
+            project_baseline_workspace: WorkspaceState::default(),
             site_map: None,
             site_map_ui: target::SiteMapUi::new(),
             scope: BTreeSet::new(),
@@ -616,7 +633,9 @@ impl PerseidApp {
             about_open: false,
             #[cfg(feature = "screenshots")]
             screenshots: None,
-        }
+        };
+        app.project_baseline_workspace = app.workspace_snapshot();
+        app
     }
 }
 
@@ -692,9 +711,42 @@ impl eframe::App for PerseidApp {
     }
 }
 
+/// Temporary retention defaults to the effective UI cache limits (clamped to
+/// at least one, as the caches are) but can be configured independently. An
+/// explicit `--temporary-retention-* 0` disables that dimension; saved projects
+/// never evict.
+fn configured_retention(args: &Args) -> RetentionLimits {
+    RetentionLimits::new(
+        args.temporary_retention_limit
+            .unwrap_or(args.history_limit.max(1) as u64),
+        args.temporary_retention_bytes
+            .unwrap_or(args.history_bytes.max(1) as u64),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn temporary_retention_defaults_to_the_history_limits_and_honours_overrides() {
+        let mut args =
+            Args::parse_from(["perseid", "--history-limit", "7", "--history-bytes", "99"]);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(7, 99));
+
+        args.temporary_retention_limit = Some(3);
+        args.temporary_retention_bytes = Some(0);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(3, 0));
+    }
+
+    #[test]
+    fn temporary_retention_follows_the_effective_cache_limits_when_unset() {
+        // The UI caches clamp zero to one, so the default retention limits do
+        // the same instead of silently disabling retention.
+        let args = Args::parse_from(["perseid", "--history-limit", "0", "--history-bytes", "0"]);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(1, 1));
+    }
 
     fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
         let ctx = egui::Context::default();

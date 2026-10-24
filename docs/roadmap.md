@@ -11,9 +11,10 @@ definition of done, and deliberate deviations.
 milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
 project-persistence workflow are available. The remaining M3 work is
-paging/search over all saved history, project workflow polish, and project-wide
-retention controls. The temporary in-memory project currently has no aggregate
-capture-retention cap, and saved files have no automatic disk cap. HTTP/2,
+paging/search over all saved history, recent-project and quit prompts, and
+persistent disk-retention controls. Temporary capture retention is bounded by
+configurable aggregate count and retained-body limits; saved files still have
+no automatic disk cap. HTTP/2,
 WebSocket history, Intruder, and Sequencer arrived ahead of the protocol
 milestone. This is a sequence of capabilities, not a schedule or release
 promise.
@@ -61,9 +62,11 @@ promise.
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
   project-scoped workbench state are written automatically. On open, the UI loads
   only a bounded newest-first history snapshot; older records remain on disk but
-  are not yet pageable or searchable. Temporary storage has no aggregate capture
-  eviction cap. There are no recent-projects or
-  save/discard-on-quit prompts, and schema migrations are not implemented.
+  are not yet pageable or searchable. Temporary storage evicts the oldest
+  captures when it exceeds the configurable aggregate count or retained-body
+  limits. New Project and Open Project ask Save/Discard/Cancel when the current
+  temporary project has unsaved work; a recent-project list and quit prompt are
+  not implemented, and schema migrations are not implemented.
   Search covers the loaded HTTP-history heads and decoded bodies with case,
   regex, negative-match, in-scope, and live-update filters. Project-scoped
   workbench state persists: UI selections/views, Inspector notes and sections,

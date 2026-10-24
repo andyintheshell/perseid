@@ -204,8 +204,10 @@ cargo run -p perseid --locked -- --listen 127.0.0.1:8081 --ui-scale 1.5
 | `--listen <ADDR>` | `127.0.0.1:8080` | Proxy listen address; keep it on loopback. |
 | `--capture-limit <BYTES>` | `1048576` (1 MiB) | Body bytes retained per request/response. |
 | `--intercept-limit <BYTES>` | `1048576` (1 MiB) | Maximum body size eligible for buffering/editing or rewriting. |
-| `--history-limit <N>` | `2000` | Maximum number of HTTP exchanges or WebSocket messages held in each UI history cache / loaded project snapshot. Does not cap total project storage. |
-| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Per-cache in-memory UI budget for HTTP and WebSocket history. In persistent projects this bounds the opened snapshot, not disk retention; it does not cap temporary redb storage either. |
+| `--history-limit <N>` | `2000` | Maximum number of HTTP exchanges or WebSocket messages held in each UI history cache / loaded project snapshot. Does not cap saved project files. Also the default for `--temporary-retention-limit`. |
+| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Per-cache in-memory UI budget for HTTP and WebSocket history. In persistent projects this bounds the opened snapshot, not disk retention. Also the default for `--temporary-retention-bytes`. |
+| `--temporary-retention-limit <N>` | `--history-limit` | Maximum combined HTTP + WebSocket records retained by a temporary project. `0` disables the count limit. Oldest records are evicted first; saved projects never evict. |
+| `--temporary-retention-bytes <BYTES>` | `--history-bytes` | Maximum retained HTTP request/response body bytes plus WebSocket payload bytes in a temporary project. `0` disables the byte limit. The newest record is always kept. |
 | `--no-proxy` | Off | Open the UI without starting the proxy. |
 | `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA store lives; use the active certificate/key paths shown in the UI. |
 | `--no-tls-intercept` | Off | Keep HTTPS tunnels opaque; the CA is still prepared. |
@@ -234,9 +236,13 @@ separate from the capture/history flags above; see
 The current `0.2.0` workspace supports saved projects, but the first UI
 integration opens only a bounded newest-first snapshot of stored history; older
 records stay in the project file but cannot yet be paged or searched from the
-app. Temporary projects currently retain accepted captures in an in-memory
-redb store without an aggregate eviction cap, so RAM can grow with traffic.
-Project files are not encrypted and schema migrations are not implemented.
+app. Temporary projects evict the oldest captured records and released body
+bytes when they exceed the configurable aggregate retention limits, which
+default to the history flags. New and Open ask Save/Discard/Cancel before
+replacing a temporary project with unsaved work; a failed save or a cancelled
+switch keeps the current project. Saved files are not automatically pruned and
+have no disk-retention cap. Project files are not encrypted and schema
+migrations are not implemented.
 WebSocket messages can be captured and inspected, but not edited or replayed;
 HTTP/3/QUIC is absent. Sequencer capture is regex-based and its statistical
 results are indicative. The published `0.1.0` release does not yet include

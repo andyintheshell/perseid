@@ -47,9 +47,15 @@ WebSocket editing/replay and automated scanning are not implemented. Project
 persistence is an initial slice: it has no encryption or schema migrations, and
 the UI currently opens only a bounded newest-first history snapshot. See the
 [workbench guide](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#projects-and-persistence)
-for exactly what is saved. Temporary projects also lack an aggregate storage
-retention cap, so RAM use can grow with captured traffic; history flags bound
-only the UI cache. Burp Suite and Burp Suite Community Edition are
+for exactly what is saved. Temporary projects evict the oldest captured
+records when they exceed the configurable `--temporary-retention-limit` and
+`--temporary-retention-bytes` limits (which default to the history flags; `0`
+disables a dimension). The limits are soft, not a hard RAM ceiling: each
+stream's newest record is kept even when it alone exceeds the byte budget,
+in-flight HTTP exchanges are kept until they complete, and headers, indexes,
+and database overhead are outside the byte budget. Saved project files are not
+automatically pruned and can grow until the disk fills. Burp Suite and Burp
+Suite Community Edition are
 trademarks of PortSwigger Ltd. Perseid is independently developed, contains no
 PortSwigger software or logos, and is not affiliated with, sponsored by, or
 endorsed by PortSwigger Ltd. References to Burp are for comparison only.

@@ -22,11 +22,13 @@ aids, not permission to test an arbitrary host.
 - The HTTP and WebSocket history **UI caches** each accept up to
   `--history-limit` (2000 entries by default) and receive the configured
   `--history-bytes` budget (half of physical memory by default, with a
-  256 MiB fallback if installed memory is unavailable). These settings do not
-  cap the project store. The temporary in-memory redb project currently retains
-  accepted captures without aggregate eviction, so RAM can grow with traffic.
-  In a saved project, stored history remains until explicitly cleared and can
-  grow until the disk fills.
+  256 MiB fallback if installed memory is unavailable). The temporary
+  in-memory redb project additionally evicts the oldest captured records when
+  it exceeds `--temporary-retention-limit` combined HTTP/WebSocket records or
+  `--temporary-retention-bytes` retained body/payload bytes; both default to
+  the history settings and can be disabled with `0`. In a saved project,
+  stored history remains until explicitly cleared and can grow until the disk
+  fills.
 - The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
   once by default. Excess connections are closed; excess CONNECT requests get
   a 503 response. Both limits are library configuration, not browser settings.
@@ -71,18 +73,20 @@ aids, not permission to test an arbitrary host.
 Perseid has two project modes:
 
 - **Temporary (default):** captured history and project-scoped workbench state
-  stay in an in-memory redb project. Accepted captures currently have no
-  aggregate retention cap; the UI's `--history-limit`/`--history-bytes` cache
-  bounds do not prevent project-store RAM from growing. Data is discarded on exit unless
-  you use **File > Save Project As…**. **New Project** warns before discarding;
-  opening another project does not ask whether to save the temporary one.
+  stay in an in-memory redb project. The oldest captured records are evicted
+  when the temporary store exceeds its aggregate count or retained-body limits
+  (`--temporary-retention-limit`/`--temporary-retention-bytes`, defaulting to
+  `--history-limit`/`--history-bytes`). Data is discarded on exit unless you
+  use **File > Save Project As…**. **New Project** and **Open Project** ask
+  Save/Discard/Cancel before replacing a temporary project that has unsaved
+  records or workbench edits; Save opens Save As and only continues after a
+  successful save. A quit prompt is not implemented.
 - **Persistent:** **Save Project As…** or **Open Project…** uses one
   user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
   project-scoped workbench state are committed automatically. **Save Project
   Copy…** creates another file. There is no encryption at rest, and no
-  configurable disk-retention limit; `--history-limit` and `--history-bytes`
-  bound the UI snapshot/cache, not the saved file. Clear history to remove
-  stored captures.
+  configurable disk-retention limit; persistent projects are never pruned
+  automatically.
 
 Saved workbench state includes scope, match/replace rules, the selected
 tab/section, filters, message views, Inspector notes and sections, Repeater tabs
@@ -92,7 +96,9 @@ samples/settings/analysis, and TLS interception and pass-through hosts. It does
 not include running attacks or sends, held interception messages, pending
 network operations, or proxy lifecycle state. Opening a project loads only a
 bounded newest-first history snapshot today; older records remain in the file
-but are not yet pageable or searchable from the UI. The project does not include
+but are not yet pageable or searchable from the UI. If a stored HTTP, WebSocket,
+or workspace snapshot cannot be decoded, the open fails visibly and the
+previously open project stays active. The project does not include
 the local TLS CA certificate or private key.
 
 New project files are created owner-only (`0600`) on Unix; Windows uses the

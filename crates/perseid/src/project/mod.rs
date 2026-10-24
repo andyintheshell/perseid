@@ -29,7 +29,9 @@ pub use records::{
     SequencerWorkspace, SideTabRecord, TargetSectionRecord, TextSelectionWorkspace, TlsWorkspace,
     UiWorkspace, WorkspaceState,
 };
-pub use service::{CommitReceipt, OpenedProject, ProjectHandle, ProjectMode, ProjectStatus};
+pub use service::{
+    CommitReceipt, OpenedProject, ProjectHandle, ProjectMode, ProjectStatus, RetentionLimits,
+};
 
 /// Errors returned by the project subsystem.
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +56,12 @@ pub enum ProjectError {
     RecordTooLarge { size: usize, limit: usize },
     #[error("this is not a valid Perseid project: {0}")]
     InvalidProject(String),
+    #[error("could not load the {component}: {source}")]
+    Snapshot {
+        component: &'static str,
+        #[source]
+        source: Box<ProjectError>,
+    },
     #[error("the project was created by a newer version (schema {found}, supported {supported})")]
     FutureSchema { found: u64, supported: u64 },
     #[error("the project uses an unsupported record version ({found}, supported {supported})")]

@@ -40,6 +40,48 @@ mod tests;
 
 const COMMAND_QUEUE: usize = 4096;
 
+/// Default count cap for a temporary project. The app derives its own default
+/// from `--history-limit`; this keeps the library constructor bounded too.
+pub const DEFAULT_TEMPORARY_RETENTION_RECORDS: u64 = 2_000;
+/// Default retained-body cap for a temporary project.
+pub const DEFAULT_TEMPORARY_RETENTION_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Aggregate retention limits for the in-memory project.
+///
+/// A zero value disables that dimension. Limits are applied oldest-first after
+/// each capture transaction commits; persistent projects never evict records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetentionLimits {
+    pub max_records: u64,
+    pub max_body_bytes: u64,
+}
+
+impl RetentionLimits {
+    pub const fn new(max_records: u64, max_body_bytes: u64) -> Self {
+        Self {
+            max_records,
+            max_body_bytes,
+        }
+    }
+
+    pub(crate) fn count_exceeded(self, records: u64) -> bool {
+        self.max_records > 0 && records > self.max_records
+    }
+
+    pub(crate) fn bytes_exceeded(self, bytes: u64) -> bool {
+        self.max_body_bytes > 0 && bytes > self.max_body_bytes
+    }
+}
+
+impl Default for RetentionLimits {
+    fn default() -> Self {
+        Self::new(
+            DEFAULT_TEMPORARY_RETENTION_RECORDS,
+            DEFAULT_TEMPORARY_RETENTION_BYTES,
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProjectMode {
     Temporary,
@@ -73,6 +115,7 @@ pub struct ProjectStatus {
     pub last_committed_sequence: u64,
     pub capture_loss_count: u64,
     pub event_loss_count: u64,
+    pub retention_evictions: u64,
     pub last_error: Option<String>,
 }
 
@@ -142,27 +185,46 @@ pub struct ProjectHandle {
 }
 
 impl ProjectHandle {
-    /// Start a new temporary, in-memory project.
+    /// Start a new temporary, in-memory project with the default retention caps.
+    #[allow(dead_code)] // Used by unit tests; the app supplies explicit CLI limits.
     pub fn temporary() -> Result<Self> {
-        let meta = ProjectMeta::new(new_project_id());
-        let db = backend::create_memory(&meta)?;
-        Self::from_database(db, ProjectMode::Temporary)
+        Self::temporary_with_retention(RetentionLimits::default())
     }
 
-    fn from_database(db: Database, mode: ProjectMode) -> Result<Self> {
+    /// Start a new temporary project with explicit aggregate retention limits.
+    pub fn temporary_with_retention(limits: RetentionLimits) -> Result<Self> {
+        let meta = ProjectMeta::new(new_project_id());
+        let db = backend::create_memory(&meta)?;
+        Self::from_database(db, ProjectMode::Temporary, limits)
+    }
+
+    fn from_database(
+        db: Database,
+        mode: ProjectMode,
+        temporary_retention: RetentionLimits,
+    ) -> Result<Self> {
         // Re-read the metadata written by the backend so the service and the
         // file can never disagree about counters or identity.
         let read = db.begin_read()?;
         let meta = schema::read_meta(&read)?;
         drop(read);
         let db = Arc::new(db);
-        let shared = Shared::new(db.clone(), &meta, mode);
+        let shared = Shared::new(db.clone(), &meta, mode.clone());
         let (sender, receiver) = mpsc::sync_channel(COMMAND_QUEUE);
         let thread = {
             let shared = shared.clone();
             thread::Builder::new()
                 .name("perseid-project-writer".to_string())
-                .spawn(move || run_writer(receiver, shared, db, meta))
+                .spawn(move || {
+                    run_writer(
+                        receiver,
+                        shared,
+                        db,
+                        meta,
+                        mode.clone(),
+                        temporary_retention,
+                    )
+                })
                 .map_err(ProjectError::Io)?
         };
         Ok(Self {
