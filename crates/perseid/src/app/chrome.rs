@@ -286,6 +286,7 @@ impl PerseidApp {
             ui.ctx().format_shortcut(&TAB_PROXY_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_INTRUDER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_REPEATER_SHORTCUT),
+            ui.ctx().format_shortcut(&TAB_SEQUENCER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_DECODER_SHORTCUT),
             ui.ctx().format_shortcut(&TAB_COMPARER_SHORTCUT),
         ];
@@ -371,6 +372,11 @@ impl PerseidApp {
             }
 
             if let Some(summary) = self.intruder.status_summary() {
+                ui.separator();
+                ui.colored_label(theme::BLUE, summary);
+            }
+
+            if let Some(summary) = self.sequencer.status_summary() {
                 ui.separator();
                 ui.colored_label(theme::BLUE, summary);
             }

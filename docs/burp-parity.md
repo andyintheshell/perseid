@@ -22,19 +22,20 @@ implementation, or compatibility with Burp extensions.
 | ✅ Working | 🟡 Partial | 🛠 Planned |
 | --- | --- | --- |
 | HTTP/HTTPS proxy and intercept | Bounded history view and site map | Paging/search across all saved history |
-| Scope and match/replace | Repeater and Decoder | Sequencer |
-| Comparer and Intruder | WebSocket capture/history; project persistence | WebSocket edit and replay; migrations |
+| Scope and match/replace | Repeater, Decoder, and Sequencer | WebSocket edit and replay |
+| Comparer and Intruder | WebSocket capture/history; project persistence | Migrations |
 | Memory display | — | — |
 
 **➕ Perseid extra:** searchable HTTP history. **↔ Deliberate differences:** no
 bundled browser or Burp BApp compatibility. **⛔ Non-goals:** automated
-scanning/crawling and Collaborator/OAST. Sequencer is planned, but is not
-implemented yet.
+scanning/crawling and Collaborator/OAST. Sequencer provides a bounded,
+expression-based sampling and analysis workflow; it is not a byte-for-byte
+reimplementation of Burp's test suite.
 
 ![Perseid HTTP history with request, response, and Inspector panes](images/perseid-main.png)
 
 Browse the [screenshot gallery](screenshots.md) for Search, Intruder, Repeater,
-Decoder, and Comparer.
+Decoder, Comparer, and Sequencer.
 
 ## Capability matrix
 
@@ -52,7 +53,7 @@ Decoder, and Comparer.
 | **Decoder** | 🟡 Partial | Stacked Text/Hex panels, common encode/decode operations, 31 hashes, Smart decode, and selection-aware transforms. Projects save panel contents, but not operation annotations or selections. Provider-specific hash variants and Send to Decoder remain missing. |
 | **Comparer** | ✅ Working | Shared item list, word- and byte-level differences, Text/Hex views, difference navigation, and synchronized scrolling. Persistent projects save input items; computed results and view state are rebuilt/reset on open. |
 | **Intruder** | ✅ Working | `$$` positions; Sniper, Battering ram, Pitchfork, and Cluster bomb; up to 32 concurrent requests with scope checks. Projects save request/payload configuration, not result rows. No payload processing. |
-| **Sequencer** | 🛠 Planned | No token-randomness analysis workflow yet. |
+| **Sequencer** | 🟡 Partial | Manual token loading and live regex capture from HTTP history; character-level count/transition tests; bit-position and whole-stream tests; effective-entropy chart and per-analysis settings. Capture is expression-based rather than parameter-aware, and the statistical results are bounded approximations. |
 | **Memory display** | ✅ Working | Current and peak allocator heap with a rolling graph; this is not total process RSS. |
 | **Project persistence** | 🟡 Partial · ➕ Beyond CE | Temporary projects by default; Save As/Open/Save Copy use one local redb `.perseid` file with automatic writes. Temporary RAM storage and persistent disk storage have no aggregate retention cap. No encryption or schema migrations; saved history is not yet pageable beyond the bounded UI snapshot. Burp CE itself does not include project files. |
 
@@ -82,7 +83,7 @@ For usage details, limits, and safety behavior, see the
 | **M1 — Proxy core** | ✅ Complete: HTTP/1.1 proxy, interception, scope, and match/replace. |
 | **M2 — HTTPS** | ✅ Complete: local CA lifecycle, TLS interception, and pass-through. |
 | **M3 — Daily workbench** | 🟡 In progress: Repeater, Decoder, Comparer, Search, and local project files are available; paging/search across the full saved history and project workflow polish remain. |
-| **M4 — Protocols and testing tools** | 🟡 In progress: HTTP/2, WebSocket capture/history, and Intruder are available; Sequencer and WebSocket editing/replay remain. |
+| **M4 — Protocols and testing tools** | 🟡 In progress: HTTP/2, WebSocket capture/history, Intruder, and Sequencer are available; WebSocket editing/replay remains. |
 | **M5 — Parity hardening** | 🟡 In progress: release packages are published; clean-install testing, crash recovery, accessibility, and broader parity audits remain. |
 
 ## When does a capability count as parity?

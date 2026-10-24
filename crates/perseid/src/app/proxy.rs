@@ -15,6 +15,7 @@ use super::*;
 enum HistoryRowAction {
     Repeater,
     Intruder,
+    Sequencer,
     ComparerRequest,
     ComparerResponse,
 }
@@ -696,6 +697,7 @@ impl PerseidApp {
                         };
                         let can_send = !item.is_tunnel();
                         let has_response = item.response.is_some();
+                        let can_capture = has_response && !item.is_in_flight();
                         let response = row.response().on_hover_text(hover);
                         if response.clicked() || response.secondary_clicked() {
                             clicked = Some(id);
@@ -754,6 +756,23 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::ComparerResponse);
                                 ui.close();
                             }
+                            ui.separator();
+                            if ui
+                                .add_enabled(
+                                    can_capture,
+                                    egui::Button::new("Send response to Sequencer"),
+                                )
+                                .on_hover_text(
+                                    "Extract tokens from the highlighted response with the Sequencer capture regex",
+                                )
+                                .on_disabled_hover_text(
+                                    "Wait for a response before extracting tokens",
+                                )
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::Sequencer);
+                                ui.close();
+                            }
                         });
                     });
                 });
@@ -765,6 +784,7 @@ impl PerseidApp {
         match action {
             Some(HistoryRowAction::Repeater) => self.send_selected_to_repeater(),
             Some(HistoryRowAction::Intruder) => self.send_selected_to_intruder(),
+            Some(HistoryRowAction::Sequencer) => self.send_selected_to_sequencer(),
             Some(HistoryRowAction::ComparerRequest) => {
                 self.send_selected_to_comparer(MessagePane::Request);
             }

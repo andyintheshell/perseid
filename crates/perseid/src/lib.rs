@@ -14,6 +14,7 @@ mod history;
 mod memory;
 mod pretty;
 mod project;
+mod sequencer;
 mod site_map;
 mod theme;
 mod view;

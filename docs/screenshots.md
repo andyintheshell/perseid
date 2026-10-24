@@ -14,8 +14,9 @@ illustrate the UI, not platform support or performance guarantees.
 
 [History](#proxy--http-history) · [Projects](#projects) · [Search](#search) ·
 [WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
-[Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
-[Comparer](#comparer) · [Comparer result](#comparer-result) · [Memory](#memory-usage)
+[Intruder](#intruder) · [Repeater](#repeater) · [Sequencer](#sequencer) ·
+[Sequencer result](#sequencer-result) · [Decoder](#decoder) · [Comparer](#comparer) ·
+[Comparer result](#comparer-result) · [Memory](#memory-usage)
 
 ## Proxy > HTTP history
 
@@ -88,6 +89,21 @@ responses from a finished Sniper attack.
 Replay edited requests directly to a target, independently of the proxy listener.
 
 ![Repeater request and response](images/perseid-repeater.png)
+
+## Sequencer
+
+Load an existing token sample or capture tokens from new proxy responses. The
+tab shows token count and length, the sample table, and the capture settings.
+
+![Sequencer manual load with a seeded token sample](images/perseid-sequencer.png)
+
+## Sequencer result
+
+The result window summarizes overall randomness, charts effective entropy
+across the five significance levels, and reports sample reliability. Character
+and bit details, plus analysis settings, are separate tabs.
+
+![Sequencer result summary with effective entropy chart](images/perseid-sequencer-result.png)
 
 ## Decoder
 

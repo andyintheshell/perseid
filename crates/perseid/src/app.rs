@@ -1,19 +1,21 @@
 //! The egui application: a Burp-style workspace over the captured traffic.
 //!
 //! The navigation intentionally mirrors the tools Burp users already know:
-//! Target, Proxy, Intruder, Repeater, Decoder, and Comparer. Proxy history,
-//! editable interception, the Target site map, scope enforcement,
+//! Target, Proxy, Intruder, Repeater, Sequencer, Decoder, and Comparer. Proxy
+//! history, editable interception, the Target site map, scope enforcement,
 //! match/replace rules, the direct Repeater, Intruder's payload attacks,
-//! Decoder's encode/decode/hash chain, Comparer's word/byte diffs, and the
-//! global Search window are live.
+//! Sequencer's token sampling and randomness analysis, Decoder's
+//! encode/decode/hash chain, Comparer's word/byte diffs, and the global Search
+//! window are live.
 //!
 //! This module holds the application state and the eframe shell. The tabs,
 //! shared top-level panels, and supporting pieces are split by area:
 //! [`chrome`], [`comparer`], [`decoder`], [`events`], [`input`], [`inspector`],
 //! [`intercept`], [`intruder`], [`listing`], [`project_ui`], [`proxy`],
 //! [`proxy_control`], [`repeater`], [`rules`], [`search`], [`selection`],
-//! [`target`], [`tls`], [`windows`], [`widgets`], [`message_view`], [`util`],
-//! [`scale`], and the feature-gated [`screenshots`] driver.
+//! [`sequencer`], [`target`], [`tls`], [`windows`], [`widgets`],
+//! [`message_view`], [`util`], [`scale`], and the feature-gated
+//! [`screenshots`] driver.
 
 mod chrome;
 mod comparer;
@@ -35,6 +37,7 @@ mod scale;
 mod screenshots;
 mod search;
 mod selection;
+mod sequencer;
 mod target;
 mod tls;
 mod util;
@@ -104,6 +107,10 @@ const TAB_REPEATER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::ne
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::R,
 );
+const TAB_SEQUENCER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    Key::S,
+);
 const TAB_DECODER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::D,
@@ -127,17 +134,19 @@ enum MainTab {
     Proxy,
     Intruder,
     Repeater,
+    Sequencer,
     Decoder,
     Comparer,
 }
 
 impl MainTab {
     /// Burp's tool order, so muscle memory carries over.
-    const ALL: [(Self, &'static str); 6] = [
+    const ALL: [(Self, &'static str); 7] = [
         (Self::Target, "Target"),
         (Self::Proxy, "Proxy"),
         (Self::Intruder, "Intruder"),
         (Self::Repeater, "Repeater"),
+        (Self::Sequencer, "Sequencer"),
         (Self::Decoder, "Decoder"),
         (Self::Comparer, "Comparer"),
     ];
@@ -236,6 +245,7 @@ pub struct PerseidApp {
     intruder: intruder::IntruderState,
     decoder: decoder::DecoderState,
     comparer: comparer::ComparerState,
+    sequencer: sequencer::SequencerState,
     project: project_ui::ProjectUi,
     site_map: Option<(u64, SiteMap)>,
     scope: BTreeSet<String>,
@@ -404,6 +414,7 @@ impl PerseidApp {
             intruder: intruder::IntruderState::new(),
             decoder: decoder::DecoderState::new(),
             comparer: comparer::ComparerState::new(),
+            sequencer: sequencer::SequencerState::new(),
             project: project_ui::ProjectUi::new(args.history_limit, args.history_bytes),
             site_map: None,
             scope: BTreeSet::new(),
@@ -458,6 +469,7 @@ impl PerseidApp {
             MainTab::Proxy => self.proxy_tab(ui),
             MainTab::Intruder => self.intruder_view(ui),
             MainTab::Repeater => self.repeater_view(ui),
+            MainTab::Sequencer => self.sequencer_view(ui),
             MainTab::Decoder => self.decoder_view(ui),
             MainTab::Comparer => self.comparer_view(ui),
         }
@@ -471,6 +483,7 @@ impl eframe::App for PerseidApp {
         self.poll_project();
         self.drain_events(&ctx);
         self.comparer.handle_input(&ctx);
+        self.poll_sequencer(&ctx);
         self.keyboard(&ctx);
         self.rebuild_visible();
 
@@ -512,6 +525,7 @@ impl eframe::App for PerseidApp {
         self.tls_setup_window(&ctx);
         self.project_windows(&ctx);
         self.comparer_windows(&ctx);
+        self.sequencer_windows(&ctx);
         self.search_window(&ctx);
         self.resize_handles(ui);
 
@@ -548,6 +562,7 @@ mod tests {
                 MainTab::Proxy,
                 MainTab::Intruder,
                 MainTab::Repeater,
+                MainTab::Sequencer,
                 MainTab::Decoder,
                 MainTab::Comparer
             ]

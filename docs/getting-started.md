@@ -219,8 +219,8 @@ default in the desktop app.
 ## Workspace
 
 Continue with the [workbench guide](workbench.md) for Target scope, history,
-message views, interception, match/replace, Intruder, Repeater, Decoder,
-Comparer, and shortcuts.
+message views, interception, match/replace, Intruder, Repeater, Sequencer,
+Decoder, Comparer, and shortcuts.
 
 Pretty body formatting has independent 256 KiB input/output and 128-level
 nesting budgets; exceeding one falls back to bounded Raw text. Repeater also
@@ -238,8 +238,9 @@ app. Temporary projects currently retain accepted captures in an in-memory
 redb store without an aggregate eviction cap, so RAM can grow with traffic.
 Project files are not encrypted and schema migrations are not implemented.
 WebSocket messages can be captured and inspected, but not edited or replayed;
-HTTP/3/QUIC and Sequencer are absent. The published `0.1.0` release does not yet
-include project persistence. See [limits and persistence](workbench.md#limits-and-persistence)
+HTTP/3/QUIC is absent. Sequencer capture is regex-based and its statistical
+results are indicative. The published `0.1.0` release does not yet include
+project persistence. See [limits and persistence](workbench.md#limits-and-persistence)
 and the [capability matrix](burp-parity.md) before relying on a particular
 workflow.
 

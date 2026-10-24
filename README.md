@@ -55,11 +55,12 @@ browser required.**
 | **Intruder** | `$$` payload positions, editable payload sets, Sniper, Battering ram, Pitchfork, and Cluster bomb modes, bounded concurrency, and response inspection. |
 | **Decoder** | Stacked encoding/decoding panels, selection-aware transforms, Smart decode, and 31 common hashes. |
 | **Comparer** | Text and hex comparison, word- and byte-level diffs, synchronized scrolling, and inputs from history, files, or the clipboard. |
+| **Sequencer** | Manual and live token sampling with character- and bit-level randomness tests, effective-entropy estimates, and per-analysis settings. |
 | **Scope & rewriting** | Opt-in proxy scope enforcement, literal/regex match-and-replace rules, and capture/history limits. |
 
-The interface follows **Target → Proxy → Intruder → Repeater → Decoder →
-Comparer**. See the [workbench guide](docs/workbench.md) for behavior and
-limitations, or browse the [screenshot gallery](docs/screenshots.md).
+The interface follows **Target → Proxy → Intruder → Repeater → Sequencer →
+Decoder → Comparer**. See the [workbench guide](docs/workbench.md) for behavior
+and limitations, or browse the [screenshot gallery](docs/screenshots.md).
 
 ## Quick start
 
@@ -129,8 +130,11 @@ important boundaries:
 - **No WebSocket editing or replay yet.** WebSocket frames can be captured and
   inspected, but not intercepted, modified, or resent.
 - **Not an automated scanner.** There is no crawler, automated vulnerability
-  scanner, Sequencer, or bundled browser. Intruder sends requests using
-  user-supplied payloads; it does not discover vulnerabilities automatically.
+  scanner, or bundled browser. Intruder sends requests using user-supplied
+  payloads; it does not discover vulnerabilities automatically.
+- **Sequencer results are indicative.** Token capture is expression-based and
+  the statistical tests are bounded approximations, not a proof that a token
+  is predictable or safe.
 - **Some message bodies cannot be edited.** Large, streaming, and binary
   intercepted bodies are header-editable only. Previews and direct-send seeds
   can be truncated or lossy.
@@ -166,7 +170,7 @@ platform support, tests, or documentation.
 | I want to… | Start here |
 | --- | --- |
 | Install, build, or configure Perseid | [Getting started](docs/getting-started.md) |
-| Learn Proxy, Intruder, Repeater, Decoder, and Comparer | [Workbench guide](docs/workbench.md) |
+| Learn Proxy, Intruder, Repeater, Sequencer, Decoder, and Comparer | [Workbench guide](docs/workbench.md) |
 | Set up HTTPS interception and certificate trust | [TLS guide](docs/tls.md) |
 | Troubleshoot setup, traffic, or proxy problems | [Troubleshooting](docs/troubleshooting.md) |
 | Compare implemented and planned capabilities | [Burp Community capability matrix](docs/burp-parity.md) |

@@ -15,6 +15,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
 | **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
+| **Sequencer** | Token sampling and character- or bit-level randomness analysis. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
 | **Comparer** | Word- or byte-level diffs between any two requests, responses, or loaded messages. |
 
@@ -103,7 +104,8 @@ is a quick way to verify the path without a browser or CA trust.
 
 - **HTTP history** has one row per HTTP exchange, including decrypted HTTPS.
   `CONNECT` transport tunnels do not get their own rows. Right-click a row to
-  send its request or response to Repeater, Intruder, or Comparer.
+  send its request or response to Repeater, Intruder, or Comparer, or send its
+  response to Sequencer.
 - The text filter matches method, host, path, URI, and status—not response-body
   contents. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
@@ -466,13 +468,58 @@ Oversized inputs are rejected with a message, and both modes give the diff
 algorithm a 500 ms deadline. Comparer input items are saved with a persistent
 project; computed results and view state are rebuilt/reset when it is opened.
 
+## Sequencer
+
+Sequencer analyzes whether a sample of tokens behaves like random data. It can
+help review session identifiers, CSRF tokens, password-reset codes, and other
+opaque values, but its output is statistical evidence rather than proof of
+predictability or safety.
+
+Use **Manual load** to paste tokens, load a text file, or collect a response
+from **Proxy > HTTP history** with **Send response to Sequencer**. Manual input
+accepts one token per line; a line without spaces may also be comma- or
+semicolon-separated. **Live capture** watches responses that complete after
+**Start live capture** and extracts matches with the configured Rust regex.
+The default expression is a deliberately broad opaque-token heuristic; narrow
+it for the target. Choose whether to scan response headers, the decoded body,
+or both, and whether duplicate tokens are ignored. Live capture and manual
+load share the same sample.
+
+**Sequencer settings** controls token format and the tests used by the next
+analysis. Auto detection tries hexadecimal, then Base64, then text; override it
+when the representation is known. Character tests compare character frequencies
+and adjacent-character transitions when the sample has enough observations per
+symbol. Bit tests decode the tokens and examine each bit position plus
+whole-stream monobit, runs, longest-run, poker, byte-frequency, pairwise
+correlation, and zlib-compression checks. The zlib result is informational.
+
+**Analyze now** opens a floating result window with four tabs:
+
+- **Summary** shows the overall randomness rating, effective entropy at the
+  chosen significance level, the entropy chart across all five levels, the
+  sample-size reliability, and detected format.
+- **Character-level analysis** shows the alphabet, per-position count and
+  transition results, and character-level effective entropy. It is skipped when
+  the sample is too small for the alphabet, unless **Always** is selected.
+- **Bit-level analysis** shows failing bit positions, effective bit entropy, and
+  the whole-stream test table with p-values.
+- **Analysis settings** changes the format, significance level, character-test
+  mode, and bit tests, then re-runs the analysis on the current sample.
+
+The tab holds up to **10,000 tokens**, each up to **16,384 characters**; one
+analysis uses at most **5,000 tokens**, **1,024 character positions**, and
+**4,096 bit positions**. Longer input is truncated and the result window says
+so. Live capture starts with responses that arrive after it is armed, not with
+existing history. Samples, results, settings, and analysis windows are
+in-memory only and are not saved in a project.
+
 ## Keyboard shortcuts
 
 Use `Cmd` in place of `Ctrl` on macOS unless noted.
 
 | Action | Shortcut |
 | --- | --- |
-| Target / Proxy / Intruder / Repeater / Decoder / Comparer | `Ctrl`+`Shift`+`T` / `P` / `I` / `R` / `D` / `C` |
+| Target / Proxy / Intruder / Repeater / Sequencer / Decoder / Comparer | `Ctrl`+`Shift`+`T` / `P` / `I` / `R` / `S` / `D` / `C` |
 | Open Search and focus its query | `Ctrl`+`Shift`+`F` |
 | Focus the history filter | `Ctrl`+`F` |
 | Leave the filter | `Esc` |
@@ -505,10 +552,11 @@ separate Space, matching the system green-button behavior.
 | Temporary storage growth | The in-memory redb project retains accepted captures without an aggregate eviction cap. `--history-limit`/`--history-bytes` only bound the UI cache; RAM can grow until history is cleared or the app exits. |
 | Persistent project | One local `.perseid` redb file; captured records and supported workspace inputs auto-save. Files are plaintext, have no automatic disk-retention cap, and are not encrypted. |
 | Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
-| Persisted workspace | Scope, match/replace, Repeater request tabs, Intruder configuration/payloads, Decoder panel contents, and Comparer inputs. Notes, response/attack results, computed diffs, search state, and transient selections are not restored. |
+| Persisted workspace | Scope, match/replace, Repeater request tabs, Intruder configuration/payloads, Decoder panel contents, and Comparer inputs. Sequencer samples/results/settings, Notes, response/attack results, computed diffs, search state, and transient selections are not restored. |
 | Project transitions | New Project confirms discard; Open Project has no save/discard prompt for a temporary project. Save As/Copy refuse to overwrite an existing file. |
 | Local CA | Persisted separately from projects; its private key is never included in a `.perseid` file. |
-| Missing tools/protocols | No Sequencer, WebSocket message interception/replay, or HTTP/3/QUIC support. |
+| Sequencer work | At most 10,000 tokens of 16,384 characters; analysis uses 5,000 tokens, 1,024 character positions, and 4,096 bit positions. Capture is limited to the retained history. |
+| Missing tools/protocols | No WebSocket message interception/replay or HTTP/3/QUIC support. |
 
 See [CLI options](getting-started.md#options) to change the UI-cache limits and
 [Safety and privacy](safety.md) for the data-handling implications. Larger
