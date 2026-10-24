@@ -59,18 +59,21 @@ promise.
 
   *Status: projects start in temporary memory by default. Save As, Open, and Save
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
-  supported workspace inputs are written automatically. On open, the UI loads
+  project-scoped workbench state are written automatically. On open, the UI loads
   only a bounded newest-first history snapshot; older records remain on disk but
   are not yet pageable or searchable. Temporary storage has no aggregate capture
   eviction cap. There are no recent-projects or
   save/discard-on-quit prompts, and schema migrations are not implemented.
   Search covers the loaded HTTP-history heads and decoded bodies with case,
-  regex, negative-match, in-scope, and live-update filters. Repeater persists
-  request tabs/drafts but not response history; Intruder persists its request
-  and payload configuration but not results. Decoder panel contents and
-  Comparer inputs persist, while Inspector notes and computed results do not.
-  WebSocket message interception/replay remains unimplemented. Decoder still
-  lacks SKEIN/TupleHash/OID aliases and Send to Decoder.*
+  regex, negative-match, in-scope, and live-update filters. Project-scoped
+  workbench state persists: UI selections/views, Inspector notes and sections,
+  Repeater tabs and their last responses, Intruder configuration and result
+  rows, Decoder panels, Comparer items and result-window state, Search state,
+  Sequencer samples/settings, and TLS interception/pass-through hosts. The
+  Comparer diff and Sequencer analysis are recomputed on open. Live capture,
+  running attacks or sends, held interception messages, and CA material do not
+  persist. WebSocket message interception/replay remains unimplemented. Decoder
+  still lacks SKEIN/TupleHash/OID aliases and Send to Decoder.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope

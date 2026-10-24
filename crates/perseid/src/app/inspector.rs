@@ -17,8 +17,22 @@ use egui::{Align2, FontId, RichText, Sense, Stroke, TextEdit};
 
 use crate::decoder::hex_value;
 use crate::history::HistoryItem;
+use crate::project::{InspectorNoteWorkspace, InspectorWorkspace, SideTabRecord};
 use crate::theme;
 use crate::view;
+
+/// Every Inspector section id. Restoring only known ids keeps an edited or
+/// older project from growing the expanded set without bound.
+const SECTION_IDS: [&str; 8] = [
+    "request.attributes",
+    "request.query",
+    "request.body",
+    "request.cookies",
+    "request.headers",
+    "response.attributes",
+    "response.cookies",
+    "response.headers",
+];
 
 const RAIL_WIDTH: f32 = 24.0;
 const RAIL_TAB_MAX_HEIGHT: f32 = 116.0;
@@ -67,6 +81,50 @@ impl InspectorState {
 
     pub(super) fn clear_notes(&mut self) {
         self.notes.clear();
+    }
+
+    pub(super) fn workspace(&self) -> InspectorWorkspace {
+        InspectorWorkspace {
+            open: self.open,
+            tab: match self.tab {
+                SideTab::Inspector => SideTabRecord::Inspector,
+                SideTab::Notes => SideTabRecord::Notes,
+            },
+            expanded: self.expanded.iter().map(|id| (*id).to_owned()).collect(),
+            notes: self
+                .notes
+                .iter()
+                .filter(|(_, text)| !text.is_empty())
+                .map(|(id, text)| InspectorNoteWorkspace {
+                    id: *id,
+                    text: text.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub(super) fn apply_workspace(&mut self, workspace: &InspectorWorkspace) {
+        self.open = workspace.open;
+        self.tab = match workspace.tab {
+            SideTabRecord::Inspector => SideTab::Inspector,
+            SideTabRecord::Notes => SideTab::Notes,
+        };
+        self.expanded = workspace
+            .expanded
+            .iter()
+            .filter_map(|id| {
+                SECTION_IDS
+                    .iter()
+                    .copied()
+                    .find(|known| *known == id.as_str())
+            })
+            .collect();
+        self.notes = workspace
+            .notes
+            .iter()
+            .filter(|note| !note.text.is_empty())
+            .map(|note| (note.id, note.text.clone()))
+            .collect();
     }
 
     fn toggle(&mut self, id: &'static str) {

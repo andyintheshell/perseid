@@ -190,11 +190,74 @@ fn normalized_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
+/// Chunk size for workspace JSON that exceeds one record. Retained result
+/// bodies make the workspace much larger than ordinary metadata records.
+const WORKSPACE_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+/// Read cap for an assembled workspace. This is deliberately far above the
+/// per-record limit while still bounding memory for a corrupt file.
+const MAX_WORKSPACE_BYTES: usize = 512 * 1024 * 1024;
+const WORKSPACE_CHUNK_PREFIX: &str = "workspace/v1/chunk/";
+const WORKSPACE_CHUNK_MAGIC: &[u8] = b"perseid-workspace-chunks-v1\n";
+
+fn workspace_chunk_key(index: u32) -> String {
+    format!("{WORKSPACE_CHUNK_PREFIX}{index:08}")
+}
+
 pub(super) fn write_workspace(db: &Database, bytes: &[u8]) -> Result<()> {
+    write_workspace_chunks(db, bytes, codec::MAX_RECORD_BYTES, WORKSPACE_CHUNK_BYTES)
+}
+
+fn write_workspace_chunks(
+    db: &Database,
+    bytes: &[u8],
+    inline_limit: usize,
+    chunk_bytes: usize,
+) -> Result<()> {
+    debug_assert!(chunk_bytes > 0);
+    if bytes.len() > MAX_WORKSPACE_BYTES {
+        return Err(ProjectError::RecordTooLarge {
+            size: bytes.len(),
+            limit: MAX_WORKSPACE_BYTES,
+        });
+    }
     let tx = begin_write(db)?;
     {
         let mut table = tx.open_table(schema::WORKSPACE)?;
-        table.insert(schema::WORKSPACE_KEY, bytes)?;
+        let chunk_count = if bytes.len() <= inline_limit {
+            table.insert(schema::WORKSPACE_KEY, bytes)?;
+            0
+        } else {
+            let count = bytes.len().div_ceil(chunk_bytes);
+            let count = u32::try_from(count).map_err(|_| ProjectError::RecordTooLarge {
+                size: bytes.len(),
+                limit: MAX_WORKSPACE_BYTES,
+            })?;
+            let mut manifest = Vec::with_capacity(WORKSPACE_CHUNK_MAGIC.len() + 12);
+            manifest.extend_from_slice(WORKSPACE_CHUNK_MAGIC);
+            manifest.extend_from_slice(&count.to_be_bytes());
+            manifest.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+            table.insert(schema::WORKSPACE_KEY, manifest.as_slice())?;
+            for (index, chunk) in bytes.chunks(chunk_bytes).enumerate() {
+                table.insert(workspace_chunk_key(index as u32).as_str(), chunk)?;
+            }
+            count
+        };
+        // Drop chunks left over from an earlier, larger snapshot.
+        let stale: Vec<String> = table
+            .iter()?
+            .filter_map(|entry| {
+                let (key, _) = entry.ok()?;
+                let key = key.value();
+                let index = key
+                    .strip_prefix(WORKSPACE_CHUNK_PREFIX)?
+                    .parse::<u32>()
+                    .ok()?;
+                (index >= chunk_count).then(|| key.to_string())
+            })
+            .collect();
+        for key in stale {
+            table.remove(key.as_str())?;
+        }
     }
     tx.commit()?;
     Ok(())
@@ -206,7 +269,52 @@ fn read_workspace(db: &Database) -> Result<WorkspaceState> {
     let Some(value) = table.get(schema::WORKSPACE_KEY)? else {
         return Ok(WorkspaceState::default());
     };
-    let workspace: WorkspaceState = codec::decode(value.value())?;
+    let bytes = value.value();
+    let workspace: WorkspaceState = if let Some(manifest) =
+        bytes.strip_prefix(WORKSPACE_CHUNK_MAGIC)
+    {
+        if manifest.len() < 12 {
+            return Err(ProjectError::InvalidProject(
+                "workspace manifest is truncated".to_string(),
+            ));
+        }
+        let count = u32::from_be_bytes(manifest[0..4].try_into().expect("checked manifest length"));
+        let length =
+            u64::from_be_bytes(manifest[4..12].try_into().expect("checked manifest length"));
+        let length = usize::try_from(length).map_err(|_| {
+            ProjectError::InvalidProject("workspace length does not fit in memory".to_string())
+        })?;
+        if length > MAX_WORKSPACE_BYTES {
+            return Err(ProjectError::RecordTooLarge {
+                size: length,
+                limit: MAX_WORKSPACE_BYTES,
+            });
+        }
+        if u64::from(count) > length as u64 + 1 {
+            return Err(ProjectError::InvalidProject(
+                "workspace manifest has an invalid chunk count".to_string(),
+            ));
+        }
+        let mut data = Vec::with_capacity(length);
+        for index in 0..count {
+            let key = workspace_chunk_key(index);
+            let Some(chunk) = table.get(key.as_str())? else {
+                return Err(ProjectError::InvalidProject(format!(
+                    "workspace chunk {index} is missing"
+                )));
+            };
+            data.extend_from_slice(chunk.value());
+        }
+        if data.len() != length {
+            return Err(ProjectError::InvalidProject(format!(
+                "workspace is {} bytes; expected {length}",
+                data.len()
+            )));
+        }
+        codec::decode_large(&data)?
+    } else {
+        codec::decode(bytes)?
+    };
     if workspace.version > WorkspaceState::CURRENT_VERSION {
         return Err(ProjectError::UnsupportedRecord {
             found: workspace.version,
@@ -438,6 +546,72 @@ mod tests {
         let (http, ws) = snapshot_budgets(usize::MAX);
         assert_eq!(http, usize::MAX / 4);
         assert_eq!(http + ws, usize::MAX);
+    }
+
+    #[test]
+    fn workspace_chunks_round_trip_and_replace_stale_entries() {
+        let meta = ProjectMeta::new("workspace-chunks".to_string());
+        let db = backend::create_memory(&meta).expect("workspace chunks project");
+        let workspace = WorkspaceState {
+            ui: crate::project::UiWorkspace {
+                http_filter: "filter".repeat(200),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let bytes = codec::encode_large(&workspace).expect("encode workspace");
+        write_workspace_chunks(&db, &bytes, 64, 32).expect("write chunked workspace");
+
+        let (chunked, chunk_keys) = {
+            let read = db.begin_read().expect("read transaction");
+            let table = read.open_table(schema::WORKSPACE).expect("workspace table");
+            let manifest = table
+                .get(schema::WORKSPACE_KEY)
+                .expect("read manifest")
+                .expect("manifest entry");
+            let chunked = manifest.value().starts_with(WORKSPACE_CHUNK_MAGIC);
+            let chunk_keys = table
+                .iter()
+                .expect("iterate workspace")
+                .filter_map(|entry| {
+                    let (key, _) = entry.ok()?;
+                    key.value()
+                        .starts_with(WORKSPACE_CHUNK_PREFIX)
+                        .then_some(())
+                })
+                .count();
+            (chunked, chunk_keys)
+        };
+        assert!(chunked);
+        assert!(chunk_keys > 1);
+
+        let restored = read_workspace(&db).expect("read chunked workspace");
+        assert_eq!(restored, workspace);
+
+        // Every field has a serde default, so `{}` is a valid empty workspace.
+        write_workspace_chunks(&db, b"{}", 64, 32).expect("replace with inline workspace");
+        let stale_chunks = {
+            let read = db.begin_read().expect("read transaction");
+            let table = read.open_table(schema::WORKSPACE).expect("workspace table");
+            table
+                .iter()
+                .expect("iterate workspace")
+                .filter_map(|entry| {
+                    let (key, _) = entry.ok()?;
+                    key.value()
+                        .starts_with(WORKSPACE_CHUNK_PREFIX)
+                        .then_some(())
+                })
+                .count()
+        };
+        assert_eq!(
+            stale_chunks, 0,
+            "replacing a chunked workspace removes every stale chunk"
+        );
+        assert_eq!(
+            read_workspace(&db).expect("read inline workspace"),
+            WorkspaceState::default()
+        );
     }
 
     #[test]

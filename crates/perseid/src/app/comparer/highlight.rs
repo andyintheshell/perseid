@@ -22,6 +22,7 @@ pub(super) struct Highlight {
 }
 
 pub(super) struct CompareResult {
+    mode: crate::comparer::CompareMode,
     old_index: usize,
     new_index: usize,
     /// Title shown in the result window.
@@ -68,6 +69,7 @@ impl CompareResult {
             comparison.differences
         );
         Self {
+            mode,
             old_index,
             new_index,
             title,
@@ -80,6 +82,14 @@ impl CompareResult {
             spans: comparison.spans,
             differences: comparison.differences,
         }
+    }
+
+    pub(super) fn mode(&self) -> crate::comparer::CompareMode {
+        self.mode
+    }
+
+    pub(super) fn item_indices(&self) -> [usize; 2] {
+        [self.old_index, self.new_index]
     }
 
     pub(super) fn title(&self) -> &str {

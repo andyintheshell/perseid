@@ -4,10 +4,12 @@
 //! moves it into a `.perseid` file; `Open` switches to an existing one. The
 //! dialogs take a path directly instead of depending on a platform file picker.
 //!
-//! Workbench state (scope, match/replace rules, Repeater tabs, Intruder
-//! configuration, Decoder panels and Comparer items) is saved with the project
-//! and restored on open. Captured traffic and workbench state share one writer
-//! queue, so a save always includes captures applied before it.
+//! Workbench state (scope, match/replace rules, UI selections, Inspector,
+//! Repeater, Intruder, Decoder, Comparer, Search, Sequencer, and TLS settings)
+//! is saved with the project and restored on open. Captured traffic and
+//! workbench state share one writer queue, so a save always includes captures
+//! applied before it. The local certificate authority is never part of the
+//! workspace.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -16,8 +18,9 @@ use std::time::{Duration, Instant};
 use egui::{Align2, RichText};
 
 use crate::project::{
-    CommitReceipt, OpenedProject, ProjectError, ProjectHandle, ProjectMode, ProjectStatus,
-    RuleDirectionRecord, RulePartRecord, RuleWorkspace, ScopeWorkspace, WorkspaceState,
+    CommitReceipt, MainTabRecord, OpenedProject, ProjectError, ProjectHandle, ProjectMode,
+    ProjectStatus, ProxySectionRecord, RuleDirectionRecord, RulePartRecord, RuleWorkspace,
+    ScopeWorkspace, TargetSectionRecord, TlsWorkspace, UiWorkspace, WorkspaceState,
 };
 use crate::proxy::{MatchReplaceRule, RuleDirection, RulePart};
 
@@ -521,6 +524,64 @@ fn rule_from_workspace(rule: &RuleWorkspace) -> MatchReplaceRule {
     }
 }
 
+fn main_tab_record(tab: MainTab) -> MainTabRecord {
+    match tab {
+        MainTab::Target => MainTabRecord::Target,
+        MainTab::Proxy => MainTabRecord::Proxy,
+        MainTab::Intruder => MainTabRecord::Intruder,
+        MainTab::Repeater => MainTabRecord::Repeater,
+        MainTab::Sequencer => MainTabRecord::Sequencer,
+        MainTab::Decoder => MainTabRecord::Decoder,
+        MainTab::Comparer => MainTabRecord::Comparer,
+    }
+}
+
+fn main_tab_from_record(tab: MainTabRecord) -> MainTab {
+    match tab {
+        MainTabRecord::Target => MainTab::Target,
+        MainTabRecord::Proxy => MainTab::Proxy,
+        MainTabRecord::Intruder => MainTab::Intruder,
+        MainTabRecord::Repeater => MainTab::Repeater,
+        MainTabRecord::Sequencer => MainTab::Sequencer,
+        MainTabRecord::Decoder => MainTab::Decoder,
+        MainTabRecord::Comparer => MainTab::Comparer,
+    }
+}
+
+fn proxy_section_record(section: ProxySection) -> ProxySectionRecord {
+    match section {
+        ProxySection::Intercept => ProxySectionRecord::Intercept,
+        ProxySection::HttpHistory => ProxySectionRecord::HttpHistory,
+        ProxySection::WebSocketsHistory => ProxySectionRecord::WebSocketsHistory,
+        ProxySection::MatchReplace => ProxySectionRecord::MatchReplace,
+        ProxySection::Tls => ProxySectionRecord::Tls,
+    }
+}
+
+fn proxy_section_from_record(section: ProxySectionRecord) -> ProxySection {
+    match section {
+        ProxySectionRecord::Intercept => ProxySection::Intercept,
+        ProxySectionRecord::HttpHistory => ProxySection::HttpHistory,
+        ProxySectionRecord::WebSocketsHistory => ProxySection::WebSocketsHistory,
+        ProxySectionRecord::MatchReplace => ProxySection::MatchReplace,
+        ProxySectionRecord::Tls => ProxySection::Tls,
+    }
+}
+
+fn target_section_record(section: TargetSection) -> TargetSectionRecord {
+    match section {
+        TargetSection::SiteMap => TargetSectionRecord::SiteMap,
+        TargetSection::Scope => TargetSectionRecord::Scope,
+    }
+}
+
+fn target_section_from_record(section: TargetSectionRecord) -> TargetSection {
+    match section {
+        TargetSectionRecord::SiteMap => TargetSection::SiteMap,
+        TargetSectionRecord::Scope => TargetSection::Scope,
+    }
+}
+
 impl PerseidApp {
     /// The File menu: project lifecycle commands live above Quit.
     pub(super) fn project_menu(&mut self, ui: &mut egui::Ui) {
@@ -729,8 +790,6 @@ impl PerseidApp {
         self.websocket_detail = None;
         self.scroll_to_selected = false;
         self.websocket_scroll_to_selected = false;
-        self.inspector.clear_notes();
-        self.search.clear_history();
         self.invalidate_views();
         self.apply_workspace(&opened.workspace);
         self.project.last_workspace = Some(self.workspace_snapshot());
@@ -749,6 +808,43 @@ impl PerseidApp {
         }
     }
 
+    fn ui_workspace(&self) -> UiWorkspace {
+        UiWorkspace {
+            main_tab: main_tab_record(self.main_tab),
+            proxy_section: proxy_section_record(self.proxy_section),
+            target_section: target_section_record(self.target_section),
+            request_view: self.request_view.into(),
+            response_view: self.response_view.into(),
+            websocket_view: self.websocket_view.into(),
+            http_filter: self.filter.clone(),
+            websocket_filter: self.websocket_filter.clone(),
+            selected_http_id: self.selected,
+            selected_websocket_id: self.websocket_selected,
+            repeater_active: self.repeater_active,
+        }
+    }
+
+    fn apply_ui_workspace(&mut self, workspace: &UiWorkspace) {
+        self.main_tab = main_tab_from_record(workspace.main_tab);
+        self.proxy_section = proxy_section_from_record(workspace.proxy_section);
+        self.target_section = target_section_from_record(workspace.target_section);
+        self.request_view = workspace.request_view.into();
+        self.response_view = workspace.response_view.into();
+        self.websocket_view = workspace.websocket_view.into();
+        self.filter = workspace.http_filter.clone();
+        self.websocket_filter = workspace.websocket_filter.clone();
+        self.selected = workspace
+            .selected_http_id
+            .filter(|id| self.history.get(*id).is_some());
+        self.websocket_selected = workspace
+            .selected_websocket_id
+            .filter(|id| self.websocket_history.get(*id).is_some());
+        self.detail = None;
+        self.websocket_detail = None;
+        self.scroll_to_selected = false;
+        self.websocket_scroll_to_selected = false;
+    }
+
     fn workspace_snapshot(&self) -> WorkspaceState {
         WorkspaceState {
             version: WorkspaceState::CURRENT_VERSION,
@@ -758,10 +854,19 @@ impl PerseidApp {
                 hosts: self.scope.iter().cloned().collect(),
             },
             match_replace: self.match_replace.iter().map(rule_workspace).collect(),
+            ui: self.ui_workspace(),
+            inspector: self.inspector.workspace(),
             repeater: self.repeater_workspace(),
             intruder: self.intruder_workspace(),
             decoder: self.decoder_workspace(),
             comparer: self.comparer_workspace(),
+            comparer_ui: self.comparer_ui_workspace(),
+            search: self.search.workspace(),
+            sequencer: self.sequencer.workspace(),
+            tls: TlsWorkspace {
+                intercept: self.tls_intercept,
+                passthrough: self.tls_passthrough.clone(),
+            },
         }
     }
 
@@ -776,11 +881,20 @@ impl PerseidApp {
             .map(rule_from_workspace)
             .collect();
         self.rules_error = None;
+        self.tls_intercept = workspace.tls.intercept;
+        self.tls_passthrough = workspace.tls.passthrough.clone();
+        self.tls_passthrough_input.clear();
+        self.apply_ui_workspace(&workspace.ui);
         self.apply_proxy_settings();
-        self.apply_repeater_workspace(&workspace.repeater);
+        self.apply_repeater_workspace(&workspace.repeater, workspace.ui.repeater_active);
         self.apply_intruder_workspace(&workspace.intruder);
         self.apply_decoder_workspace(&workspace.decoder);
         self.apply_comparer_workspace(&workspace.comparer);
+        self.apply_comparer_ui_workspace(&workspace.comparer_ui);
+        self.inspector.apply_workspace(&workspace.inspector);
+        self.search
+            .apply_workspace(&workspace.search, &self.history);
+        self.sequencer.apply_workspace(&workspace.sequencer);
         self.invalidate_views();
         self.site_map = None;
     }
@@ -905,6 +1019,218 @@ impl PerseidApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::{
+        BodyWorkspace, CapturePartRecord, CompareModeRecord, ComparerWorkspace, DecoderCodecRecord,
+        DecoderColorTagRecord, DecoderOperationRecord, DecoderPanelWorkspace, DecoderSpanWorkspace,
+        DecoderViewRecord, InspectorNoteWorkspace, InspectorWorkspace, IntruderAttackRecord,
+        IntruderPlanWorkspace, IntruderResultOutcomeWorkspace, IntruderResultWorkspace,
+        IntruderWorkspace, MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace,
+        RepeaterResponseWorkspace, RepeaterWorkspace, ResultViewRecord, SearchWorkspace,
+        SequencerResultTabRecord, SequencerSectionRecord, SequencerSettingsWorkspace,
+        SideTabRecord, TextSelectionWorkspace, TlsWorkspace, UiWorkspace,
+    };
+
+    fn sample_workspace() -> WorkspaceState {
+        let response_views = MessageViewsWorkspace {
+            pretty: "HTTP/1.1 200 OK\r\n\r\nbody".to_string(),
+            raw: "HTTP/1.1 200 OK\n\nbody".to_string(),
+            hex: "48 54 54 50".to_string(),
+        };
+        WorkspaceState {
+            scope: ScopeWorkspace {
+                enabled: true,
+                enforce: true,
+                hosts: vec!["example.test".to_string()],
+            },
+            match_replace: vec![RuleWorkspace {
+                enabled: true,
+                direction: RuleDirectionRecord::Response,
+                part: RulePartRecord::Body,
+                pattern: "before".to_string(),
+                replacement: "after".to_string(),
+                regex: false,
+            }],
+            ui: UiWorkspace {
+                main_tab: MainTabRecord::Comparer,
+                proxy_section: ProxySectionRecord::Tls,
+                target_section: TargetSectionRecord::Scope,
+                request_view: MessageViewRecord::Hex,
+                response_view: MessageViewRecord::Raw,
+                websocket_view: MessageViewRecord::Hex,
+                http_filter: "status:200".to_string(),
+                websocket_filter: "chat".to_string(),
+                selected_http_id: None,
+                selected_websocket_id: None,
+                repeater_active: 0,
+            },
+            inspector: InspectorWorkspace {
+                open: false,
+                tab: SideTabRecord::Notes,
+                expanded: vec!["request.headers".to_string()],
+                notes: vec![InspectorNoteWorkspace {
+                    id: 4,
+                    text: "check this exchange".to_string(),
+                }],
+            },
+            repeater: vec![RepeaterWorkspace {
+                id: 2,
+                title: "Login".to_string(),
+                scheme: "https".to_string(),
+                host: "example.test".to_string(),
+                request: "GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".to_string(),
+                note: Some("seeded".to_string()),
+                response: Some(RepeaterResponseWorkspace {
+                    views: response_views,
+                    status: 200,
+                    reason: "OK".to_string(),
+                    duration_ms: 18,
+                    size: 4,
+                    truncated: false,
+                    body_complete: true,
+                    body_error: None,
+                }),
+                error: None,
+                response_view: MessageViewRecord::Raw,
+            }],
+            intruder: IntruderWorkspace {
+                scheme: "https".to_string(),
+                host: "example.test".to_string(),
+                request: "POST /login HTTP/1.1\r\nHost: example.test\r\n\r\nuser=§a§".to_string(),
+                attack: IntruderAttackRecord::ClusterBomb,
+                payload_sets: vec!["admin\nroot".to_string()],
+                active_set: 0,
+                concurrency: 8,
+                update_host: true,
+                note: None,
+                selection: Some(TextSelectionWorkspace { start: 0, end: 4 }),
+                cursor: 5,
+                results: vec![IntruderResultWorkspace {
+                    attack_id: 9,
+                    sequence: 2,
+                    payloads: vec!["admin".to_string()],
+                    duration_ms: 9,
+                    outcome: IntruderResultOutcomeWorkspace::Response {
+                        version: "HTTP/1.1".to_string(),
+                        status: 200,
+                        reason: "OK".to_string(),
+                        headers: vec![("Content-Length".to_string(), "4".to_string())],
+                        body: BodyWorkspace {
+                            data: b"body".to_vec(),
+                            total_len: 4,
+                            truncated: false,
+                            complete: true,
+                        },
+                        body_error: None,
+                    },
+                }],
+                selected: Some(2),
+                detail_pane: MessagePaneRecord::Request,
+                detail_view: MessageViewRecord::Raw,
+                attack_id: Some(9),
+                last_plan: Some(IntruderPlanWorkspace {
+                    attack: IntruderAttackRecord::ClusterBomb,
+                    scheme: "https".to_string(),
+                    host: "example.test".to_string(),
+                    template: "POST /login HTTP/1.1\r\nHost: example.test\r\n\r\nuser=§a§"
+                        .to_string(),
+                    payload_sets: vec![vec!["admin".to_string(), "root".to_string()]],
+                    concurrency: 8,
+                    scope: Vec::new(),
+                }),
+                total: 2,
+                received: 1,
+                error: None,
+                finished_note: Some("1 of 2 completed".to_string()),
+            },
+            decoder: vec![DecoderPanelWorkspace {
+                id: 3,
+                data: b"abc".to_vec(),
+                spans: vec![DecoderSpanWorkspace {
+                    start: 0,
+                    end: 3,
+                    tag: DecoderColorTagRecord::Codec(DecoderCodecRecord::Url),
+                }],
+                operation: Some(DecoderOperationRecord::Decode(DecoderCodecRecord::Url)),
+                view: DecoderViewRecord::Hex,
+                selection: Some(TextSelectionWorkspace { start: 1, end: 3 }),
+            }],
+            comparer: vec![b"one".to_vec(), b"two".to_vec()],
+            comparer_ui: ComparerWorkspace {
+                selected: [Some(0), Some(1)],
+                active: 1,
+                result_open: true,
+                result_mode: Some(CompareModeRecord::Words),
+                result_items: Some([0, 1]),
+                result_views: [ResultViewRecord::Text, ResultViewRecord::Hex],
+                sync_views: true,
+                diff_cursor: 0,
+            },
+            search: SearchWorkspace {
+                open: true,
+                query: "needle".to_string(),
+                options: crate::project::SearchOptionsWorkspace {
+                    regex: true,
+                    negative: true,
+                    ..Default::default()
+                },
+                ran: false,
+                dirty: false,
+                results: Vec::new(),
+                selected: None,
+                pane: MessagePaneRecord::Request,
+                request_view: MessageViewRecord::Hex,
+                response_view: MessageViewRecord::Raw,
+                error: None,
+            },
+            sequencer: crate::project::SequencerWorkspace {
+                section: SequencerSectionRecord::Settings,
+                tokens: vec!["deadbeef".to_string(), "cafebabe".to_string()],
+                settings: SequencerSettingsWorkspace {
+                    capture_regex: r"token=(\w+)".to_string(),
+                    capture_part: CapturePartRecord::Both,
+                    deduplicate: false,
+                    ..Default::default()
+                },
+                result_open: true,
+                result_tab: SequencerResultTabRecord::Bit,
+                result_title: "Perseid Sequencer [manual load analysis #3]".to_string(),
+                analysis_count: 3,
+                result_source: Some("manual load".to_string()),
+            },
+            tls: TlsWorkspace {
+                intercept: true,
+                passthrough: vec!["pinned.example.test".to_string()],
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn workspace_round_trips_through_the_app() {
+        let mut app = PerseidApp::test_app();
+        let workspace = sample_workspace();
+
+        app.apply_workspace(&workspace);
+
+        assert_eq!(app.main_tab, MainTab::Comparer);
+        assert_eq!(app.proxy_section, ProxySection::Tls);
+        assert_eq!(app.target_section, TargetSection::Scope);
+        assert_eq!(app.request_view, MessageView::Hex);
+        assert_eq!(app.filter, "status:200");
+        assert!(app.scope_enabled);
+        assert!(app.scope_enforce);
+        assert!(app.tls_intercept);
+        assert_eq!(app.tls_passthrough, ["pinned.example.test"]);
+        assert_eq!(app.inspector.workspace(), workspace.inspector);
+        assert_eq!(app.repeater_workspace(), workspace.repeater);
+        assert_eq!(app.intruder_workspace(), workspace.intruder);
+        assert_eq!(app.decoder_workspace(), workspace.decoder);
+        assert_eq!(app.comparer_workspace(), workspace.comparer);
+        assert_eq!(app.comparer_ui_workspace(), workspace.comparer_ui);
+        assert_eq!(app.search.workspace(), workspace.search);
+        assert_eq!(app.sequencer.workspace(), workspace.sequencer);
+        assert_eq!(app.workspace_snapshot(), workspace);
+    }
 
     #[test]
     fn project_paths_get_the_extension() {

@@ -7,6 +7,11 @@ use egui::Context;
 use regex::Regex;
 
 use crate::history::{History, HistoryItem};
+use crate::project::{
+    CapturePartRecord, SequencerAnalysisSettingsWorkspace, SequencerCharacterAnalysisRecord,
+    SequencerResultTabRecord, SequencerSectionRecord, SequencerSettingsWorkspace,
+    SequencerSignificanceRecord, SequencerTokenFormatRecord, SequencerWorkspace,
+};
 use crate::sequencer::{self, Analysis, AnalysisSettings, MAX_TOKENS, token_length};
 use crate::view;
 
@@ -426,6 +431,195 @@ impl SequencerState {
         self.analysis_count = 2;
         self.analyze_now("manual load");
         self.result_tab = ResultTab::Summary;
+    }
+}
+
+fn section_record(section: SequencerSection) -> SequencerSectionRecord {
+    match section {
+        SequencerSection::LiveCapture => SequencerSectionRecord::LiveCapture,
+        SequencerSection::ManualLoad => SequencerSectionRecord::ManualLoad,
+        SequencerSection::Settings => SequencerSectionRecord::Settings,
+    }
+}
+
+fn section_from_record(section: SequencerSectionRecord) -> SequencerSection {
+    match section {
+        SequencerSectionRecord::LiveCapture => SequencerSection::LiveCapture,
+        SequencerSectionRecord::ManualLoad => SequencerSection::ManualLoad,
+        SequencerSectionRecord::Settings => SequencerSection::Settings,
+    }
+}
+
+fn capture_part_record(part: CapturePart) -> CapturePartRecord {
+    match part {
+        CapturePart::Body => CapturePartRecord::Body,
+        CapturePart::Headers => CapturePartRecord::Headers,
+        CapturePart::Both => CapturePartRecord::Both,
+    }
+}
+
+fn capture_part_from_record(part: CapturePartRecord) -> CapturePart {
+    match part {
+        CapturePartRecord::Body => CapturePart::Body,
+        CapturePartRecord::Headers => CapturePart::Headers,
+        CapturePartRecord::Both => CapturePart::Both,
+    }
+}
+
+fn result_tab_record(tab: ResultTab) -> SequencerResultTabRecord {
+    match tab {
+        ResultTab::Summary => SequencerResultTabRecord::Summary,
+        ResultTab::Character => SequencerResultTabRecord::Character,
+        ResultTab::Bit => SequencerResultTabRecord::Bit,
+        ResultTab::Settings => SequencerResultTabRecord::Settings,
+    }
+}
+
+fn result_tab_from_record(tab: SequencerResultTabRecord) -> ResultTab {
+    match tab {
+        SequencerResultTabRecord::Summary => ResultTab::Summary,
+        SequencerResultTabRecord::Character => ResultTab::Character,
+        SequencerResultTabRecord::Bit => ResultTab::Bit,
+        SequencerResultTabRecord::Settings => ResultTab::Settings,
+    }
+}
+
+fn token_format_record(format: sequencer::TokenFormat) -> SequencerTokenFormatRecord {
+    match format {
+        sequencer::TokenFormat::Auto => SequencerTokenFormatRecord::Auto,
+        sequencer::TokenFormat::Hex => SequencerTokenFormatRecord::Hex,
+        sequencer::TokenFormat::Base64 => SequencerTokenFormatRecord::Base64,
+        sequencer::TokenFormat::Text => SequencerTokenFormatRecord::Text,
+    }
+}
+
+fn token_format_from_record(format: SequencerTokenFormatRecord) -> sequencer::TokenFormat {
+    match format {
+        SequencerTokenFormatRecord::Auto => sequencer::TokenFormat::Auto,
+        SequencerTokenFormatRecord::Hex => sequencer::TokenFormat::Hex,
+        SequencerTokenFormatRecord::Base64 => sequencer::TokenFormat::Base64,
+        SequencerTokenFormatRecord::Text => sequencer::TokenFormat::Text,
+    }
+}
+
+fn significance_record(significance: sequencer::Significance) -> SequencerSignificanceRecord {
+    match significance {
+        sequencer::Significance::TenPercent => SequencerSignificanceRecord::TenPercent,
+        sequencer::Significance::OnePercent => SequencerSignificanceRecord::OnePercent,
+        sequencer::Significance::PointOnePercent => SequencerSignificanceRecord::PointOnePercent,
+        sequencer::Significance::PointZeroOnePercent => {
+            SequencerSignificanceRecord::PointZeroOnePercent
+        }
+        sequencer::Significance::PointZeroZeroOnePercent => {
+            SequencerSignificanceRecord::PointZeroZeroOnePercent
+        }
+    }
+}
+
+fn significance_from_record(significance: SequencerSignificanceRecord) -> sequencer::Significance {
+    match significance {
+        SequencerSignificanceRecord::TenPercent => sequencer::Significance::TenPercent,
+        SequencerSignificanceRecord::OnePercent => sequencer::Significance::OnePercent,
+        SequencerSignificanceRecord::PointOnePercent => sequencer::Significance::PointOnePercent,
+        SequencerSignificanceRecord::PointZeroOnePercent => {
+            sequencer::Significance::PointZeroOnePercent
+        }
+        SequencerSignificanceRecord::PointZeroZeroOnePercent => {
+            sequencer::Significance::PointZeroZeroOnePercent
+        }
+    }
+}
+
+fn character_analysis_record(
+    mode: sequencer::CharacterAnalysisMode,
+) -> SequencerCharacterAnalysisRecord {
+    match mode {
+        sequencer::CharacterAnalysisMode::Auto => SequencerCharacterAnalysisRecord::Auto,
+        sequencer::CharacterAnalysisMode::Always => SequencerCharacterAnalysisRecord::Always,
+        sequencer::CharacterAnalysisMode::Never => SequencerCharacterAnalysisRecord::Never,
+    }
+}
+
+fn character_analysis_from_record(
+    mode: SequencerCharacterAnalysisRecord,
+) -> sequencer::CharacterAnalysisMode {
+    match mode {
+        SequencerCharacterAnalysisRecord::Auto => sequencer::CharacterAnalysisMode::Auto,
+        SequencerCharacterAnalysisRecord::Always => sequencer::CharacterAnalysisMode::Always,
+        SequencerCharacterAnalysisRecord::Never => sequencer::CharacterAnalysisMode::Never,
+    }
+}
+
+fn settings_workspace(settings: &SequencerSettings) -> SequencerSettingsWorkspace {
+    SequencerSettingsWorkspace {
+        analysis: SequencerAnalysisSettingsWorkspace {
+            format: token_format_record(settings.analysis.format),
+            significance: significance_record(settings.analysis.significance),
+            character_analysis: character_analysis_record(settings.analysis.character_analysis),
+            bit_analysis: settings.analysis.bit_analysis,
+        },
+        capture_regex: settings.capture_regex.clone(),
+        capture_part: capture_part_record(settings.capture_part),
+        deduplicate: settings.deduplicate,
+    }
+}
+
+fn settings_from_workspace(workspace: &SequencerSettingsWorkspace) -> SequencerSettings {
+    SequencerSettings {
+        analysis: AnalysisSettings {
+            format: token_format_from_record(workspace.analysis.format),
+            significance: significance_from_record(workspace.analysis.significance),
+            character_analysis: character_analysis_from_record(
+                workspace.analysis.character_analysis,
+            ),
+            bit_analysis: workspace.analysis.bit_analysis,
+        },
+        capture_regex: if workspace.capture_regex.is_empty() {
+            DEFAULT_CAPTURE_REGEX.to_string()
+        } else {
+            workspace.capture_regex.clone()
+        },
+        capture_part: capture_part_from_record(workspace.capture_part),
+        deduplicate: workspace.deduplicate,
+    }
+}
+
+impl SequencerState {
+    pub(in crate::app) fn workspace(&self) -> SequencerWorkspace {
+        SequencerWorkspace {
+            section: section_record(self.section),
+            tokens: self.tokens.clone(),
+            settings: settings_workspace(&self.settings),
+            result_open: self.result_open,
+            result_tab: result_tab_record(self.result_tab),
+            result_title: self.result_title.clone(),
+            analysis_count: self.analysis_count,
+            result_source: self.result.as_ref().map(|analysis| analysis.source.clone()),
+        }
+    }
+
+    pub(in crate::app) fn apply_workspace(&mut self, workspace: &SequencerWorkspace) {
+        self.section = section_from_record(workspace.section);
+        self.tokens = workspace
+            .tokens
+            .iter()
+            .map(|token| token.trim().to_string())
+            .filter(|token| !token.is_empty() && token_length(token) <= sequencer::MAX_TOKEN_CHARS)
+            .take(MAX_TOKENS)
+            .collect();
+        self.seen_tokens = self.tokens.iter().cloned().collect();
+        self.feedback = None;
+        self.paste = None;
+        self.load = None;
+        self.settings = settings_from_workspace(&workspace.settings);
+        self.capture = CaptureState::default();
+        self.result_tab = result_tab_from_record(workspace.result_tab);
+        self.result_title = workspace.result_title.clone();
+        self.analysis_count = workspace.analysis_count;
+        self.result = workspace.result_source.as_deref().and_then(|source| {
+            sequencer::analyze(&self.tokens, self.settings.analysis, source).ok()
+        });
+        self.result_open = workspace.result_open && self.result.is_some();
     }
 }
 

@@ -86,7 +86,7 @@ impl SearchMatcher {
         })
     }
 
-    fn with_negative(mut self, negative: bool) -> Self {
+    pub(super) fn with_negative(mut self, negative: bool) -> Self {
         self.negative = negative;
         self
     }

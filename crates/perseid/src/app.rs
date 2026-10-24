@@ -63,6 +63,7 @@ use crate::branding;
 use crate::ca_store;
 use crate::history::History;
 use crate::memory::MemoryMeter;
+use crate::project::{MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace};
 use crate::site_map::{self, SiteMap};
 use crate::theme;
 use crate::view::{self, MessageViews};
@@ -190,6 +191,64 @@ enum WindowControl {
     Minimize,
     Maximize,
     Close,
+}
+
+impl From<MessagePane> for MessagePaneRecord {
+    fn from(pane: MessagePane) -> Self {
+        match pane {
+            MessagePane::Request => Self::Request,
+            MessagePane::Response => Self::Response,
+        }
+    }
+}
+
+impl From<MessagePaneRecord> for MessagePane {
+    fn from(pane: MessagePaneRecord) -> Self {
+        match pane {
+            MessagePaneRecord::Request => Self::Request,
+            MessagePaneRecord::Response => Self::Response,
+        }
+    }
+}
+
+impl From<MessageView> for MessageViewRecord {
+    fn from(view: MessageView) -> Self {
+        match view {
+            MessageView::Pretty => Self::Pretty,
+            MessageView::Raw => Self::Raw,
+            MessageView::Hex => Self::Hex,
+        }
+    }
+}
+
+impl From<MessageViewRecord> for MessageView {
+    fn from(view: MessageViewRecord) -> Self {
+        match view {
+            MessageViewRecord::Pretty => Self::Pretty,
+            MessageViewRecord::Raw => Self::Raw,
+            MessageViewRecord::Hex => Self::Hex,
+        }
+    }
+}
+
+impl From<&MessageViews> for MessageViewsWorkspace {
+    fn from(views: &MessageViews) -> Self {
+        Self {
+            pretty: views.pretty.clone(),
+            raw: views.raw.clone(),
+            hex: views.hex.clone(),
+        }
+    }
+}
+
+impl From<&MessageViewsWorkspace> for MessageViews {
+    fn from(views: &MessageViewsWorkspace) -> Self {
+        Self {
+            pretty: views.pretty.clone(),
+            raw: views.raw.clone(),
+            hex: views.hex.clone(),
+        }
+    }
 }
 
 pub struct PerseidApp {

@@ -34,6 +34,20 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     Ok(serde_json::from_slice(bytes)?)
 }
 
+/// Encode a value that is split into bounded chunks before storage.
+///
+/// Only the workspace uses this today: its retained result bodies can add up
+/// to more than [`MAX_RECORD_BYTES`], so the persistence layer stores the JSON
+/// across several entries and applies its own read cap.
+pub fn encode_large<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(value)?)
+}
+
+/// Decode a value assembled from bounded chunks. See [`encode_large`].
+pub fn decode_large<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
+    Ok(serde_json::from_slice(bytes)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
