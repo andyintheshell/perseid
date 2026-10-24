@@ -412,6 +412,7 @@ pub enum TargetSectionRecord {
     #[default]
     SiteMap,
     Scope,
+    Issues,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

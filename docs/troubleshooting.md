@@ -64,6 +64,10 @@ public interface just to work around a local port conflict.
    eviction removes a row from the current view; it does not delete that record
    from a saved project. The temporary project store can grow beyond these cache
    limits until history is cleared or the app exits.
+6. In **Target > Site map**, check the display filter. By default Perseid hides
+   not-found items, CSS, images, general binary content, 4xx responses, and
+   empty folders. Click the filter bar and choose **Show all items** (or relax
+   specific filters) to reveal entries.
 
 The site map uses the currently loaded history snapshot, not active crawling.
 HTTPS pass-through tunnels have no visible decrypted requests, and `CONNECT`

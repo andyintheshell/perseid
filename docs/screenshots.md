@@ -57,7 +57,10 @@ traffic, with direction, length, TLS, time, listener port, and WebSocket ID.
 
 ## Target > Site map
 
-![Target site map grouped by host and path](images/perseid-target-site-map.png)
+The Burp-style URL-view tree, display-filter bar, sortable Contents table, and
+shared request/response detail panes.
+
+![Target site map with a folder tree, Burp-style display filters, and a sortable Contents table](images/perseid-target-site-map.png)
 
 ## Target > Scope
 

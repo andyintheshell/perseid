@@ -75,10 +75,9 @@ const HOME: &[u8] = b"<!DOCTYPE html><html><head><title>Demo shop</title></head>
 const API_JSON: &[u8] = br#"{"items":[{"id":1,"name":"Router"},{"id":2,"name":"Cable"}]}"#;
 const CSS: &[u8] = b"body { font-family: sans-serif; }";
 const MISSING: &[u8] = b"<!DOCTYPE html><html><body>Not found</body></html>";
-const PRODUCTS: &[u8] = b"<!DOCTYPE html><html><body><h1>Products</h1></body></html>";
-const NOT_IMPLEMENTED: &[u8] = b"<!DOCTYPE html><html><body>Not implemented</body></html>";
-const PRODUCTS_HTML: &[u8] =
-    b"<!DOCTYPE html><html><body><h1>Products</h1><ul><li>Router</li><li>Cable</li></ul></body></html>";
+const PRODUCTS: &[u8] = b"<!DOCTYPE html><html><head><title>Products</title></head><body><h1>Products</h1></body></html>";
+const NOT_IMPLEMENTED: &[u8] = b"<!DOCTYPE html><html><head><title>Not implemented</title></head><body><h1>Not implemented</h1></body></html>";
+const PRODUCTS_HTML: &[u8] = b"<!DOCTYPE html><html><head><title>Products</title></head><body><h1>Products</h1><ul><li>Router</li><li>Cable</li></ul></body></html>";
 
 type ShotResult = Arc<Mutex<Option<Result<(), String>>>>;
 
@@ -286,6 +285,7 @@ impl PerseidApp {
         self.main_tab = MainTab::Proxy;
         self.proxy_section = ProxySection::HttpHistory;
         self.target_section = TargetSection::SiteMap;
+        self.site_map_ui.reset();
         self.request_view = MessageView::Pretty;
         self.response_view = MessageView::Pretty;
         self.inspector.reset();
@@ -663,6 +663,135 @@ impl PerseidApp {
             "text/html",
             example_body(),
             118,
+            &date,
+        );
+
+        // A small folder hierarchy makes the Target > Site map documentation
+        // scene show folders, query folding, and repeated paths. These are
+        // ordinary captured exchanges like the rows above; nothing is crawled.
+        let page = |title: &str| {
+            format!(
+                "<!doctype html><html><head><title>{title}</title></head>\
+                 <body><h1>{title}</h1><p>Captured locally by Perseid.</p></body></html>"
+            )
+            .into_bytes()
+        };
+        let query = later + Duration::from_millis(200);
+        demo_http(
+            &mut self.history,
+            9,
+            query,
+            "GET",
+            &format!("http://{host}/account/settings"),
+            host,
+            "/account/settings",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Account settings"),
+            3,
+            &date,
+        );
+        let mut login_headers = proxy_headers(host);
+        login_headers.push((
+            "content-type".to_owned(),
+            "application/x-www-form-urlencoded".to_owned(),
+        ));
+        demo_http(
+            &mut self.history,
+            10,
+            query,
+            "POST",
+            &format!("http://{host}/account/login"),
+            host,
+            "/account/login",
+            login_headers,
+            b"user=demo&remember=1".to_vec(),
+            302,
+            "text/html",
+            Vec::new(),
+            5,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            11,
+            query,
+            "GET",
+            &format!("http://{host}/admin/users?page=1"),
+            host,
+            "/admin/users?page=1",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Users"),
+            4,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            12,
+            query,
+            "GET",
+            &format!("http://{host}/admin/users?page=2"),
+            host,
+            "/admin/users?page=2",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Users"),
+            4,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            13,
+            query,
+            "GET",
+            &format!("http://{host}/assets/app.js"),
+            host,
+            "/assets/app.js",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "application/javascript",
+            b"console.log('demo');".to_vec(),
+            1,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            14,
+            query,
+            "GET",
+            &format!("http://{host}/products?sort=name"),
+            host,
+            "/products?sort=name",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Products"),
+            4,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            15,
+            query,
+            "GET",
+            &format!("http://{host}/docs/api"),
+            host,
+            "/docs/api",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("API reference"),
+            3,
             &date,
         );
     }
