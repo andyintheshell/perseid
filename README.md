@@ -45,7 +45,7 @@ browser required.**
 
 | Tool | Available today |
 | --- | --- |
-| **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; host/path site map; Pretty, Raw, and Hex message views; Copy as curl for complete captures; gzip, deflate, and Brotli decoding. |
+| **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; Burp-style target site map with a host/folder tree, display filters, and sortable Contents table; Pretty, Raw, and Hex message views; Copy as curl for complete captures; gzip, deflate, and Brotli decoding. |
 | **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and project-scoped workbench state. Older saved history is stored but not yet pageable in the UI. |
 | **Search** | Search the currently loaded HTTP-history snapshot's request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted Pretty/Raw/Hex results. Older saved rows are not searched yet. |
 | **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |

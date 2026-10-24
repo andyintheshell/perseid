@@ -68,6 +68,11 @@ impl PerseidApp {
         {
             return;
         }
+        // Pausing freezes the current snapshot. The cache is rebuilt on the
+        // next frame after the user resumes or clears the pause state.
+        if self.site_map_ui.paused() && self.site_map.is_some() {
+            return;
+        }
         let scope = self.scope_enabled.then_some(&self.scope);
         let map = SiteMap::build(&self.history, scope);
         self.site_map = Some((revision, map));

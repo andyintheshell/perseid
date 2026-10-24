@@ -74,7 +74,7 @@ impl PerseidApp {
 /// Without a selection the first row becomes selected, regardless of the
 /// direction; otherwise the target index clamps to the ends and never wraps.
 /// `None` means there are no rows.
-fn moved_row_index(len: usize, current: Option<usize>, delta: isize) -> Option<usize> {
+pub(super) fn moved_row_index(len: usize, current: Option<usize>, delta: isize) -> Option<usize> {
     if len == 0 {
         return None;
     }

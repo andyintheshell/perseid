@@ -68,6 +68,22 @@ impl PerseidApp {
         let on_websocket_history = self.main_tab == MainTab::Proxy
             && self.proxy_section == ProxySection::WebSocketsHistory;
         let on_history = on_http_history || on_websocket_history;
+        let on_site_map = self.main_tab == MainTab::Target
+            && self.target_section == TargetSection::SiteMap
+            && self.site_map_ui.on_contents();
+        if on_site_map {
+            let search_id = egui::Id::unique(super::target::SITE_MAP_SEARCH_ID);
+            if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::F)) {
+                ctx.memory_mut(|memory| memory.request_focus(search_id));
+                return;
+            }
+            if ctx.memory(|memory| memory.focused()) == Some(search_id) {
+                if ctx.input(|input| input.key_pressed(Key::Escape)) {
+                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
+                }
+                return;
+            }
+        }
         if on_history {
             let filter_id = egui::Id::unique(if on_http_history {
                 FILTER_ID
@@ -86,7 +102,7 @@ impl PerseidApp {
             }
         }
 
-        if ctx.egui_wants_keyboard_input() || !on_history {
+        if ctx.egui_wants_keyboard_input() || !(on_history || on_site_map) {
             return;
         }
 
@@ -95,6 +111,21 @@ impl PerseidApp {
         let up = ctx.input(|input| input.key_pressed(Key::ArrowUp) || input.key_pressed(Key::K));
         let home = ctx.input(|input| input.key_pressed(Key::Home));
         let end = ctx.input(|input| input.key_pressed(Key::End));
+        if on_site_map {
+            if down {
+                self.move_site_map_selection(1);
+            }
+            if up {
+                self.move_site_map_selection(-1);
+            }
+            if home {
+                self.select_site_map_edge(true);
+            }
+            if end {
+                self.select_site_map_edge(false);
+            }
+            return;
+        }
         if on_http_history {
             if down {
                 self.move_selection(1);

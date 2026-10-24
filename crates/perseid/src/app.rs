@@ -169,6 +169,7 @@ enum TargetSection {
     #[default]
     SiteMap,
     Scope,
+    Issues,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -308,6 +309,7 @@ pub struct PerseidApp {
     sequencer: sequencer::SequencerState,
     project: project_ui::ProjectUi,
     site_map: Option<(u64, SiteMap)>,
+    site_map_ui: target::SiteMapUi,
     scope: BTreeSet<String>,
     scope_enabled: bool,
     scope_input: String,
@@ -477,6 +479,7 @@ impl PerseidApp {
             sequencer: sequencer::SequencerState::new(),
             project: project_ui::ProjectUi::new(args.history_limit, args.history_bytes),
             site_map: None,
+            site_map_ui: target::SiteMapUi::new(),
             scope: BTreeSet::new(),
             scope_enabled: false,
             scope_input: String::new(),
@@ -593,6 +596,7 @@ impl PerseidApp {
             sequencer: sequencer::SequencerState::new(),
             project: project_ui::ProjectUi::new(10, 1024),
             site_map: None,
+            site_map_ui: target::SiteMapUi::new(),
             scope: BTreeSet::new(),
             scope_enabled: false,
             scope_input: String::new(),

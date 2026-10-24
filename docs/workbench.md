@@ -11,7 +11,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 
 | Tab | Use it for |
 | --- | --- |
-| **Target** | A site map derived from history and a shared scope list. |
+| **Target** | A Burp-style site map derived from history, a shared scope list, and an explicit empty scanner-issues view. |
 | **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
 | **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
@@ -71,11 +71,28 @@ active project.
 
 ## Target and scope
 
-**Target > Site map** groups captured requests by host and path, showing the
-latest exchange for each path in the currently loaded history. It is built from
-history, not from a crawler. UI-cache eviction can remove entries from the map
-without deleting their saved project records; clearing history removes the
-stored records too.
+**Target > Site map** follows Burp's URL view. The left tree groups captured
+requests by host, folder, and resource; selecting a node filters the
+**Contents** table to that node and everything below it. Query variants share
+the same tree leaf while each method and URL remains its own Contents row.
+Columns cover Host, Method, URL, Params, Status code, Length, MIME type, Title,
+Notes, and Time requested, and every column can be sorted.
+
+The filter bar only changes what is displayed. Its defaults match Burp's:
+not-found items, CSS, images, general binary content, 4xx responses, and empty
+folders are hidden. Relax a filter or choose **Show all items** to bring hidden
+entries back; nothing is deleted. **Contents search** narrows the selected
+node, the pause button freezes the derived map while capture continues, and the
+Inspector's Notes appear in the table. The **Issues (0)** tab is empty because
+Perseid does not run a scanner, and the crawl-paths view is unavailable because
+Perseid does not crawl or infer unrequested URLs.
+
+The map is built from the currently loaded history snapshot, not from a crawler.
+UI-cache eviction can remove entries from the map without deleting their saved
+project records; clearing history removes the stored records too.
+
+**Target > Issues** is likewise an honest empty state: Perseid has no
+vulnerability scanner and does not import scanner findings.
 
 In **Target > Scope**, add a bare host, a `host:port` authority, or a full URL.
 Matching includes subdomains and ignores ports; URL schemes and paths do not

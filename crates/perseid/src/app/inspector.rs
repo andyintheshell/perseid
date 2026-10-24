@@ -83,6 +83,14 @@ impl InspectorState {
         self.notes.clear();
     }
 
+    /// Note text for an exchange, used by the Target > Site map Notes column.
+    pub(super) fn note(&self, id: u64) -> Option<&str> {
+        self.notes
+            .get(&id)
+            .map(String::as_str)
+            .filter(|text| !text.is_empty())
+    }
+
     pub(super) fn workspace(&self) -> InspectorWorkspace {
         InspectorWorkspace {
             open: self.open,
