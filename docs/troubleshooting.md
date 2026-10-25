@@ -82,8 +82,9 @@ exchanges are also separate from Proxy history by design.
   do not provide a native file picker. Save As and Save Copy require a new path;
   they will not overwrite an existing file.
 - **Check the version.** The published `0.1.0` release predates project files;
-  use the current `0.2.0` development build to open `.perseid` projects. Newer or
-  unsupported schema versions are rejected rather than silently rewritten.
+  use a `0.2.0` build to open `.perseid` projects (build from this source until
+  that release is published). Newer or unsupported schema versions are rejected
+  rather than silently rewritten.
 - **History limits do not delete old saved records.** Opening a project loads a
   bounded newest-first snapshot controlled by `--history-limit` and
   `--history-bytes`. Older records remain in the file but are not pageable or

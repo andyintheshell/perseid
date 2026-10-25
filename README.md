@@ -71,9 +71,10 @@ The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
 macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
 are unsigned; the macOS app is ad-hoc signed but not notarized. See the
 [platform requirements](docs/getting-started.md#requirements) before installing.
-The currently published `0.1.0` crate and release predate project persistence;
-the current `0.2.0` workspace on `main` includes the first persistence support.
-Until `0.2.0` is published, build from a source checkout to use projects.
+The latest published `0.1.0` crate and GitHub release predate project
+persistence. The current source/workspace version is `0.2.0` and includes the
+first persistence support. Until the `0.2.0` release is published, build from a
+source checkout to use projects.
 
 ### Install from crates.io
 

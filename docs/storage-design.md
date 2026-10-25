@@ -1,7 +1,7 @@
 # Perseid storage and project persistence design
 
 **Status:** Original design proposal; the first persistence implementation is
-in `main` (`0.2.0` in development). See §0 for current status and deviations.<br>
+in the current `0.2.0` source/workspace. See §0 for current status and deviations.<br>
 **Design baseline:** Perseid `v0.1.0` (release commit `b8e51e9`, 2026-10-23)<br>
 **Initial storage engine:** `redb` 4.4.x, version pinned through `Cargo.lock`  
 **User-visible extension:** `.perseid`  

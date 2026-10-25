@@ -37,10 +37,9 @@ cargo install perseid --locked
 perseid
 ```
 
-The currently published crates.io version is `0.1.0`; it predates project
-persistence. Persistent projects are in the current `0.2.0` workspace on `main`
-and will be included when that version is published. Use a source checkout below
-to try them now.
+The current source/workspace version is `0.2.0` and includes persistent
+projects. The latest published crates.io/GitHub release is `0.1.0` and predates
+that support. Use a source checkout below until `0.2.0` is published.
 
 ### Download a prebuilt binary
 
