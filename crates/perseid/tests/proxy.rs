@@ -2377,6 +2377,30 @@ async fn websocket_handshake_relays_frames_and_captures_messages() {
     assert_eq!(opcode, 1);
     assert_eq!(payload, b"hello");
 
+    // The proxy forwards a frame before emitting its capture event. Wait for
+    // both directions before pausing so the pause transition cannot race the
+    // final capture callback for this exchange.
+    let mut messages = Vec::new();
+    let deadline = Instant::now() + TIMEOUT;
+    while messages.len() < 2 && Instant::now() < deadline {
+        match proxy.recv_timeout(Duration::from_millis(100)) {
+            Ok(ProxyEvent::WebSocketMessage {
+                connection,
+                direction,
+                opcode,
+                payload,
+                ..
+            }) => messages.push((connection, direction, opcode, payload)),
+            Ok(event) => panic!("unexpected HTTP history event for a WebSocket: {event:?}"),
+            Err(_) => {}
+        }
+    }
+    assert_eq!(
+        messages.len(),
+        2,
+        "both hello frames should be captured before pausing"
+    );
+
     // A persistent WebSocket stays open while capture is paused. The paused
     // message must be forwarded but omitted, and capture must resume without a
     // new handshake.
@@ -2410,7 +2434,6 @@ async fn websocket_handshake_relays_frames_and_captures_messages() {
         "extension offers should be stripped before reaching the origin"
     );
 
-    let mut messages = Vec::new();
     let deadline = Instant::now() + TIMEOUT;
     while messages.len() < 4 && Instant::now() < deadline {
         match proxy.recv_timeout(Duration::from_millis(100)) {
