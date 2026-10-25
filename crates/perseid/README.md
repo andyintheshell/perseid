@@ -26,10 +26,8 @@ browser.
 > See the [capability matrix](https://github.com/andyintheshell/perseid/blob/main/docs/burp-parity.md)
 > for current coverage and limitations.
 
-> **Version status:** the current workspace/package version is `0.2.0` and
-> includes project persistence. The latest published crates.io/GitHub release is
-> `0.1.0` and does not include it. Until `0.2.0` is released, build from a
-> source checkout to use projects.
+> **Version:** `0.2.0` includes project persistence. Install the current crate
+> from crates.io or use a prebuilt package from GitHub Releases to use projects.
 
 ## What this crate contains
 

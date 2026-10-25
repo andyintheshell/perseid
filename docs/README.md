@@ -8,9 +8,8 @@ These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
 The current source/workspace version is `0.2.0` and includes the first local
-project-persistence support. The latest published crates.io/GitHub release is
-`0.1.0` and predates it; use the source-build instructions until `0.2.0` is
-published.
+project-persistence support. Install the current crate from crates.io or use a
+prebuilt package from GitHub Releases; see [Getting started](getting-started.md).
 
 ## New to Perseid?
 

@@ -37,9 +37,8 @@ cargo install perseid --locked
 perseid
 ```
 
-The current source/workspace version is `0.2.0` and includes persistent
-projects. The latest published crates.io/GitHub release is `0.1.0` and predates
-that support. Use a source checkout below until `0.2.0` is published.
+Perseid `0.2.0` includes persistent projects. Install the current crate from
+crates.io or download a prebuilt package from GitHub Releases to use them.
 
 ### Download a prebuilt binary
 
@@ -244,8 +243,7 @@ have no disk-retention cap. Project files are not encrypted and schema
 migrations are not implemented.
 WebSocket messages can be captured and inspected, but not edited or replayed;
 HTTP/3/QUIC is absent. Sequencer capture is regex-based and its statistical
-results are indicative. The published `0.1.0` release does not yet include
-project persistence. See [limits and persistence](workbench.md#limits-and-persistence)
+results are indicative. See [limits and persistence](workbench.md#limits-and-persistence)
 and the [capability matrix](burp-parity.md) before relying on a particular
 workflow.
 

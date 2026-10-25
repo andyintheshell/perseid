@@ -5,9 +5,8 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version status:** the workspace/package version is `0.2.0`; `v0.1.0`
-is still the latest published crate and GitHub release. The `0.2.0` release is
-not available until its packages are built and the GitHub draft is published.
+**Current version:** `0.2.0`, including the first project-persistence
+implementation.
 
 ## Current release formats
 
@@ -107,7 +106,7 @@ wix extension add -g WixToolset.UI.wixext/5.0.2
 pwsh scripts/package-windows.ps1 -Arch x64 # or arm64
 ```
 
-The published `0.1.0` release completed all five hosted package builders. That
-checks artifact generation, not every installer and runtime on clean machines.
+The previous release completed all five hosted package builders. That checks
+artifact generation, not every installer and runtime on clean machines.
 Continue smoke-testing native ARM64 builds, MSI install/upgrade behavior, the
 macOS Gatekeeper experience, and Linux runtime dependencies before each release.
