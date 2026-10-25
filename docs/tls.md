@@ -73,9 +73,10 @@ just to follow this guide.
 ### Other browser/platform combinations
 
 Use the browser's documented certificate manager and trust only the public CA
-for website/SSL authentication. Windows-specific paths exist in Perseid, but
-Windows build/run setup is not CI-validated; these trust notes are not a claim
-of full Windows application support. See [platform status](README.md#platform-status).
+for website/SSL authentication. Windows builds and tests run in CI. Clean-machine
+release installs and manual browser trust workflows still need broader smoke
+testing; see
+[platform status](README.md#platform-status).
 
 ## Verify interception
 

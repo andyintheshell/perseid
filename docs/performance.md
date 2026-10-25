@@ -14,7 +14,9 @@ history, and viewing large responses.
 > message viewers, and other features have changed since this run. The image
 > above shows the current memory window, not the exact interface measured.
 > These figures come from one Linux VM; they are not macOS results, a current
-> release threshold, or a guarantee for arbitrary traffic.
+> release threshold, or a guarantee for arbitrary traffic. The M0 workload
+> predates persistent projects and does not measure redb writes, project-open
+> time, or saved-file disk growth.
 
 ## Milestone 0 results
 
@@ -39,19 +41,31 @@ The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
 stayed under 109 MiB peak even though the wire body was 8 MiB, because capture
 stops at 1 MiB and the detail views render bounded previews.
 
-History also has a total retained-body budget. The default is half of physical
-memory, measured once at startup, with a 256 MiB fallback if the platform does
-not report installed memory (`--history-bytes` overrides it). On the 5.3 GiB
-benchmark VM this resolves to about 2.65 GiB across request and response bodies,
-so a worst case of 2,000 exchanges with two full 1 MiB bodies each still cannot
-retain the full 4 GiB. The oldest exchanges are evicted when either the exchange
-count or the byte budget is reached. The M0 workload retained only 125 KiB, so
-this budget did not bind in the measurements above.
+Each HTTP and WebSocket history UI cache has a retained-body budget. The default
+is half of physical memory, measured once at startup, with a 256 MiB fallback if
+the platform does not report installed memory (`--history-bytes` overrides it).
+On the 5.3 GiB benchmark VM this resolves to about 2.65 GiB per cache across
+request and response bodies, so a worst case of 2,000 HTTP exchanges with two
+full 1 MiB bodies each still cannot retain the full 4 GiB in that cache. The
+HTTP and WebSocket caches have separate budgets. The temporary redb project has
+its own aggregate retention limits: combined record count across HTTP and
+WebSocket messages, and retained HTTP body/WebSocket payload bytes. By default
+both mirror the history settings, so the same numbers bound the UI cache and
+the temporary store; `--temporary-retention-limit` and
+`--temporary-retention-bytes` change them independently, and `0` disables a
+dimension. Persistent project files retain records on disk until cleared and
+have no automatic total-store retention cap. The M0 workload retained only
+125 KiB, so the UI-cache budget did not bind in the measurements above.
 
-This budget counts retained request/response bodies, not headers, formatting
+This UI-cache budget counts retained request/response bodies, not headers,
+formatting caches, editor state, queued work, graphics resources, or the entire
+process. One exchange may remain even when it alone exceeds the configured
+history byte budget, and the temporary store always keeps the newest record.
+The aggregate retention limits count retained body/payload bytes and record
+counts; they do not account for headers, redb page/cache overhead, formatting
 caches, editor state, queued work, graphics resources, or the entire process.
-One exchange may remain even when it alone exceeds the configured history byte
-budget. Treat the controls as retention limits, not a hard RSS ceiling.
+Treat the history and retention controls as bounded-data limits, not a hard RSS
+ceiling.
 
 ### Heap in use and resident memory
 

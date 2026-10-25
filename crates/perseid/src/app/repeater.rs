@@ -9,13 +9,14 @@ use std::time::{Duration, Instant};
 
 use crate::proxy::{
     DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterError, RepeaterRequest,
-    RepeaterResult,
+    RepeaterResult, split_raw_request,
 };
 use egui::TextEdit;
 
 use super::message_view::message_text;
 use super::widgets::{empty_state, message_mode_tab, section_tab};
 use super::*;
+use crate::project::{RepeaterResponseWorkspace, RepeaterWorkspace};
 use crate::view::{self, MessageViews};
 
 const REPEATER_TABS_ID: &str = "perseid.repeater.tabs";
@@ -88,29 +89,7 @@ impl RepeaterTab {
         } else {
             item.request.scheme.clone()
         };
-        let body = &item.request_body;
-        let mut notes = Vec::new();
-        if body.is_truncated() {
-            notes.push("the captured request body was truncated at the capture limit");
-        }
-        if !body.is_complete() {
-            notes.push("the captured request body did not finish");
-        }
-        if body.data().len() > view::TEXT_PREVIEW_LIMIT {
-            notes.push("the editor contains a bounded body preview");
-        }
-        if !body.data().is_empty() && std::str::from_utf8(body.data()).is_err() {
-            notes.push(
-                "the captured body was encoded or binary; the editor uses a best-effort text view",
-            );
-        }
-
-        let note = (!notes.is_empty()).then(|| {
-            format!(
-                "Seeded from history: {}. Review the body before sending.",
-                notes.join("; ")
-            )
-        });
+        let note = view::seeded_body_note(&item.request_body, "sending");
 
         Self {
             id,
@@ -410,7 +389,7 @@ impl PerseidApp {
                         );
                     } else if let Some(reply) = &tab.response {
                         ui.colored_label(
-                            repeater_status_color(reply.status),
+                            view::status_class_color(reply.status),
                             RichText::new(repeater_status_text(reply.status, &reply.reason)).strong(),
                         );
                         ui.label(
@@ -482,17 +461,12 @@ impl PerseidApp {
     }
 
     fn close_repeater_tab(&mut self, index: usize) {
-        if index >= self.repeater_tabs.len() {
+        let len = self.repeater_tabs.len();
+        if index >= len {
             return;
         }
         self.repeater_tabs.remove(index);
-        if self.repeater_tabs.is_empty() {
-            self.repeater_active = 0;
-        } else if self.repeater_active > index {
-            self.repeater_active -= 1;
-        } else if self.repeater_active >= self.repeater_tabs.len() {
-            self.repeater_active = self.repeater_tabs.len() - 1;
-        }
+        self.repeater_active = tab_index_after_close(len, self.repeater_active, index);
     }
 
     fn ensure_repeater(&mut self) -> Result<(), String> {
@@ -625,7 +599,7 @@ fn response_pane(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
             );
         } else if let Some(reply) = &tab.response {
             ui.colored_label(
-                repeater_status_color(reply.status),
+                view::status_class_color(reply.status),
                 RichText::new(repeater_status_text(reply.status, &reply.reason)).strong(),
             );
             ui.label(
@@ -706,16 +680,6 @@ fn response_pane(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
     }
 }
 
-fn split_raw_request(raw: &str) -> (&str, &str) {
-    if let Some(position) = raw.find("\r\n\r\n") {
-        (&raw[..position + 4], &raw[position + 4..])
-    } else if let Some(position) = raw.find("\n\n") {
-        (&raw[..position + 2], &raw[position + 2..])
-    } else {
-        (raw, "")
-    }
-}
-
 fn repeater_status_text(status: u16, reason: &str) -> String {
     if reason.is_empty() {
         status.to_string()
@@ -724,19 +688,117 @@ fn repeater_status_text(status: u16, reason: &str) -> String {
     }
 }
 
-fn repeater_status_color(status: u16) -> Color32 {
-    match status / 100 {
-        2 => theme::GREEN,
-        3 => theme::BLUE,
-        4 => theme::AMBER,
-        5 => theme::RED,
-        _ => theme::GRAY,
+impl PerseidApp {
+    pub(super) fn repeater_workspace(&self) -> Vec<RepeaterWorkspace> {
+        self.repeater_tabs
+            .iter()
+            .map(|tab| RepeaterWorkspace {
+                id: tab.id,
+                title: tab.title.clone(),
+                scheme: tab.scheme.clone(),
+                host: tab.host.clone(),
+                request: tab.request.clone(),
+                note: tab.note.clone(),
+                response: tab
+                    .response
+                    .as_ref()
+                    .map(|response| RepeaterResponseWorkspace {
+                        views: (&response.views).into(),
+                        status: response.status,
+                        reason: response.reason.clone(),
+                        duration_ms: u64::try_from(response.duration.as_millis())
+                            .unwrap_or(u64::MAX),
+                        size: response.size,
+                        truncated: response.truncated,
+                        body_complete: response.body_complete,
+                        body_error: response.body_error.clone(),
+                    }),
+                error: tab.error.clone(),
+                response_view: tab.response_view.into(),
+            })
+            .collect()
+    }
+
+    pub(super) fn apply_repeater_workspace(&mut self, tabs: &[RepeaterWorkspace], active: usize) {
+        self.repeater_tabs.clear();
+        let mut next_id = 1;
+        for workspace in tabs {
+            let id = workspace.id.max(next_id);
+            next_id = id.saturating_add(1).max(next_id.saturating_add(1));
+            let mut tab = RepeaterTab::new(id);
+            tab.title = workspace.title.clone();
+            tab.scheme = workspace.scheme.clone();
+            tab.host = workspace.host.clone();
+            tab.request = workspace.request.clone();
+            tab.note = workspace.note.clone();
+            tab.response = workspace.response.as_ref().map(|response| RepeaterReply {
+                views: (&response.views).into(),
+                status: response.status,
+                reason: response.reason.clone(),
+                duration: Duration::from_millis(response.duration_ms),
+                size: response.size,
+                truncated: response.truncated,
+                body_complete: response.body_complete,
+                body_error: response.body_error.clone(),
+            });
+            tab.error = workspace.error.clone();
+            tab.response_view = workspace.response_view.into();
+            self.repeater_tabs.push(tab);
+        }
+        self.repeater_active = active.min(self.repeater_tabs.len().saturating_sub(1));
+        self.repeater_next_tab = next_id;
+    }
+}
+
+/// Active tab index after the tab at `index` is removed from `len` tabs.
+///
+/// Removing a tab before the active one shifts it left; removing the active
+/// tab selects the nearest remaining tab to the right, or the last one.
+fn tab_index_after_close(len: usize, active: usize, index: usize) -> usize {
+    if len <= 1 {
+        return 0;
+    }
+    if active > index {
+        active - 1
+    } else if active >= len - 1 {
+        len - 2
+    } else {
+        active
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::{HistoryItem, Phase};
+    use crate::proxy::{CapturedBody, RequestInfo};
+    use std::time::SystemTime;
+
+    fn history_item(
+        number: u64,
+        method: &str,
+        path: &str,
+        scheme: &str,
+        body: Vec<u8>,
+    ) -> HistoryItem {
+        HistoryItem {
+            id: number,
+            number,
+            timestamp: SystemTime::now(),
+            request: RequestInfo {
+                method: method.to_string(),
+                uri: format!("{scheme}://example.com{path}"),
+                scheme: scheme.to_string(),
+                host: "example.com".to_string(),
+                path: path.to_string(),
+                version: "HTTP/1.1".to_string(),
+                headers: Vec::new(),
+            },
+            request_body: CapturedBody::from_bytes(body),
+            response: None,
+            phase: Phase::InFlight,
+        }
+    }
 
     #[test]
     fn splits_lf_and_crlf_request_bodies() {
@@ -749,5 +811,55 @@ mod tests {
             ("POST / HTTP/1.1\n\n", "hello")
         );
         assert_eq!(split_raw_request("GET / HTTP/1.1"), ("GET / HTTP/1.1", ""));
+    }
+
+    #[test]
+    fn seeding_from_history_keeps_the_wire_request_and_a_path_title() {
+        let item = history_item(7, "GET", "/search?q=1", "https", Vec::new());
+        let tab = RepeaterTab::from_history(1, &item);
+        assert_eq!(tab.title, "#7 GET /search");
+        assert_eq!(tab.scheme, "https");
+        assert_eq!(tab.host, "example.com");
+        assert_eq!(tab.request, view::request_views(&item).raw);
+        assert!(tab.note.is_none());
+    }
+
+    #[test]
+    fn seeding_from_history_defaults_an_empty_scheme_to_http() {
+        let item = history_item(1, "GET", "/", "", Vec::new());
+        let tab = RepeaterTab::from_history(1, &item);
+        assert_eq!(tab.scheme, "http");
+    }
+
+    #[test]
+    fn seeding_from_history_truncates_long_titles() {
+        let path = format!("/{}", "a".repeat(80));
+        let item = history_item(3, "GET", &path, "https", Vec::new());
+        let tab = RepeaterTab::from_history(1, &item);
+        assert_eq!(tab.title.chars().count(), 56);
+        assert!(tab.title.ends_with("..."));
+    }
+
+    #[test]
+    fn seeding_from_history_notes_binary_bodies_before_sending() {
+        let item = history_item(1, "POST", "/upload", "https", vec![0xff, 0x00]);
+        let tab = RepeaterTab::from_history(1, &item);
+        let note = tab.note.expect("binary body needs a note");
+        assert!(note.contains("Seeded from history"));
+        assert!(note.ends_with("Review the body before sending."));
+    }
+
+    #[test]
+    fn closing_a_tab_selects_the_nearest_remaining_tab() {
+        // Removing a tab before the active one shifts the selection left.
+        assert_eq!(tab_index_after_close(3, 2, 0), 1);
+        // Removing a tab after the active one keeps the selection.
+        assert_eq!(tab_index_after_close(3, 0, 2), 0);
+        // Removing the active last tab selects the previous one.
+        assert_eq!(tab_index_after_close(3, 2, 2), 1);
+        // Removing the active middle tab selects the tab that follows it.
+        assert_eq!(tab_index_after_close(3, 1, 1), 1);
+        // Removing the only tab resets the index.
+        assert_eq!(tab_index_after_close(1, 0, 0), 0);
     }
 }

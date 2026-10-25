@@ -13,6 +13,8 @@ mod highlight;
 mod history;
 mod memory;
 mod pretty;
+mod project;
+mod sequencer;
 mod site_map;
 mod theme;
 mod view;
@@ -53,6 +55,18 @@ pub(crate) struct Args {
     /// (default: half of physical memory).
     #[arg(long, value_name = "BYTES", default_value_t = default_history_bytes())]
     pub history_bytes: usize,
+
+    /// Maximum captured HTTP exchanges and WebSocket messages retained by a
+    /// temporary project (default: `--history-limit`). `0` disables the count
+    /// limit. Saved projects keep every record.
+    #[arg(long, value_name = "N")]
+    pub temporary_retention_limit: Option<u64>,
+
+    /// Maximum request/response and WebSocket payload bytes retained by a
+    /// temporary project (default: `--history-bytes`). `0` disables the byte
+    /// limit. Saved projects keep every record.
+    #[arg(long, value_name = "BYTES")]
+    pub temporary_retention_bytes: Option<u64>,
 
     /// Start without the proxy (UI only).
     #[arg(long)]
@@ -106,7 +120,21 @@ pub fn run() -> eframe::Result {
         // The menu shares the title-bar row with the window controls, Burp
         // style. The app draws the drag area and resize border itself.
         .with_decorations(false);
-    if let Some(icon) = branding::window_icon() {
+    #[cfg(target_os = "macos")]
+    let running_from_app_bundle = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .is_some_and(branding::is_macos_app_bundle_executable);
+    #[cfg(not(target_os = "macos"))]
+    let running_from_app_bundle = false;
+
+    if running_from_app_bundle {
+        // eframe applies a supplied icon to NSApp at runtime, overriding the
+        // packaged .icns and macOS's native rounded-corner mask. Use its
+        // explicit OS-default sentinel; leaving the icon unset makes eframe
+        // substitute its own default icon instead.
+        viewport = viewport.with_icon(egui::IconData::default());
+    } else if let Some(icon) = branding::window_icon() {
         viewport = viewport.with_icon(icon);
     } else {
         log::warn!("could not decode the window icon");

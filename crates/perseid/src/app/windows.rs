@@ -110,8 +110,11 @@ impl PerseidApp {
                         .color(theme::TEXT),
                 );
                 ui.hyperlink_to(
-                    RichText::new("github.com/andyintheshell/perseid").color(theme::ACCENT_DARK),
-                    "https://github.com/andyintheshell/perseid",
+                    RichText::new(
+                        branding::REPOSITORY_URL.trim_start_matches("https://"),
+                    )
+                    .color(theme::ACCENT_DARK),
+                    branding::REPOSITORY_URL,
                 );
                 ui.add_space(2.0);
                 ui.weak("A lightweight web security workbench. Inspect, modify, and replay HTTP traffic.");
@@ -273,5 +276,119 @@ fn memory_graph(ui: &mut egui::Ui, samples: &[u64]) {
     ));
     if let Some(last) = points.last() {
         painter.circle_filled(*last, 3.0, theme::ACCENT);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Pos2, Rect, Shape, Vec2};
+
+    use crate::memory::{MemoryMeter, SAMPLE_INTERVAL};
+
+    use super::*;
+
+    /// Run `memory_graph` in a headless context and return the painted shapes.
+    fn graph_shapes(samples: &[u64]) -> Vec<Shape> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(520.0, 320.0))),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| memory_graph(ui, samples));
+        output.textures_delta.clear();
+        output
+            .shapes
+            .into_iter()
+            .map(|clipped| clipped.shape)
+            .collect()
+    }
+
+    fn data_points(shapes: &[Shape], expected: usize) -> Vec<Pos2> {
+        shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Path(path) if path.points.len() == expected => Some(path.points.clone()),
+                _ => None,
+            })
+            .expect("graph should draw a data path")
+    }
+
+    fn chart_rect(shapes: &[Shape]) -> Rect {
+        shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Rect(rect) => Some(rect.rect),
+                _ => None,
+            })
+            .expect("graph should draw a background frame")
+            .shrink2(Vec2::new(10.0, 12.0))
+    }
+
+    #[test]
+    fn memory_graph_draws_one_point_per_sample_with_a_marker_on_the_last() {
+        let samples = [1024, 2048, 4096, 3072];
+        let shapes = graph_shapes(&samples);
+        let points = data_points(&shapes, samples.len());
+        assert_eq!(points.len(), 4);
+        let last = points.last().unwrap();
+        assert!(shapes.iter().any(|shape| matches!(
+            shape,
+            Shape::Circle(circle) if (circle.center - *last).length() < 0.01
+        )));
+    }
+
+    #[test]
+    fn memory_graph_spreads_points_left_to_right_across_the_chart() {
+        let samples = [100, 200, 300, 400, 500];
+        let shapes = graph_shapes(&samples);
+        let chart = chart_rect(&shapes);
+        let points = data_points(&shapes, samples.len());
+        assert!((points[0].x - chart.left()).abs() < 0.01);
+        assert!((points[2].x - chart.center().x).abs() < 0.01);
+        assert!((points[4].x - chart.right()).abs() < 0.01);
+        assert!(points.windows(2).all(|pair| pair[0].x < pair[1].x));
+    }
+
+    #[test]
+    fn memory_graph_places_larger_samples_higher_and_keeps_headroom() {
+        let samples = [0, 500, 1000];
+        let shapes = graph_shapes(&samples);
+        let chart = chart_rect(&shapes);
+        let points = data_points(&shapes, samples.len());
+        assert!((points[0].y - chart.bottom()).abs() < 0.01);
+        assert!(points[1].y < points[0].y);
+        assert!(points[2].y < points[1].y);
+        // The 10% ceiling headroom keeps the peak below the top edge.
+        let headroom = points[2].y - chart.top();
+        assert!((headroom - chart.height() * (1.0 - 1.0 / 1.1)).abs() < 0.5);
+    }
+
+    #[test]
+    fn memory_graph_centers_a_lone_sample() {
+        let shapes = graph_shapes(&[777]);
+        let chart = chart_rect(&shapes);
+        let points = data_points(&shapes, 1);
+        assert!((points[0].x - chart.center().x).abs() < 0.01);
+        assert!(chart.contains(points[0]));
+    }
+
+    #[test]
+    fn memory_graph_draws_only_the_frame_when_there_is_nothing_to_plot() {
+        for samples in [&[][..], &[0, 0, 0]] {
+            let shapes = graph_shapes(samples);
+            assert!(shapes.iter().any(|shape| matches!(shape, Shape::Rect(_))));
+            assert!(
+                !shapes
+                    .iter()
+                    .any(|shape| matches!(shape, Shape::Path(_) | Shape::Circle(_)))
+            );
+        }
+    }
+
+    #[test]
+    fn memory_meter_starts_with_a_single_sample() {
+        let meter = MemoryMeter::new();
+        assert_eq!(meter.samples().len(), 1);
+        assert!(meter.time_until_next_sample() <= SAMPLE_INTERVAL);
     }
 }

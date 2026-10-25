@@ -11,13 +11,14 @@ use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use perseid::proxy::{Repeater, RepeaterConfig, RepeaterRequest, RepeaterResult};
-use rcgen::{CertificateParams, KeyPair};
-use rustls::ServerConfig;
-use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::TlsAcceptor;
+
+mod common;
+
+use common::{origin_certificate, origin_certificate_h2, read_request};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -59,52 +60,6 @@ async fn rejects_oversized_response_heads() {
     .expect("oversized heads should be rejected promptly");
     assert_eq!(response.id, id);
     assert!(matches!(response.result, RepeaterResult::Failed { .. }));
-}
-
-fn origin_certificate(name: &str) -> (ServerConfig, String) {
-    let key = KeyPair::generate().expect("origin key");
-    let params = CertificateParams::new(vec![name.to_string()]).expect("origin params");
-    let cert = params.self_signed(&key).expect("origin certificate");
-    let key_der = PrivatePkcs8KeyDer::from(key.serialize_der());
-    let config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert.der().clone()], PrivateKeyDer::Pkcs8(key_der))
-        .expect("origin server config");
-    (config, cert.pem())
-}
-
-fn origin_certificate_h2(name: &str) -> (ServerConfig, String) {
-    let (mut config, pem) = origin_certificate(name);
-    config.alpn_protocols = vec![b"h2".to_vec()];
-    (config, pem)
-}
-
-async fn read_request<S: AsyncRead + Unpin>(stream: &mut S) -> Vec<u8> {
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = stream.read(&mut chunk).await.unwrap();
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        if let Some(head_end) = buf.windows(4).position(|window| window == b"\r\n\r\n") {
-            let head = String::from_utf8_lossy(&buf[..head_end]);
-            let length = head
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .unwrap_or(0);
-            if buf.len() >= head_end + 4 + length {
-                break;
-            }
-        }
-    }
-    buf
 }
 
 #[tokio::test]

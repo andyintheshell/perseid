@@ -23,7 +23,10 @@ Perseid aims to be:
 - **Manual-first.** The request and response are the center of the interface,
   not a dashboard of speculative findings.
 - **Lightweight by design.** No embedded browser or web-based desktop UI;
-  memory limits, streamed bodies, and bounded history are requirements.
+  streamed bodies and bounded UI history are requirements. The project store
+  bounds temporary capture retention by configurable aggregate count and
+  retained-body limits; saved files still need a disk-retention cap before
+  total disk use is bounded.
 - **Keyboard-friendly.** Fast navigation among requests, replay tabs, search,
   and comparisons.
 - **Transparent.** Inspection tools should show exactly what was sent,
@@ -38,7 +41,8 @@ Perseid aims to be:
 Perseid currently ships as one Cargo package. The proxy and byte-transform
 engines have module boundaries so their behavior can be tested without opening
 the UI; they are not separate, GUI-free build targets. The following diagram
-shows current responsibilities, with planned work labelled explicitly:
+shows the current capture and storage path. The UI still uses bounded in-memory
+snapshots for history views; paging older saved records is planned.
 
 ```text
 External browser
@@ -50,28 +54,34 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
       |
       +----> Interception queue <----> Hold, edit, forward, drop
       |
-      +----> Bounded capture and in-memory history
-      |                |
-      |                +----> Metadata filtering (search/diff planned)
-      |
-      +----> Optional passive and guided checks (planned)
+      +----> Bounded capture events
+                       |
+                       v
+               Project writer (redb)
+                 /             \
+       Temporary RAM DB       Persistent .perseid file
+                       |
+                       v
+       Bounded in-memory HTTP/WebSocket snapshots
                        |
                        v
                Native egui interface
-                       |
-                       +----> Intruder (payload attacks over the direct client)
-                       |
-                       +----> Repeater (direct HTTP/HTTPS client, own runtime)
-                       |
-                       +----> Decoder (local byte transforms and hashes)
+                 |       |       |
+             Search   Repeater  Intruder
+                 |       |       (direct client)
+                 +----> Sequencer (token sampling and randomness tests)
+                 +----> Decoder and Comparer
 ```
 
 Current crate layout:
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/perseid/src/proxy/` | Embedded proxy: loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, WebSocket upgrade relay and frame/message capture, body teeing, bounded capture events, the direct Repeater client, and the Intruder attack engine. Exposed as `perseid::proxy`. |
-| `crates/perseid/src/` | egui/eframe desktop app: Burp-style workspace, interception editor, in-memory history, Intruder and Repeater editors, Decoder panels and transform engine, site map, scope and rewrite controls, TLS/CA controls, message views, keyboard navigation. |
+| `crates/perseid/src/proxy/` | Embedded proxy: loopback listener, HTTP forwarding, interception policy, scope guard, match/replace rules, CONNECT tunnels, TLS interception with a local CA, WebSocket message capture, bounded capture events, direct Repeater client, and Intruder engine. Exposed as `perseid::proxy`. |
+| `crates/perseid/src/project/` | redb-backed temporary and file projects, versioned records/schema, serialized writer, history snapshots/queries, and project transfer. |
+| `crates/perseid/src/app/` | egui/eframe desktop shell and focused modules for chrome/input, project UI, history, Search, Repeater, Intruder, Sequencer, Decoder, Comparer, Target, and Proxy. |
+| `crates/perseid/src/decoder.rs` | UI-independent byte transforms and hashes used by Decoder. |
+| `crates/perseid/src/sequencer/` | UI-independent token parsing, format decoding, statistical tests, and entropy analysis used by Sequencer. |
 
 The proxy stays behind its own module boundary even though it is compiled into
 the application crate. The UI talks to it through the `perseid::proxy` API, so
@@ -118,7 +128,7 @@ workspace preflights the first one.
 Decoder is a local utility and never touches the network. Its byte-level engine
 lives in `crates/perseid/src/decoder.rs`, independent of egui so the transforms
 can be unit-tested directly. The panel chain, selection handling, coloring, and
-widgets live beside it in `crates/perseid/src/app/decoder.rs`. A transform
+widgets live in `crates/perseid/src/app/decoder/`. A transform
 accepts at most 8 MiB and may produce at most 16 MiB, including preserved
 prefix and suffix bytes; gzip decompression is bounded by the same output cap.
 Results carry byte ranges tagged with the operation that produced them, and the
@@ -127,15 +137,23 @@ operation truncates the panels after its source and appends the result, so the
 chain cannot describe transformations that no longer produced the visible
 bytes.
 
-Planned additions include a disk-backed history store, WebSocket message
-interception/replay, and a native extension point. Proxy, Repeater, and Intruder
-network operations run off the UI thread. Proxy capture events use a bounded,
-lossy channel with a drop counter; Repeater jobs and Intruder events use separate
-bounded queues. Repeater
-admission reserves both an operation slot and bytes through result consumption,
-not just through network completion. Held messages use a separate bounded
-interception channel with a one-shot decision per message, so capture-event
-overflow does not discard the user's interception decision channel.
+Project persistence is implemented, but the first UI integration loads a bounded
+newest-first snapshot rather than paging through all saved history. Search still
+queries the loaded in-memory history. The temporary redb project bounds capture
+retention with configurable aggregate count and retained-body limits
+(`--temporary-retention-*`, defaulting to the `--history-*` values), evicting
+the oldest records first. New and Open ask Save/Discard/Cancel when the temporary
+project has unsaved work. Persistent project files have no automatic disk cap,
+and recent-project/quit prompts and schema migrations remain planned; WebSocket
+message interception/replay and a native extension point are also not
+implemented.
+Proxy, Repeater, and Intruder network operations run off the UI thread. Proxy
+capture events use a bounded, lossy
+channel with a drop counter; the project writer has its own bounded queue and
+reports storage-side capture loss. Repeater jobs and Intruder events use separate
+bounded queues. Repeater admission reserves both an operation slot and bytes
+through result consumption, not just through network completion. Held messages
+use a separate bounded interception channel with a one-shot decision per message.
 
 Capture/history limits constrain retained body data, not total resident memory.
 Repeater additionally has an aggregate pending-work budget, and Pretty body
@@ -151,19 +169,22 @@ lets users keep their normal browser, extensions, and devtools.
 
 The workspace follows Burp's tool organization so existing users can find
 familiar surfaces immediately: **Target**, **Proxy**, **Intruder**,
-**Repeater**, **Decoder**, and **Comparer**, in that order. **Proxy > HTTP
-history** is the default landing view because it is the live capture surface;
-**Proxy > WebSockets history** sits beside it for complete message-level
-WebSocket traffic.
+**Repeater**, **Sequencer**, **Decoder**, and **Comparer**, in that order.
+**Proxy > HTTP history** is the default landing view because it is the live
+capture surface; **Proxy > WebSockets history** sits beside it for complete
+message-level WebSocket traffic.
 
 The visual language is a warm, low-contrast light theme: near-white surfaces,
 pale orange selection states, and a burnt-orange accent. The palette lives in
 one theme module so future views stay consistent. HiDPI text and controls are
 first-class requirements, not an afterthought.
 
-Planned tools such as Sequencer are not presented as working controls before
-their engines exist. **Comparer** is a real two-item diff workspace: one shared
-item collection, word/byte comparison, and paired Text/Hex result panes.
+Tools are not presented as working controls before their engines exist.
+**Sequencer** is a real token-randomness workspace: manual and live sampling,
+regex capture from HTTP history, character- and bit-level tests, and an
+effective-entropy result window with per-analysis settings. **Comparer** is a
+real two-item diff workspace: one shared item collection, word/byte comparison,
+and paired Text/Hex result panes.
 **Intruder** is a real fuzzing workspace:
 an editable raw request with `$$` position highlighting, Add/Clear/Auto marker
 actions, one payload set per relevant position, all four Burp attack types, a
@@ -194,7 +215,7 @@ Burp's bottom-bar convention.
 
 ## Technology
 
-Initial technology choices, subject to prototyping and measurement:
+Current technology choices:
 
 - **Rust** for the application and networking components.
 - **Tokio** for asynchronous networking.
@@ -209,7 +230,8 @@ Initial technology choices, subject to prototyping and measurement:
 - **base64**, **flate2**, **html-escape**, **num-bigint**, and the RustCrypto
   digest crates for Decoder. The transforms are implemented in-process and
   bounded; Decoder does not embed a scripting engine.
-- **SQLite** for searchable, disk-backed history (planned).
+- **redb** for single-file persistent projects with a versioned schema. Files are
+  not encrypted, and automatic schema migrations are not implemented.
 
 ## Performance philosophy
 
@@ -220,10 +242,17 @@ performance claims.
 
 Important implementation principles:
 
-- Disk-backed history with bounded in-memory windows (planned).
+- redb-backed project history with a bounded in-memory UI snapshot. Paging
+  through older saved records is planned.
 - Hard limits on captured body size, with bounded text and hex previews.
-- A total retained-body budget for history, independent of the exchange count
-  (half of physical memory by default, with a 256 MiB fallback).
+- A total retained-body budget for the UI cache, independent of the exchange
+  count (half of physical memory by default, with a 256 MiB fallback). The
+  temporary redb project has its own aggregate retention limits for record
+  count and retained HTTP body/WebSocket payload bytes; by default they mirror
+  the history flags and can be set with `--temporary-retention-limit` and
+  `--temporary-retention-bytes`. Oldest records are evicted first and the newest
+  record is always kept. Persistent project files are not automatically pruned
+  and have no disk-retention limit; users clear saved history explicitly.
 - Concurrent proxy connection/tunnel limits and a bounded capture-event channel
   with drop counters. Loss recovery applies queued events before resolving
   in-flight rows; late or duplicate completions do not decrement unrelated

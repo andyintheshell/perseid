@@ -13,7 +13,7 @@ use crate::proxy::{
 };
 
 /// One complete text or binary WebSocket message.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WebSocketMessageItem {
     /// Unique event ID used by the UI selection.
     pub id: u64,
@@ -81,6 +81,27 @@ impl WebSocketHistory {
         self.retained_bytes = 0;
         self.evicted = 0;
         self.next_number = 1;
+        self.revision += 1;
+    }
+
+    /// Replace the cache with messages loaded from a project.
+    ///
+    /// Counters refer to the loaded history only, so a previous session's
+    /// eviction count is discarded.
+    pub fn load(&mut self, items: Vec<WebSocketMessageItem>) {
+        self.items.clear();
+        self.order.clear();
+        self.retained_bytes = 0;
+        self.evicted = 0;
+        self.next_number = 1;
+        for item in items {
+            self.next_number = self.next_number.max(item.number.saturating_add(1));
+            self.retained_bytes = self
+                .retained_bytes
+                .saturating_add(item.payload.data().len());
+            self.order.push_back(item.id);
+            self.items.insert(item.id, item);
+        }
         self.revision += 1;
     }
 
@@ -224,5 +245,33 @@ mod tests {
         history.apply(message(2, 1, b"b"));
         assert_eq!(history.get(2).expect("message").number, 1);
         assert_eq!(history.evicted(), 0);
+    }
+
+    #[test]
+    fn load_discards_previous_eviction_count() {
+        let mut history = WebSocketHistory::new(1, 1024);
+        history.apply(message(1, 1, b"a"));
+        history.apply(message(2, 1, b"b"));
+        assert_eq!(history.evicted(), 1);
+
+        history.load(vec![WebSocketMessageItem {
+            id: 9,
+            number: 9,
+            timestamp: SystemTime::now(),
+            connection: WebSocketConnectionInfo {
+                id: 1,
+                url: "wss://example.com/socket".to_string(),
+                host: "example.com".to_string(),
+                tls: true,
+                listener_port: 8080,
+                protocol: None,
+            },
+            direction: WebSocketDirection::ToClient,
+            opcode: WebSocketOpcode::Text,
+            payload: CapturedBody::from_bytes(b"hello".to_vec()),
+        }]);
+        assert_eq!(history.evicted(), 0);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.get(9).expect("message").number, 9);
     }
 }

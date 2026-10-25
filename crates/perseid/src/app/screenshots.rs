@@ -27,6 +27,7 @@ use super::intercept::InterceptEntry;
 use super::intruder::IntruderState;
 use super::repeater::RepeaterTab;
 use super::search::SearchState;
+use super::sequencer::SequencerState;
 use super::*;
 use crate::history::History;
 use crate::websocket_history::WebSocketHistory;
@@ -49,6 +50,8 @@ const TIMEOUT: Duration = Duration::from_secs(150);
 /// `docs/screenshots.md`, and add a label in the Screenshots workflow.
 const SCENE_FILES: &[&str] = &[
     MAIN_FILE,
+    "perseid-project.png",
+    "perseid-project-dialog.png",
     "perseid-target-site-map.png",
     "perseid-target-scope.png",
     "perseid-proxy-intercept.png",
@@ -59,6 +62,8 @@ const SCENE_FILES: &[&str] = &[
     "perseid-decoder.png",
     "perseid-comparer.png",
     "perseid-comparer-result.png",
+    "perseid-sequencer.png",
+    "perseid-sequencer-result.png",
     "perseid-proxy-websockets.png",
     "perseid-search.png",
 ];
@@ -70,10 +75,9 @@ const HOME: &[u8] = b"<!DOCTYPE html><html><head><title>Demo shop</title></head>
 const API_JSON: &[u8] = br#"{"items":[{"id":1,"name":"Router"},{"id":2,"name":"Cable"}]}"#;
 const CSS: &[u8] = b"body { font-family: sans-serif; }";
 const MISSING: &[u8] = b"<!DOCTYPE html><html><body>Not found</body></html>";
-const PRODUCTS: &[u8] = b"<!DOCTYPE html><html><body><h1>Products</h1></body></html>";
-const NOT_IMPLEMENTED: &[u8] = b"<!DOCTYPE html><html><body>Not implemented</body></html>";
-const PRODUCTS_HTML: &[u8] =
-    b"<!DOCTYPE html><html><body><h1>Products</h1><ul><li>Router</li><li>Cable</li></ul></body></html>";
+const PRODUCTS: &[u8] = b"<!DOCTYPE html><html><head><title>Products</title></head><body><h1>Products</h1></body></html>";
+const NOT_IMPLEMENTED: &[u8] = b"<!DOCTYPE html><html><head><title>Not implemented</title></head><body><h1>Not implemented</h1></body></html>";
+const PRODUCTS_HTML: &[u8] = b"<!DOCTYPE html><html><head><title>Products</title></head><body><h1>Products</h1><ul><li>Router</li><li>Cable</li></ul></body></html>";
 
 type ShotResult = Arc<Mutex<Option<Result<(), String>>>>;
 
@@ -281,6 +285,7 @@ impl PerseidApp {
         self.main_tab = MainTab::Proxy;
         self.proxy_section = ProxySection::HttpHistory;
         self.target_section = TargetSection::SiteMap;
+        self.site_map_ui.reset();
         self.request_view = MessageView::Pretty;
         self.response_view = MessageView::Pretty;
         self.inspector.reset();
@@ -312,18 +317,29 @@ impl PerseidApp {
         self.intruder = IntruderState::new();
         self.decoder = DecoderState::new();
         self.comparer = ComparerState::new();
+        self.sequencer = SequencerState::new();
         self.search = SearchState::default();
+        self.project.reset_for_screenshot();
 
         match index {
             // Proxy > HTTP history (the README scene).
             0 => {}
-            // Target > Site map.
+            // Projects: the File menu open over the HTTP history, with the
+            // temporary-project status visible in the status bar.
             1 => {
+                self.project.file_menu_forced_open = true;
+            }
+            // Projects: the Save As dialog with a demo destination path.
+            2 => {
+                self.project.show_save_dialog_for_screenshot();
+            }
+            // Target > Site map.
+            3 => {
                 self.main_tab = MainTab::Target;
                 self.target_section = TargetSection::SiteMap;
             }
             // Target > Scope.
-            2 => {
+            4 => {
                 self.main_tab = MainTab::Target;
                 self.target_section = TargetSection::Scope;
                 self.scope_enabled = true;
@@ -332,13 +348,13 @@ impl PerseidApp {
                 self.scope.insert("127.0.0.1:8090".to_string());
             }
             // Proxy > Intercept with a small queue of held messages.
-            3 => {
+            5 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::Intercept;
                 self.seed_screenshot_intercepts();
             }
             // Proxy > Match/replace.
-            4 => {
+            6 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::MatchReplace;
                 self.match_replace = vec![
@@ -369,19 +385,19 @@ impl PerseidApp {
                 ];
             }
             // Proxy > TLS.
-            5 => {
+            7 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::Tls;
                 self.tls_intercept = true;
                 self.tls_passthrough.push("banking.example.com".to_string());
             }
             // Intruder with a populated template, payload set, and results.
-            6 => {
+            8 => {
                 self.main_tab = MainTab::Intruder;
                 self.intruder.seed_screenshot();
             }
             // Repeater with two seeded history requests.
-            7 => {
+            9 => {
                 self.main_tab = MainTab::Repeater;
                 for (tab_id, history_id) in [(1, 2), (2, 5)] {
                     let item = self.history.get(history_id).ok_or_else(|| {
@@ -396,30 +412,41 @@ impl PerseidApp {
                 }
             }
             // Decoder with Base64 and SHA-256 layers.
-            8 => {
+            10 => {
                 self.main_tab = MainTab::Decoder;
                 self.decoder.seed_screenshot();
             }
             // Comparer with a request and response selected.
-            9 => {
+            11 => {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
             }
             // Comparer result window for the same pair.
-            10 => {
+            12 => {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
                 self.comparer.open_screenshot_result();
             }
+            // Sequencer > Manual load with a seeded token sample.
+            13 => {
+                self.main_tab = MainTab::Sequencer;
+                self.sequencer.seed_screenshot();
+            }
+            // Sequencer result window for the same sample.
+            14 => {
+                self.main_tab = MainTab::Sequencer;
+                self.sequencer.seed_screenshot();
+                self.sequencer.open_screenshot_result();
+            }
             // Proxy > WebSockets history with a JSON message selected.
-            11 => {
+            15 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::WebSocketsHistory;
                 self.websocket_selected = Some(23);
                 self.websocket_view = MessageView::Pretty;
             }
             // Search with a decoded response body selected.
-            12 => {
+            16 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::HttpHistory;
                 self.selected = Some(2);
@@ -636,6 +663,135 @@ impl PerseidApp {
             "text/html",
             example_body(),
             118,
+            &date,
+        );
+
+        // A small folder hierarchy makes the Target > Site map documentation
+        // scene show folders, query folding, and repeated paths. These are
+        // ordinary captured exchanges like the rows above; nothing is crawled.
+        let page = |title: &str| {
+            format!(
+                "<!doctype html><html><head><title>{title}</title></head>\
+                 <body><h1>{title}</h1><p>Captured locally by Perseid.</p></body></html>"
+            )
+            .into_bytes()
+        };
+        let query = later + Duration::from_millis(200);
+        demo_http(
+            &mut self.history,
+            9,
+            query,
+            "GET",
+            &format!("http://{host}/account/settings"),
+            host,
+            "/account/settings",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Account settings"),
+            3,
+            &date,
+        );
+        let mut login_headers = proxy_headers(host);
+        login_headers.push((
+            "content-type".to_owned(),
+            "application/x-www-form-urlencoded".to_owned(),
+        ));
+        demo_http(
+            &mut self.history,
+            10,
+            query,
+            "POST",
+            &format!("http://{host}/account/login"),
+            host,
+            "/account/login",
+            login_headers,
+            b"user=demo&remember=1".to_vec(),
+            302,
+            "text/html",
+            Vec::new(),
+            5,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            11,
+            query,
+            "GET",
+            &format!("http://{host}/admin/users?page=1"),
+            host,
+            "/admin/users?page=1",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Users"),
+            4,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            12,
+            query,
+            "GET",
+            &format!("http://{host}/admin/users?page=2"),
+            host,
+            "/admin/users?page=2",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Users"),
+            4,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            13,
+            query,
+            "GET",
+            &format!("http://{host}/assets/app.js"),
+            host,
+            "/assets/app.js",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "application/javascript",
+            b"console.log('demo');".to_vec(),
+            1,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            14,
+            query,
+            "GET",
+            &format!("http://{host}/products?sort=name"),
+            host,
+            "/products?sort=name",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("Products"),
+            4,
+            &date,
+        );
+        demo_http(
+            &mut self.history,
+            15,
+            query,
+            "GET",
+            &format!("http://{host}/docs/api"),
+            host,
+            "/docs/api",
+            proxy_headers(host),
+            Vec::new(),
+            200,
+            "text/html",
+            page("API reference"),
+            3,
             &date,
         );
     }

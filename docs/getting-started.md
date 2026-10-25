@@ -3,23 +3,59 @@
 [Documentation](README.md) · [Workbench](workbench.md) ·
 [HTTPS setup](tls.md) · [Troubleshooting](troubleshooting.md)
 
-Build Perseid from source, capture a request from a local target, and then
-connect a testing browser. No certificate installation is needed for the first
-plain-HTTP walkthrough.
+Install the latest published Perseid crate with Cargo, download a prebuilt
+binary from GitHub Releases, or build from source. Then capture a request from a
+local target and connect a testing browser. No certificate installation is
+needed for the first plain-HTTP walkthrough.
 
 ## Requirements
 
-- **Rust 1.95 or newer**, with Cargo. `rust-toolchain.toml` pins 1.95.0 for
-  rustup users; the manifest minimum is 1.95 and the crate uses edition 2024.
+- **Rust 1.95 or newer**, with Cargo, when installing with `cargo install` or
+  building from source. `rust-toolchain.toml` pins 1.95.0 for rustup users; the
+  manifest minimum is 1.95 and the crate uses edition 2024. Prebuilt downloads
+  do not require Rust.
 - A graphical desktop with OpenGL support; X11 or Wayland on Linux.
-- Git, and a browser or HTTP client that supports an HTTP proxy.
+- A browser or HTTP client that supports an HTTP proxy. Git is needed only for a
+  source checkout.
 - Python 3 and curl for the optional local-target walkthrough below.
 
 | Platform | Validation status |
 | --- | --- |
-| Linux | CI-tested on Ubuntu 26.04; the desktop screenshot workflow also runs on Linux/Xvfb. The published memory baseline is from a Kali arm64 VM. |
-| macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. Homebrew instructions are below. Release packaging is not yet validated or published. |
-| Windows | CI-tested on the GitHub-hosted Windows 2025 runner with MSVC. Release packaging is not yet validated or published, and graphics-driver coverage is limited. |
+| Linux | CI-tested on Ubuntu 26.04; x86-64/ARM64 AppImage and DEB downloads are available. Packages are built on Ubuntu 22.04 and need compatible desktop/graphics libraries. The published memory baseline is from a Kali ARM64 VM. |
+| macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. A universal Intel/Apple Silicon DMG is available; it is ad-hoc signed but not notarized. |
+| Windows | CI-tested on the GitHub-hosted Windows 2025 x64 runner. x64/ARM64 MSI and no-install ZIP downloads are available; Windows packages are unsigned. Graphics-driver and clean-install coverage is limited. |
+
+## Install a published release
+
+### Build the latest crates.io version
+
+This compiles Perseid locally and requires Rust plus the platform's build
+dependencies:
+
+```sh
+cargo install perseid --locked
+perseid
+```
+
+The currently published crates.io version is `0.1.0`; it predates project
+persistence. Persistent projects are in the current `0.2.0` workspace on `main`
+and will be included when that version is published. Use a source checkout below
+to try them now.
+
+### Download a prebuilt binary
+
+Choose a platform package from
+[GitHub Releases](https://github.com/andyintheshell/perseid/releases/latest):
+
+| Platform | Downloads |
+| --- | --- |
+| Windows | x64 or ARM64 `.msi` installer, or `-portable.zip` |
+| macOS | Universal `.dmg` containing `Perseid.app` |
+| Linux | x86-64 or ARM64 `.AppImage` or `.deb` |
+
+`SHA256SUMS.txt` lists checksums. Windows packages are unsigned, and the macOS
+DMG is not notarized, so the operating system may warn or block launch. The
+AppImage and DEB still require compatible host desktop and graphics libraries.
 
 ### Linux
 
@@ -27,7 +63,8 @@ Install Rust through [rustup](https://www.rust-lang.org/tools/install), or use
 distribution packages that meet the minimum version. With rustup, the repository
 selects its pinned toolchain automatically.
 
-On Debian, Ubuntu, or Kali, install the native build dependencies:
+For `cargo install` or a source build on Debian, Ubuntu, or Kali, install the
+native build dependencies:
 
 ```sh
 sudo apt-get update
@@ -71,10 +108,10 @@ desktop dependencies; the macOS job verifies that its hosted runner is arm64.
 Before caching, CI removes each image's unrelated floating `stable` Rust
 toolchain so image updates do not invalidate the cache for the pinned project
 toolchain. The test suite runs headlessly. Running the app still requires a
-working desktop and graphics stack; CI coverage is not a promise of release
-installers or support for every desktop configuration.
+working desktop and graphics stack. CI does not install-test release packages
+or promise support for every desktop and graphics configuration.
 
-## Build and run
+## Build from the repository
 
 ```sh
 git clone https://github.com/andyintheshell/perseid.git
@@ -97,7 +134,7 @@ cargo build --release -p perseid --locked
 ```
 
 On macOS this produces a command-line-launched desktop executable, not a
-packaged `.app` or installer. The setup here is a source-build workflow.
+packaged `.app` or installer. Use the GitHub release DMG for a prebuilt app.
 
 To explore the interface without starting the listener:
 
@@ -167,8 +204,10 @@ cargo run -p perseid --locked -- --listen 127.0.0.1:8081 --ui-scale 1.5
 | `--listen <ADDR>` | `127.0.0.1:8080` | Proxy listen address; keep it on loopback. |
 | `--capture-limit <BYTES>` | `1048576` (1 MiB) | Body bytes retained per request/response. |
 | `--intercept-limit <BYTES>` | `1048576` (1 MiB) | Maximum body size eligible for buffering/editing or rewriting. |
-| `--history-limit <N>` | `2000` | Maximum number of retained exchanges. |
-| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Retained history-body budget, not a process-memory limit. |
+| `--history-limit <N>` | `2000` | Maximum number of HTTP exchanges or WebSocket messages held in each UI history cache / loaded project snapshot. Does not cap saved project files. Also the default for `--temporary-retention-limit`. |
+| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Per-cache in-memory UI budget for HTTP and WebSocket history. In persistent projects this bounds the opened snapshot, not disk retention. Also the default for `--temporary-retention-bytes`. |
+| `--temporary-retention-limit <N>` | `--history-limit` | Maximum combined HTTP + WebSocket records retained by a temporary project. `0` disables the count limit. Oldest records are evicted first; saved projects never evict. |
+| `--temporary-retention-bytes <BYTES>` | `--history-bytes` | Maximum retained HTTP request/response body bytes plus WebSocket payload bytes in a temporary project. `0` disables the byte limit. The newest record is always kept. |
 | `--no-proxy` | Off | Open the UI without starting the proxy. |
 | `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA store lives; use the active certificate/key paths shown in the UI. |
 | `--no-tls-intercept` | Off | Keep HTTPS tunnels opaque; the CA is still prepared. |
@@ -182,8 +221,8 @@ default in the desktop app.
 ## Workspace
 
 Continue with the [workbench guide](workbench.md) for Target scope, history,
-message views, interception, match/replace, Intruder, Repeater, Decoder,
-Comparer, and shortcuts.
+message views, interception, match/replace, Intruder, Repeater, Sequencer,
+Decoder, Comparer, and shortcuts.
 
 Pretty body formatting has independent 256 KiB input/output and 128-level
 nesting budgets; exceeding one falls back to bounded Raw text. Repeater also
@@ -194,11 +233,22 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-This is a prototype: history, attack results, Comparer items, and workspace
-settings are not saved. WebSocket messages can be captured and inspected, but
-not edited or replayed; HTTP/3/QUIC and Sequencer are absent. See
-[limits and persistence](workbench.md#limits-and-persistence) and the
-[capability matrix](burp-parity.md) before relying on a particular workflow.
+The current `0.2.0` workspace supports saved projects, but the first UI
+integration opens only a bounded newest-first snapshot of stored history; older
+records stay in the project file but cannot yet be paged or searched from the
+app. Temporary projects evict the oldest captured records and released body
+bytes when they exceed the configurable aggregate retention limits, which
+default to the history flags. New and Open ask Save/Discard/Cancel before
+replacing a temporary project with unsaved work; a failed save or a cancelled
+switch keeps the current project. Saved files are not automatically pruned and
+have no disk-retention cap. Project files are not encrypted and schema
+migrations are not implemented.
+WebSocket messages can be captured and inspected, but not edited or replayed;
+HTTP/3/QUIC is absent. Sequencer capture is regex-based and its statistical
+results are indicative. The published `0.1.0` release does not yet include
+project persistence. See [limits and persistence](workbench.md#limits-and-persistence)
+and the [capability matrix](burp-parity.md) before relying on a particular
+workflow.
 
 ## HiDPI displays
 

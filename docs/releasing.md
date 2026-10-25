@@ -5,6 +5,10 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
+**Current version status:** `v0.1.0` is the latest published crate and GitHub
+release. The workspace on `main` is `0.2.0`, which is intended for the next
+release and includes the first project-persistence implementation.
+
 ## Current release formats
 
 The release matrix builds these nine application downloads:
@@ -27,10 +31,8 @@ also need real-device smoke testing before we treat them as supported downloads.
    through the normal pull-request flow. The version produces tag `v<version>`
    and determines all asset names.
 2. Merge the reviewed `main` branch into the protected `release` branch and push
-   it. For the first release, create `release` from the updated `main` after this
-   setup pull request has landed. Manual dispatch can preflight the builders on
-   another branch without publishing; dispatching on `release` will create or
-   update the draft as usual.
+   it. Manual dispatch can preflight the builders on another branch without
+   publishing; dispatching on `release` will create or update the draft as usual.
 3. Wait for all five native build jobs and the draft job to finish. The draft is
    not public until someone publishes it. On a failed build, fix the issue on
    `main`, merge the fix into `release`, and push again.
@@ -61,7 +63,7 @@ maintainers.
 - No signing secrets are required by this initial workflow. This means MSI and
   Windows executables are unsigned, and the macOS DMG is not notarized.
 
-## First-draft smoke test
+## Release smoke-test checklist
 
 - **Windows:** Install the MSI on x64 and ARM64 Windows, confirm it creates a
   Start Menu shortcut, launch it, uninstall it, and test an upgrade. Extract the
@@ -104,7 +106,7 @@ wix extension add -g WixToolset.UI.wixext/5.0.2
 pwsh scripts/package-windows.ps1 -Arch x64 # or arm64
 ```
 
-The first hosted release run is the first full validation of these package
-formats. In particular, validate the native ARM64 Windows runner, ARM64
-AppImage tooling, MSI install/upgrade behavior, macOS Gatekeeper experience, and
-Linux runtime dependencies before publishing.
+The published `0.1.0` release completed all five hosted package builders. That
+checks artifact generation, not every installer and runtime on clean machines.
+Continue smoke-testing native ARM64 builds, MSI install/upgrade behavior, the
+macOS Gatekeeper experience, and Linux runtime dependencies before each release.

@@ -7,6 +7,11 @@ Perseid is an **early prototype** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
+The current `main` workspace (`0.2.0` in development) includes the first local
+project-persistence support. The latest published crates.io/GitHub release is
+`0.1.0` and predates it; use the source-build instructions until `0.2.0` is
+published.
+
 ## New to Perseid?
 
 1. [Install the prerequisites and capture a local request](getting-started.md).
@@ -22,7 +27,7 @@ use a local lab or another target you are explicitly authorized to test.
 | Guide | What it answers |
 | --- | --- |
 | [Getting started](getting-started.md) | Which platforms and dependencies? How do I build, run, and configure the app? |
-| [Workbench](workbench.md) | How do Target, Proxy, Intruder, Repeater, Decoder, and Comparer work? What are the shortcuts and limits? |
+| [Workbench](workbench.md) | How do Target, Proxy, Intruder, Repeater, Sequencer, Decoder, and Comparer work? What are the shortcuts and limits? |
 | [HTTPS interception](tls.md) | Where is the CA? How do I install or remove trust and configure pass-through hosts? |
 | [Troubleshooting](troubleshooting.md) | Why is traffic missing, held, rejected, or failing TLS? What should go in a bug report? |
 | [Safety and privacy](safety.md) | What is retained? What does scope enforce? What happens to credentials and CA keys? |
@@ -36,6 +41,7 @@ use a local lab or another target you are explicitly authorized to test.
 | [Roadmap](roadmap.md) | Completed milestones, current work, and planned capabilities—not delivery dates. |
 | [Burp Community parity](burp-parity.md) | Capability status, deliberate differences, and the definition of parity. |
 | [Design](design.md) | Architecture, module boundaries, technology choices, and design goals. |
+| [Project storage design](storage-design.md) | Original storage proposal, implementation status, deviations, and remaining work. |
 | [Performance and memory](performance.md) | Historical M0 measurements, their environment, and a reproduction method. |
 | [Contributing](../CONTRIBUTING.md) | Toolchains, checks, headless development, screenshots, and documentation changes. |
 | [Proxy library](../crates/perseid/README.md) | The `perseid::proxy` API, its defaults, and the headless example. |
@@ -49,11 +55,9 @@ use a local lab or another target you are explicitly authorized to test.
 required CI workflow runs formatting, Clippy, tests, and package checks in
 parallel on Linux, GitHub-hosted Apple Silicon macOS, and Windows with MSVC.
 The Linux screenshot workflow remains a separate Xvfb job. Cross-platform CI
-does not provide signed installers or validate every desktop/graphics setup.
+does not install-test release packages or validate every desktop/graphics setup.
 
-The release workflow can build packages into a draft GitHub Release (Windows is
-unsigned; macOS is ad-hoc signed but not notarized). It does not validate every
-desktop or graphics setup. See the [release guide](releasing.md) before treating
-draft packages as supported downloads, and check
-[requirements](getting-started.md#requirements) for the currently tested
-platforms.
+GitHub Releases now include Windows, macOS, and Linux packages. Windows
+packages are unsigned, and macOS is ad-hoc signed but not notarized. Release
+builds do not validate every desktop or graphics setup; see the
+[release guide](releasing.md) and [platform requirements](getting-started.md#requirements).

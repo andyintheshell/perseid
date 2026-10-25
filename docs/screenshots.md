@@ -4,17 +4,19 @@
 [Getting started](getting-started.md)
 
 These full-window scenes are generated deterministically by
-`scripts/screenshots.sh`. The same images are uploaded by CI and posted to
-same-repository pull requests so every UI tab is reviewed together; forks can
-use workflow artifacts. Traffic and credentials in these scenes are synthetic.
+`scripts/screenshots.sh`. CI uploads the images as an artifact. Same-repository
+pull requests get one comment linking to a generated Markdown gallery page on
+the preview branch; the images are not embedded in the PR thread. Forks can use
+workflow artifacts. Traffic and credentials in these scenes are synthetic.
 The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
-[History](#proxy--http-history) · [Search](#search) ·
+[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) ·
 [WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
-[Intruder](#intruder) · [Repeater](#repeater) · [Decoder](#decoder) ·
-[Comparer](#comparer) · [Comparer result](#comparer-result) · [Memory](#memory-usage)
+[Intruder](#intruder) · [Repeater](#repeater) · [Sequencer](#sequencer) ·
+[Sequencer result](#sequencer-result) · [Decoder](#decoder) · [Comparer](#comparer) ·
+[Comparer result](#comparer-result) · [Memory](#memory-usage)
 
 ## Proxy > HTTP history
 
@@ -22,6 +24,21 @@ The request and response editors open side by side, with the parsed Inspector
 on the right and per-exchange Notes behind its rail tab.
 
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
+
+## Projects
+
+Perseid starts with a temporary in-memory project (`Untitled (temporary)` in
+the status bar). **File > Save Project As…** moves it into a single `.perseid`
+file; **Open Project…** switches to an existing one, and **Save Project
+Copy…** snapshots it into a new file. Once saved, captures and workbench state
+commit automatically, and the status bar shows the open project.
+
+![File menu with project commands over the HTTP history](images/perseid-project.png)
+
+The path is entered directly in the save dialog; the destination is created
+exclusively and only becomes the open project once the copy is complete.
+
+![Save Project As dialog with a destination path](images/perseid-project-dialog.png)
 
 ## Search
 
@@ -40,7 +57,10 @@ traffic, with direction, length, TLS, time, listener port, and WebSocket ID.
 
 ## Target > Site map
 
-![Target site map grouped by host and path](images/perseid-target-site-map.png)
+The Burp-style URL-view tree, display-filter bar, sortable Contents table, and
+shared request/response detail panes.
+
+![Target site map with a folder tree, Burp-style display filters, and a sortable Contents table](images/perseid-target-site-map.png)
 
 ## Target > Scope
 
@@ -72,6 +92,21 @@ responses from a finished Sniper attack.
 Replay edited requests directly to a target, independently of the proxy listener.
 
 ![Repeater request and response](images/perseid-repeater.png)
+
+## Sequencer
+
+Load an existing token sample or capture tokens from new proxy responses. The
+tab shows token count and length, the sample table, and the capture settings.
+
+![Sequencer manual load with a seeded token sample](images/perseid-sequencer.png)
+
+## Sequencer result
+
+The result window summarizes overall randomness, charts effective entropy
+across the five significance levels, and reports sample reliability. Character
+and bit details, plus analysis settings, are separate tabs.
+
+![Sequencer result summary with effective entropy chart](images/perseid-sequencer-result.png)
 
 ## Decoder
 

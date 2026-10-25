@@ -6,6 +6,21 @@
 //! edited; larger or streaming bodies still park for header edits, but their
 //! body bytes pass through untouched.
 
+mod error;
+mod reject;
+mod response;
+mod target;
+mod websocket;
+
+use self::error::classify;
+use self::reject::{finish, finish_failed, reject_dropped_request, reject_request};
+use self::response::relay;
+use self::target::{
+    Target, buffer_body, build_request_info, captured_buffered, fits_intercept_limit,
+    resolve_target,
+};
+use self::websocket::{forward_websocket, is_websocket_upgrade};
+
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
@@ -40,29 +55,6 @@ use crate::proxy::util::{
     IntoProxyBody, ProxyBody, display_host, empty_body, forwarded_headers, header_list,
     sanitized_accept_encoding, text_response, version_str,
 };
-use crate::proxy::websocket;
-
-/// Cases where the proxy rejects a request before any upstream traffic happens.
-struct TargetError {
-    status: StatusCode,
-    message: String,
-}
-
-impl TargetError {
-    fn bad_request(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
-        }
-    }
-}
-
-/// A validated upstream target. Keeping the authority alongside the URI avoids
-/// later `expect`s on a value that originated in an untrusted request.
-struct Target {
-    uri: Uri,
-    authority: http::uri::Authority,
-}
 
 /// The identity and timing of one exchange.
 #[derive(Clone, Copy, Debug)]
@@ -228,12 +220,7 @@ async fn handle_with(
     let needs_buffer =
         exchange.policy.intercept_requests() || exchange.policy.has_request_body_rules();
     if needs_buffer {
-        let can_buffer = match &body_source {
-            BodySource::Incoming(body) => {
-                can_buffer_request(&parts.headers, body, ctx.intercept_limit)
-            }
-            BodySource::Buffered(_) => true,
-        };
+        let can_buffer = fits_intercept_limit(&body_source, &parts.headers, ctx.intercept_limit);
         if can_buffer
             && let Err(message) =
                 buffer_body(&mut body_source, ctx.intercept_limit, "request").await
@@ -535,696 +522,288 @@ async fn forward(
     }
 }
 
-/// Forward a WebSocket handshake and, on 101, hand both upgraded sockets to
-/// the frame relay. The handshake itself does not create an HTTP history row;
-/// only complete WebSocket messages enter the WebSockets history.
-async fn forward_websocket(
-    ctx: Arc<Ctx>,
-    exchange: Exchange,
-    target: Target,
-    parts: http::request::Parts,
-    body_source: BodySource,
-    client_upgrade: Option<OnUpgrade>,
-) -> Response<ProxyBody> {
-    let Exchange {
-        start,
-        capture,
-        policy,
-        request,
-        downstream_version,
-    } = exchange;
+#[cfg(test)]
+mod tests {
+    use std::fmt;
 
-    if client_upgrade.is_none() || downstream_version != Version::HTTP_11 {
-        let message = "WebSocket upgrades require an HTTP/1.1 client connection".to_string();
-        if capture {
-            ctx.emit(ProxyEvent::Started {
-                id: start.id,
-                timestamp: start.timestamp,
-                request,
-            });
-            finish_failed(&ctx, start.id, start.started, None, message.clone());
+    use super::error::error_chain;
+    use super::target::content_length;
+    use super::websocket::{header_has_token, websocket_upstream_headers};
+    use super::*;
+
+    fn request_parts(
+        method: Method,
+        version: Version,
+        headers: &[(&str, &'static str)],
+    ) -> http::request::Parts {
+        let mut builder = Request::builder().method(method).version(version);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
         }
-        return text_response(StatusCode::NOT_IMPLEMENTED, &message);
+        builder.body(()).expect("request builds").into_parts().0
     }
 
-    let request_buffer = new_buffer();
-    let request_limit = if capture { ctx.capture_limit } else { 0 };
-    let body = if capture {
-        match body_source {
-            BodySource::Incoming(body) => {
-                TeeBody::new(body, request_limit, request_buffer.clone(), None).boxed_response()
-            }
-            BodySource::Buffered(bytes) => TeeBody::new(
-                Full::new(Bytes::from(bytes)),
-                request_limit,
-                request_buffer.clone(),
-                None,
-            )
-            .boxed_response(),
-        }
-    } else {
-        match body_source {
-            BodySource::Incoming(body) => body.boxed_response(),
-            BodySource::Buffered(bytes) => Full::new(Bytes::from(bytes)).boxed_response(),
-        }
-    };
+    #[test]
+    fn websocket_upgrade_requires_get_http11_and_both_tokens() {
+        let upgrading = [
+            ("connection", "keep-alive, Upgrade"),
+            ("upgrade", "websocket"),
+        ];
+        assert!(is_websocket_upgrade(&request_parts(
+            Method::GET,
+            Version::HTTP_11,
+            &upgrading
+        )));
+        assert!(!is_websocket_upgrade(&request_parts(
+            Method::POST,
+            Version::HTTP_11,
+            &upgrading
+        )));
+        assert!(!is_websocket_upgrade(&request_parts(
+            Method::GET,
+            Version::HTTP_2,
+            &upgrading
+        )));
+        let no_upgrade = [("connection", "keep-alive")];
+        assert!(!is_websocket_upgrade(&request_parts(
+            Method::GET,
+            Version::HTTP_11,
+            &no_upgrade
+        )));
+    }
 
-    let mut upstream = Request::new(body);
-    *upstream.method_mut() = parts.method;
-    *upstream.uri_mut() = target.uri;
-    *upstream.version_mut() = Version::HTTP_11;
-    *upstream.headers_mut() = websocket_upstream_headers(&parts.headers);
+    #[test]
+    fn header_token_matching_ignores_case_and_spacing() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONNECTION,
+            HeaderValue::from_static("keep-alive,  UpGradE "),
+        );
+        assert!(header_has_token(&headers, CONNECTION, "upgrade"));
+        assert!(!header_has_token(&headers, CONNECTION, "close"));
+        assert!(!header_has_token(&headers, UPGRADE, "websocket"));
+    }
 
-    let mut response = match ctx.ws_client.request(upstream).await {
-        Ok(response) => response,
-        Err(err) => {
-            let (status, message) = classify(&err);
-            if capture {
-                ctx.emit(ProxyEvent::Started {
-                    id: start.id,
-                    timestamp: start.timestamp,
-                    request,
-                });
-                finish_failed(
-                    &ctx,
-                    start.id,
-                    start.started,
-                    Some(snapshot(&request_buffer)),
-                    message.clone(),
-                );
-            }
-            return text_response(status, &message);
-        }
-    };
+    #[test]
+    fn header_token_scans_every_value_of_a_repeated_header() {
+        let mut headers = HeaderMap::new();
+        headers.append(CONNECTION, HeaderValue::from_static("keep-alive"));
+        headers.append(CONNECTION, HeaderValue::from_static("upgrade"));
+        assert!(header_has_token(&headers, CONNECTION, "upgrade"));
+    }
 
-    if response.status() != StatusCode::SWITCHING_PROTOCOLS {
-        // A rejected or redirected handshake is ordinary HTTP. Preserve the
-        // normal capture path so failed upgrades remain visible.
-        if capture {
-            ctx.emit(ProxyEvent::Started {
-                id: start.id,
-                timestamp: start.timestamp,
-                request: request.clone(),
-            });
-        }
-        return relay(
-            ctx,
-            Exchange {
-                start,
-                capture,
-                policy,
-                request,
-                downstream_version,
-            },
-            request_buffer,
-            response,
+    #[test]
+    fn websocket_upstream_headers_drop_hop_by_hop_and_host_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        headers.insert(CONNECTION, HeaderValue::from_static("keep-alive, Upgrade"));
+        headers.insert(UPGRADE, HeaderValue::from_static("websocket"));
+        headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("chat"));
+        headers.insert(
+            SEC_WEBSOCKET_EXTENSIONS,
+            HeaderValue::from_static("permessage-deflate"),
+        );
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("12"));
+        headers.insert(
+            "sec-websocket-key",
+            HeaderValue::from_static("dGhlIHNhbXBsZSBub25jZQ=="),
+        );
+        headers.insert("user-agent", HeaderValue::from_static("test"));
+
+        let upstream = websocket_upstream_headers(&headers);
+        assert_eq!(upstream.get(CONNECTION).expect("connection"), "Upgrade");
+        assert_eq!(upstream.get(UPGRADE).expect("upgrade"), "websocket");
+        assert!(upstream.get(HOST).is_none());
+        assert!(upstream.get(SEC_WEBSOCKET_EXTENSIONS).is_none());
+        assert!(upstream.get(CONTENT_LENGTH).is_none());
+        assert_eq!(
+            upstream.get(SEC_WEBSOCKET_PROTOCOL).expect("protocol"),
+            "chat"
+        );
+        assert_eq!(
+            upstream.get("sec-websocket-key").expect("key"),
+            "dGhlIHNhbXBsZSBub25jZQ=="
+        );
+        assert_eq!(upstream.get("user-agent").expect("user-agent"), "test");
+    }
+
+    #[test]
+    fn resolve_target_accepts_absolute_form_targets() {
+        let uri: Uri = "http://example.com:8080/a?b=c".parse().expect("uri");
+        let target =
+            resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None).expect("absolute form");
+        assert_eq!(target.uri, uri);
+        assert_eq!(target.authority.as_str(), "example.com:8080");
+    }
+
+    #[test]
+    fn resolve_target_rejects_unsupported_absolute_schemes() {
+        let uri: Uri = "ftp://example.com/file".parse().expect("uri");
+        let err = resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None)
+            .expect_err("scheme is not proxied");
+        assert_eq!(err.status, StatusCode::NOT_IMPLEMENTED);
+        assert!(err.message.contains("ftp"));
+    }
+
+    #[test]
+    fn resolve_target_builds_origin_form_targets_from_the_host_header() {
+        let uri: Uri = "/a/b?c=d".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com:8443"));
+        let target = resolve_target(&uri, &headers, ConnScheme::Https, None).expect("origin form");
+        assert_eq!(target.uri.to_string(), "https://example.com:8443/a/b?c=d");
+        assert_eq!(target.authority.as_str(), "example.com:8443");
+    }
+
+    #[test]
+    fn resolve_target_resolves_origin_form_against_the_connection_scheme() {
+        let uri: Uri = "/a".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        let target = resolve_target(&uri, &headers, ConnScheme::Http, None).expect("origin form");
+        assert_eq!(target.uri.to_string(), "http://example.com/a");
+    }
+
+    #[test]
+    fn resolve_target_uses_the_connect_authority_when_host_is_missing() {
+        let uri: Uri = "/".parse().expect("uri");
+        let target = resolve_target(
+            &uri,
+            &HeaderMap::new(),
+            ConnScheme::Https,
+            Some("example.com:443"),
         )
-        .await;
+        .expect("fallback authority");
+        assert_eq!(target.uri.to_string(), "https://example.com:443/");
+        assert_eq!(target.authority.as_str(), "example.com:443");
     }
 
-    let upstream_upgrade = hyper::upgrade::on(&mut response);
-    let (response_parts, _) = response.into_parts();
-    let client_upgrade = client_upgrade.expect("checked above");
-    let tls = request_is_tls(&request);
-    let connection = Arc::new(WebSocketConnectionInfo {
-        id: start.id,
-        url: websocket_url(&request),
-        host: request.host.clone(),
-        tls,
-        listener_port: ctx.listen.port(),
-        protocol: response_parts
-            .headers
-            .get(SEC_WEBSOCKET_PROTOCOL)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned),
-    });
+    #[test]
+    fn resolve_target_rejects_origin_form_without_a_host() {
+        let uri: Uri = "/a".parse().expect("uri");
+        let err = resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None)
+            .expect_err("no host is available");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
 
-    let connection_id = connection.id;
-    let relay_ctx = ctx.clone();
-    tokio::spawn(async move {
-        let client = match client_upgrade.await {
-            Ok(upgraded) => TokioIo::new(upgraded),
-            Err(err) => {
-                warn!("WebSocket {connection_id} client upgrade failed: {err}");
-                return;
-            }
+    #[test]
+    fn resolve_target_rejects_asterisk_and_authority_forms() {
+        let uri: Uri = "*".parse().expect("uri");
+        let err =
+            resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None).expect_err("asterisk");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("asterisk"));
+
+        let uri: Uri = "example.com:443".parse().expect("uri");
+        let err = resolve_target(&uri, &HeaderMap::new(), ConnScheme::Http, None)
+            .expect_err("authority form");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn content_length_parses_valid_values_only() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(content_length(&headers), None);
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("42"));
+        assert_eq!(content_length(&headers), Some(42));
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("4 2"));
+        assert_eq!(content_length(&headers), None);
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("-1"));
+        assert_eq!(content_length(&headers), None);
+    }
+
+    #[test]
+    fn buffered_bodies_are_always_ready_for_interception() {
+        // A transfer-coded message cannot be size-checked while streaming, but
+        // an already-buffered body needs no such check.
+        let mut headers = HeaderMap::new();
+        headers.insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        let source = BodySource::Buffered(b"body".to_vec());
+        assert!(fits_intercept_limit(&source, &headers, 0));
+    }
+
+    /// An error with an optional cause, standing in for hyper-util's layered
+    /// client errors.
+    #[derive(Debug)]
+    struct ChainedError {
+        message: &'static str,
+        source: Option<Box<ChainedError>>,
+    }
+
+    impl fmt::Display for ChainedError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for ChainedError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.source
+                .as_deref()
+                .map(|cause| cause as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    #[test]
+    fn error_chain_flattens_every_source() {
+        let plain = ChainedError {
+            message: "tls failure",
+            source: None,
         };
-        let server = match upstream_upgrade.await {
-            Ok(upgraded) => TokioIo::new(upgraded),
-            Err(err) => {
-                warn!("WebSocket {connection_id} upstream upgrade failed: {err}");
-                return;
-            }
+        assert_eq!(error_chain(&plain), "tls failure");
+
+        let layered = ChainedError {
+            message: "client error (SendRequest)",
+            source: Some(Box::new(ChainedError {
+                message: "connection",
+                source: Some(Box::new(ChainedError {
+                    message: "tls failure",
+                    source: None,
+                })),
+            })),
         };
-        match websocket::relay(relay_ctx, connection, client, server).await {
-            Ok((client_to_server, server_to_client)) => debug!(
-                "WebSocket {connection_id} closed after {client_to_server} up and \
-                 {server_to_client} down bytes"
-            ),
-            Err(err) => debug!("WebSocket {connection_id} relay error: {err}"),
-        }
-    });
-
-    let mut out = Response::new(empty_body());
-    *out.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
-    *out.version_mut() = downstream_version;
-    if let Some(phrase) = response_parts.extensions.get::<ReasonPhrase>() {
-        out.extensions_mut().insert(phrase.clone());
-    }
-    let mut headers = HeaderMap::new();
-    for (name, value) in forwarded_headers(&response_parts.headers) {
-        // Compression was not offered upstream, so the history must not
-        // advertise an extension it cannot decode.
-        if name == SEC_WEBSOCKET_EXTENSIONS {
-            continue;
-        }
-        headers.append(name, value);
-    }
-    headers.insert(CONNECTION, HeaderValue::from_static("Upgrade"));
-    headers.insert(UPGRADE, HeaderValue::from_static("websocket"));
-    *out.headers_mut() = headers;
-    out
-}
-
-fn is_websocket_upgrade(parts: &http::request::Parts) -> bool {
-    parts.method == Method::GET
-        && parts.version == Version::HTTP_11
-        && header_has_token(&parts.headers, CONNECTION, "upgrade")
-        && header_has_token(&parts.headers, UPGRADE, "websocket")
-}
-
-fn header_has_token(headers: &HeaderMap, name: http::header::HeaderName, token: &str) -> bool {
-    headers.get_all(name).iter().any(|value| {
-        value.to_str().is_ok_and(|text| {
-            text.split(',')
-                .any(|part| part.trim().eq_ignore_ascii_case(token))
-        })
-    })
-}
-
-fn websocket_upstream_headers(headers: &HeaderMap) -> HeaderMap {
-    let mut out = HeaderMap::new();
-    for (name, value) in forwarded_headers(headers) {
-        if name == HOST || name == SEC_WEBSOCKET_EXTENSIONS {
-            continue;
-        }
-        out.append(name, value);
-    }
-    out.insert(CONNECTION, HeaderValue::from_static("Upgrade"));
-    out.insert(UPGRADE, HeaderValue::from_static("websocket"));
-    out
-}
-
-fn request_is_tls(request: &RequestInfo) -> bool {
-    matches!(
-        request.scheme.to_ascii_lowercase().as_str(),
-        "https" | "wss"
-    )
-}
-
-fn websocket_url(request: &RequestInfo) -> String {
-    let scheme = if request_is_tls(request) { "wss" } else { "ws" };
-    let path = if request.path.is_empty() {
-        "/"
-    } else {
-        request.path.as_str()
-    };
-    format!("{scheme}://{}{path}", request.host)
-}
-
-fn finish(
-    ctx: &Ctx,
-    id: u64,
-    started: Instant,
-    request_body: Option<CapturedBody>,
-    result: ExchangeResult,
-) {
-    let end = ExchangeEnd {
-        duration: started.elapsed(),
-        request_body: request_body.unwrap_or_default(),
-        result,
-    };
-    ctx.emit(ProxyEvent::Finished { id, end });
-}
-
-fn finish_failed(
-    ctx: &Ctx,
-    id: u64,
-    started: Instant,
-    request_body: Option<CapturedBody>,
-    message: String,
-) {
-    finish(
-        ctx,
-        id,
-        started,
-        request_body,
-        ExchangeResult::Failed { error: message },
-    );
-}
-
-fn reject_request(
-    ctx: &Ctx,
-    start: ExchangeStart,
-    capture: bool,
-    request: RequestInfo,
-    request_body: CapturedBody,
-    status: StatusCode,
-    message: String,
-) -> Response<ProxyBody> {
-    if capture {
-        ctx.emit(ProxyEvent::Started {
-            id: start.id,
-            timestamp: start.timestamp,
-            request,
-        });
-        finish_failed(
-            ctx,
-            start.id,
-            start.started,
-            Some(request_body),
-            message.clone(),
+        assert_eq!(
+            error_chain(&layered),
+            "client error (SendRequest): connection: tls failure"
         );
     }
-    text_response(status, &message)
-}
 
-fn reject_dropped_request(
-    ctx: &Ctx,
-    start: ExchangeStart,
-    capture: bool,
-    request: RequestInfo,
-    request_body: CapturedBody,
-    status: StatusCode,
-    message: String,
-) -> Response<ProxyBody> {
-    if capture {
-        ctx.emit(ProxyEvent::Started {
-            id: start.id,
-            timestamp: start.timestamp,
-            request,
-        });
-        finish(
-            ctx,
-            start.id,
-            start.started,
-            Some(request_body),
-            ExchangeResult::Dropped,
-        );
-    }
-    text_response(status, &message)
-}
-
-/// Stream the upstream response to the client, capturing as it goes. The
-/// `Finished` event fires when the last frame is relayed (or earlier if the
-/// connection dies), from inside the body adapter.
-async fn relay(
-    ctx: Arc<Ctx>,
-    exchange: Exchange,
-    request_buffer: BodyBuffer,
-    response: Response<Incoming>,
-) -> Response<ProxyBody> {
-    let Exchange {
-        start,
-        capture,
-        policy,
-        request,
-        downstream_version,
-    } = exchange;
-    let (mut parts, body) = response.into_parts();
-    let mut body_source = BodySource::Incoming(body);
-
-    let needs_buffer = policy.intercept_responses() || policy.has_response_body_rules();
-    if needs_buffer {
-        let can_buffer = match &body_source {
-            BodySource::Incoming(body) => {
-                can_buffer_response(&parts.headers, body, ctx.intercept_limit)
-            }
-            BodySource::Buffered(_) => true,
-        };
-        if can_buffer
-            && let Err(message) =
-                buffer_body(&mut body_source, ctx.intercept_limit, "response").await
-        {
-            if capture {
-                finish_failed(
-                    &ctx,
-                    start.id,
-                    start.started,
-                    Some(snapshot(&request_buffer)),
-                    message.clone(),
-                );
-            }
-            return text_response(StatusCode::BAD_GATEWAY, &message);
-        }
+    #[test]
+    fn request_info_keeps_the_wire_uri_and_takes_the_host_from_the_target() {
+        let raw: Uri = "http://example.com:8080/a?b=c".parse().expect("uri");
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(raw.clone())
+            .header("host", "example.com:8080")
+            .body(())
+            .expect("request");
+        let (parts, ()) = request.into_parts();
+        let target = resolve_target(&raw, &parts.headers, ConnScheme::Http, None).expect("target");
+        let info = build_request_info(&parts, &target, &raw, ConnScheme::Http);
+        assert_eq!(info.uri, "http://example.com:8080/a?b=c");
+        assert_eq!(info.scheme, "http");
+        assert_eq!(info.host, "example.com:8080");
+        assert_eq!(info.path, "/a?b=c");
+        assert_eq!(info.version, "HTTP/1.1");
+        assert_eq!(info.method, "GET");
     }
 
-    if policy.intercept_responses() {
-        let reason = editor_reason(parts.status, &parts.extensions);
-        let head = serialize_response_head(parts.version, parts.status, &reason, &parts.headers);
-        let body = body_source.buffered().map(<[u8]>::to_vec);
-        let (decision_tx, decision_rx) = oneshot::channel();
-        let item = InterceptItem::new_response(start.id, request.clone(), head, body, decision_tx);
-
-        match ctx.ask_interceptor(item, decision_rx).await {
-            InterceptDecision::Forward { mut head, mut body } => {
-                if let Some(edited) = body.as_mut() {
-                    policy.apply_response(&mut head, Some(edited));
-                } else if let Some(original) = body_source.buffered_mut() {
-                    policy.apply_response(&mut head, Some(original));
-                } else {
-                    policy.apply_response(&mut head, None);
-                }
-                let parsed = match parse_response_head(&head) {
-                    Ok(parsed) => parsed,
-                    Err(message) => {
-                        if capture {
-                            finish_failed(
-                                &ctx,
-                                start.id,
-                                start.started,
-                                Some(snapshot(&request_buffer)),
-                                message.clone(),
-                            );
-                        }
-                        return text_response(StatusCode::BAD_GATEWAY, &message);
-                    }
-                };
-                apply_response_head(&mut parts, parsed);
-                if let Some(edited) = body {
-                    body_source = BodySource::Buffered(edited);
-                }
-            }
-            InterceptDecision::Drop => {
-                let message = "response dropped in the interceptor".to_string();
-                if capture {
-                    finish(
-                        &ctx,
-                        start.id,
-                        start.started,
-                        Some(snapshot(&request_buffer)),
-                        ExchangeResult::Dropped,
-                    );
-                }
-                return text_response(StatusCode::BAD_GATEWAY, &message);
-            }
-            InterceptDecision::Abort => {
-                let message = "the interceptor is no longer available".to_string();
-                if capture {
-                    finish_failed(
-                        &ctx,
-                        start.id,
-                        start.started,
-                        Some(snapshot(&request_buffer)),
-                        message.clone(),
-                    );
-                }
-                return text_response(StatusCode::BAD_GATEWAY, &message);
-            }
-        }
-    } else if policy.has_response_rules() {
-        if policy.has_response_head_rules() {
-            let reason = editor_reason(parts.status, &parts.extensions);
-            let mut head =
-                serialize_response_head(parts.version, parts.status, &reason, &parts.headers);
-            policy.apply_response_head(&mut head);
-            let parsed = match parse_response_head(&head) {
-                Ok(parsed) => parsed,
-                Err(message) => {
-                    if capture {
-                        finish_failed(
-                            &ctx,
-                            start.id,
-                            start.started,
-                            Some(snapshot(&request_buffer)),
-                            message.clone(),
-                        );
-                    }
-                    return text_response(StatusCode::BAD_GATEWAY, &message);
-                }
-            };
-            apply_response_head(&mut parts, parsed);
-        }
-        if let Some(body) = body_source.buffered_mut() {
-            policy.apply_response_body(body);
-        }
+    #[test]
+    fn request_info_reports_the_connection_scheme_for_origin_form() {
+        let raw: Uri = "/a?b=c".parse().expect("uri");
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(raw.clone())
+            .body(())
+            .expect("request");
+        let (parts, ()) = request.into_parts();
+        let target = resolve_target(&raw, &headers, ConnScheme::Https, None).expect("target");
+        let info = build_request_info(&parts, &target, &raw, ConnScheme::Https);
+        assert_eq!(info.uri, "/a?b=c");
+        assert_eq!(info.scheme, "https");
+        assert_eq!(info.host, "example.com");
+        assert_eq!(info.path, "/a?b=c");
     }
-
-    if capture {
-        let head = ResponseHead {
-            version: version_str(parts.version),
-            status: parts.status.as_u16(),
-            reason: parts
-                .extensions
-                .get::<ReasonPhrase>()
-                .map(|phrase| String::from_utf8_lossy(phrase.as_bytes()).into_owned())
-                .unwrap_or_default(),
-            headers: header_list(&parts.headers),
-        };
-        ctx.emit(ProxyEvent::ResponseHead { id: start.id, head });
-    }
-
-    let body = if capture {
-        let response_buffer = new_buffer();
-        let completion = {
-            let ctx = ctx.clone();
-            let request_buffer = request_buffer.clone();
-            let response_buffer = response_buffer.clone();
-            move |reason: EndReason| {
-                let result = match reason {
-                    EndReason::Complete => ExchangeResult::Response {
-                        body: snapshot(&response_buffer),
-                    },
-                    EndReason::Failed(err) => ExchangeResult::Failed {
-                        error: format!("upstream body error: {err}"),
-                    },
-                    EndReason::Dropped => ExchangeResult::Failed {
-                        error: "connection closed before the response body finished".to_string(),
-                    },
-                };
-                let end = ExchangeEnd {
-                    duration: start.started.elapsed(),
-                    request_body: snapshot(&request_buffer),
-                    result,
-                };
-                ctx.emit(ProxyEvent::Finished { id: start.id, end });
-            }
-        };
-
-        match body_source {
-            BodySource::Incoming(body) => TeeBody::new(
-                body,
-                ctx.capture_limit,
-                response_buffer,
-                Some(Box::new(completion)),
-            )
-            .boxed_response(),
-            BodySource::Buffered(bytes) => TeeBody::new(
-                Full::new(Bytes::from(bytes)),
-                ctx.capture_limit,
-                response_buffer,
-                Some(Box::new(completion)),
-            )
-            .boxed_response(),
-        }
-    } else {
-        match body_source {
-            BodySource::Incoming(body) => body.boxed_response(),
-            BodySource::Buffered(bytes) => Full::new(Bytes::from(bytes)).boxed_response(),
-        }
-    };
-
-    let mut out = Response::new(body);
-    *out.status_mut() = parts.status;
-    // The response head is captured with the origin's protocol, but the
-    // connection back to the client may have negotiated a different one.
-    *out.version_mut() = downstream_version;
-    if let Some(phrase) = parts.extensions.get::<ReasonPhrase>() {
-        out.extensions_mut().insert(phrase.clone());
-    }
-    let mut headers = HeaderMap::new();
-    for (name, value) in forwarded_headers(&parts.headers) {
-        headers.append(name, value);
-    }
-    *out.headers_mut() = headers;
-    out
-}
-
-fn apply_response_head(parts: &mut http::response::Parts, parsed: ParsedResponseHead) {
-    parts.version = parsed.version;
-    parts.status = parsed.status;
-    parts.headers = parsed.headers;
-    parts.extensions.remove::<ReasonPhrase>();
-    if let Some(reason) = parsed.reason {
-        parts.extensions.insert(reason);
-    }
-}
-
-/// Determine the upstream target for a proxied request.
-///
-/// Browsers send absolute-form targets (`GET http://host/path`); origin-form
-/// targets (`GET /path` plus `Host`) are also accepted for clients that do
-/// not implement proxy request syntax. Inside an intercepted TLS tunnel the
-/// origin-form path resolves against `https`, and the CONNECT authority is the
-/// fallback when the client omits `Host`.
-fn resolve_target(
-    uri: &Uri,
-    headers: &HeaderMap,
-    conn_scheme: ConnScheme,
-    fallback_authority: Option<&str>,
-) -> Result<Target, TargetError> {
-    if let Some(scheme) = uri.scheme() {
-        match scheme.as_str() {
-            "http" | "https" => {}
-            other => {
-                return Err(TargetError {
-                    status: StatusCode::NOT_IMPLEMENTED,
-                    message: format!("absolute-form target with scheme `{other}` is not supported"),
-                });
-            }
-        }
-        let authority = uri.authority().cloned().ok_or_else(|| {
-            TargetError::bad_request("absolute-form target is missing an authority")
-        })?;
-        return Ok(Target {
-            uri: uri.clone(),
-            authority,
-        });
-    }
-
-    if uri.path() == "*" {
-        return Err(TargetError::bad_request(
-            "asterisk-form targets are not supported",
-        ));
-    }
-    if !uri.path().starts_with('/') {
-        return Err(TargetError::bad_request("unsupported request target form"));
-    }
-
-    let host = match headers.get(HOST) {
-        Some(value) => value
-            .to_str()
-            .map_err(|_| TargetError::bad_request("Host header is not valid ASCII"))?
-            .to_string(),
-        None => fallback_authority
-            .map(str::to_string)
-            .ok_or_else(|| TargetError::bad_request("origin-form request without a Host header"))?,
-    };
-    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
-    let uri = format!("{}://{host}{path}", conn_scheme.as_str())
-        .parse::<Uri>()
-        .map_err(|_| TargetError::bad_request("invalid Host header"))?;
-    let authority = uri
-        .authority()
-        .cloned()
-        .ok_or_else(|| TargetError::bad_request("invalid Host header"))?;
-    Ok(Target { uri, authority })
-}
-
-fn build_request_info(
-    parts: &http::request::Parts,
-    target: &Target,
-    raw_uri: &Uri,
-    conn_scheme: ConnScheme,
-) -> RequestInfo {
-    RequestInfo {
-        method: parts.method.to_string(),
-        uri: raw_uri.to_string(),
-        scheme: raw_uri
-            .scheme()
-            .map(|scheme| scheme.as_str().to_string())
-            .unwrap_or_else(|| conn_scheme.as_str().to_string()),
-        host: display_host(&target.authority),
-        path: target
-            .uri
-            .path_and_query()
-            .map(|pq| pq.as_str().to_string())
-            .unwrap_or_else(|| "/".to_string()),
-        version: version_str(parts.version),
-        headers: header_list(&parts.headers),
-    }
-}
-
-fn captured_buffered(body: &BodySource, limit: usize) -> CapturedBody {
-    body.buffered()
-        .map(|bytes| CapturedBody::from_bytes_limited(bytes, limit))
-        .unwrap_or_default()
-}
-
-fn content_length(headers: &HeaderMap) -> Option<usize> {
-    headers.get(CONTENT_LENGTH)?.to_str().ok()?.parse().ok()
-}
-
-fn can_buffer_request(headers: &HeaderMap, body: &Incoming, limit: usize) -> bool {
-    // A message with transfer coding does not have a trustworthy byte length,
-    // even if a Content-Length is also present.
-    if headers.contains_key(TRANSFER_ENCODING) {
-        return false;
-    }
-    if let Some(length) = content_length(headers) {
-        return length <= limit;
-    }
-    body.is_end_stream()
-}
-
-fn can_buffer_response(headers: &HeaderMap, body: &Incoming, limit: usize) -> bool {
-    if headers.contains_key(TRANSFER_ENCODING) {
-        return false;
-    }
-    if let Some(length) = content_length(headers) {
-        return length <= limit;
-    }
-    body.is_end_stream()
-}
-
-/// Read and buffer a body that is known to fit within `limit`.
-async fn buffer_body(source: &mut BodySource, limit: usize, kind: &str) -> Result<(), String> {
-    let current = std::mem::replace(source, BodySource::Buffered(Vec::new()));
-    let BodySource::Incoming(body) = current else {
-        *source = current;
-        return Ok(());
-    };
-    let collected = body
-        .collect()
-        .await
-        .map_err(|err| format!("could not read the {kind} body: {err}"))?;
-    let bytes = collected.to_bytes();
-    if bytes.len() > limit {
-        return Err(format!(
-            "the {kind} body exceeded the {limit} byte interception limit"
-        ));
-    }
-    *source = BodySource::Buffered(bytes.to_vec());
-    Ok(())
-}
-
-/// Map an upstream client failure to a proxy error page.
-fn classify(err: &ClientError) -> (StatusCode, String) {
-    let detail = error_chain(err);
-    if err.is_connect() {
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("could not connect to the upstream server: {detail}"),
-        )
-    } else {
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("upstream request failed: {detail}"),
-        )
-    }
-}
-
-/// Flatten an error and its sources for the proxy error page and history.
-///
-/// hyper-util's display text is often just `client error (SendRequest)`; the
-/// underlying HTTP/2 or TLS failure is one or more source links down.
-fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut message = err.to_string();
-    let mut source = err.source();
-    while let Some(cause) = source {
-        message.push_str(": ");
-        message.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    message
 }

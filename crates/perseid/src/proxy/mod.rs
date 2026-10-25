@@ -100,7 +100,7 @@ pub use intercept::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
 pub use intruder::{
     AttackType, Intruder, IntruderConfig, IntruderError, IntruderEvent, IntruderPlan,
     IntruderResult, IntruderStartError, MARKER, MAX_INTRUDER_CONCURRENCY, auto_mark, clear_markers,
-    marker_ranges, toggle_marker, update_host_header,
+    marker_ranges, split_raw_request, toggle_marker, update_host_header,
 };
 pub use policy::host_in_scope;
 pub use repeater::{
@@ -109,6 +109,8 @@ pub use repeater::{
 };
 pub use rules::{MatchReplaceRule, RuleDirection, RuleError, RulePart};
 pub use tls::{CaError, CertificateAuthority, UpstreamTlsError};
+
+pub(crate) use util::display_ip;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

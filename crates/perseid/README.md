@@ -26,28 +26,45 @@ browser.
 > See the [capability matrix](https://github.com/andyintheshell/perseid/blob/main/docs/burp-parity.md)
 > for current coverage and limitations.
 
+> **Release note:** the latest published crates.io version is `0.1.0` and does
+> not include project persistence. The current workspace is `0.2.0` in
+> development; its project features will be available from crates.io when that
+> version is published.
+
 ## What this crate contains
 
 The `perseid` package provides both the desktop application and the
 `perseid::proxy` Rust API. Its desktop workbench includes:
 
 - An HTTP/1.1 and HTTP/2 intercepting proxy, traffic history, and a host/path site map.
+- Temporary and persistent projects using a single local `.perseid` file, with automatic saving of captured traffic and supported workbench inputs.
 - HTTPS interception with a local certificate authority, explicit trust setup, and per-host TLS pass-through.
 - Interception controls, Repeater, Intruder, Decoder, Comparer, scope rules, and match/replace.
 - WebSocket history for `ws://` and decrypted `wss://` traffic.
 - Bounded capture/history resources and a live memory indicator.
 
-WebSocket editing and replay, persistent projects, and automated scanning are
-not implemented. Burp Suite and Burp Suite Community Edition are trademarks of
-PortSwigger Ltd. Perseid is independently developed, contains no PortSwigger
-software or logos, and is not affiliated with, sponsored by, or endorsed by
-PortSwigger Ltd. References to Burp are for comparison only.
+WebSocket editing/replay and automated scanning are not implemented. Project
+persistence is an initial slice: it has no encryption or schema migrations, and
+the UI currently opens only a bounded newest-first history snapshot. See the
+[workbench guide](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#projects-and-persistence)
+for exactly what is saved. Temporary projects evict the oldest captured
+records when they exceed the configurable `--temporary-retention-limit` and
+`--temporary-retention-bytes` limits (which default to the history flags; `0`
+disables a dimension). The limits are soft, not a hard RAM ceiling: each
+stream's newest record is kept even when it alone exceeds the byte budget,
+in-flight HTTP exchanges are kept until they complete, and headers, indexes,
+and database overhead are outside the byte budget. Saved project files are not
+automatically pruned and can grow until the disk fills. Burp Suite and Burp
+Suite Community Edition are
+trademarks of PortSwigger Ltd. Perseid is independently developed, contains no
+PortSwigger software or logos, and is not affiliated with, sponsored by, or
+endorsed by PortSwigger Ltd. References to Burp are for comparison only.
 
 ## Install and run the desktop app
 
-`cargo install` builds Perseid from source; it does not download a prebuilt
-installer. With Rust 1.95+ and the platform's native build requirements
-installed, run:
+Install the latest version published to crates.io with Cargo. `cargo install`
+builds Perseid from source; it does not download a prebuilt installer. With Rust
+1.95+ and the platform's native build requirements installed, run:
 
 ```sh
 cargo install perseid --locked
@@ -56,8 +73,11 @@ perseid
 
 For Linux build dependencies, macOS setup, and graphics requirements, see the
 [platform guide](https://github.com/andyintheshell/perseid/blob/main/docs/getting-started.md).
-Prebuilt release downloads, when available, are listed on
-[GitHub Releases](https://github.com/andyintheshell/perseid/releases).
+For compiled binaries that do not require a local Rust toolchain, use
+[GitHub Releases](https://github.com/andyintheshell/perseid/releases/latest):
+Windows MSI or no-install ZIP (x64/ARM64), universal macOS DMG, or Linux
+AppImage/DEB (x86-64/ARM64). Windows packages are unsigned; macOS is ad-hoc
+signed but not notarized.
 
 ## Use the proxy API from Rust
 

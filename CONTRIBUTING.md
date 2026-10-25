@@ -128,6 +128,45 @@ on PRs that touch `crates/`, Rust build inputs, or the CodeQL workflow itself;
 it also runs on pushes to `main`, the weekly schedule, and manual dispatches.
 The path filter includes crate README changes, not just `.rs` files.
 
+## Testing and coverage
+
+Tests follow the standard Rust layout:
+
+- Unit tests live in the same file as the code they cover, in a
+  `#[cfg(test)] mod tests` module at the bottom. Most helpers and pure logic
+  are private, so same-file tests check them without widening the module API.
+- End-to-end tests live in `crates/perseid/tests/` and drive the public
+  `perseid::proxy` API over loopback sockets (history capture, interception,
+  scope, TLS, HTTP/2, WebSockets, Repeater, Intruder).
+- If a test module grows to dwarf the code it covers, it may move to a
+  `src/<module>/tests.rs` submodule, but same-file placement is the default.
+
+Extract selection math, formatters, parsers, and other pure helpers out of
+large `egui` draw functions so they can be unit-tested; painting itself is
+usually not worth testing. When adding behavior, cover the error and empty
+paths, not just the happy path.
+
+Coverage is measured by [Codecov](.github/workflows/coverage.yml) with
+`cargo llvm-cov` on every pull request and on `main`. The workflow measures
+the default feature set; `screenshots`-only code is compiled and exercised by
+the Screenshots workflow instead. To run the same measurement locally:
+
+```sh
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+```
+
+With rustup, add the matching `llvm-tools-preview` component first; with a
+distribution Rust package, install the distribution's LLVM tools. Coverage
+reports are a guide: new logic should come with tests in the same pull
+request, and a drop in coverage for the code you touched should be explained
+in the PR description.
+
+`codecov/patch` is a required check for merging to `main`. Its settings in
+[`codecov.yml`](codecov.yml) require changed lines to meet Codecov's automatic
+patch target with no allowed shortfall; a failed CI run also fails the status.
+Add tests for executable lines changed by a pull request so this check can pass.
+
 ## Dependencies
 
 `Cargo.lock` is tracked. It is the exact, reproducible resolution used by
@@ -163,8 +202,9 @@ not a macOS screenshot command; macOS contributors can use the workflow artifact
 The screenshots contain synthetic demo traffic, never captured traffic. The
 separate [Screenshots workflow](.github/workflows/screenshots.yml) runs the
 same script on UI changes, verifies the PNGs, uploads them as artifacts, and
-posts or updates a pull-request comment containing the full-window preview of
-every tab. The pull-request workflow always starts and uses a small
+posts or updates a pull-request comment with one link to the generated Markdown
+gallery page; it no longer embeds every image in the PR thread. Forks can use
+the workflow artifact. The pull-request workflow always starts and uses a small
 change-detection job to skip the screenshot build when no relevant paths
 changed. That keeps a skipped run from leaving a required check pending.
 
@@ -173,7 +213,8 @@ changed. That keeps a skipped run from leaving a required check pending.
 | Path | Contents |
 | --- | --- |
 | `crates/perseid/src/proxy/` | Embedded proxy: listener, forwarding, CONNECT tunnels, capture, events, and the direct Repeater client. |
-| `crates/perseid/src/` | egui desktop application: history model, site map, theme, views, keyboard handling. |
+| `crates/perseid/src/project/` | redb project schema, records, writer, queries, and Save As/Copy transfer. |
+| `crates/perseid/src/app/` | egui desktop modules: project UI, history views, tools, theme, and keyboard handling. |
 | `crates/perseid/tests/` | End-to-end proxy and Repeater tests. |
 | `crates/perseid/examples/` | Headless proxy smoke-test example. |
 | `docs/` | [User guides and technical references](docs/README.md). |
@@ -197,7 +238,8 @@ through the bounded channel.
   distinguish desktop from library defaults, and do not advertise untested
   platforms or historical benchmarks as current release guarantees.
 - Use synthetic examples. Preserve warnings about CA trust, sensitive traffic,
-  in-memory state, and Repeater bypassing proxy scope.
+  temporary versus saved project state, plaintext project files, and Repeater
+  bypassing proxy scope.
 - Keep `Cargo.lock` in use with `--locked` in reproducible build/run examples.
   Do not change dependency versions just to update documentation.
 
@@ -207,10 +249,10 @@ through the bounded channel.
   practical.
 - Add or update tests for proxy, history, and scope behavior.
 - For UI changes, include a screenshot. Every UI tab must be represented; the
-  Screenshots workflow posts or updates a comment with all tab previews for
-  same-repository pull requests. If that automatic comment is unavailable
-  (for example, on a fork), link the workflow artifact or attach the previews
-  to the pull request yourself.
+  Screenshots workflow posts or updates a comment with one link to the full
+  gallery for same-repository pull requests. If that automatic comment is
+  unavailable (for example, on a fork), link the workflow artifact or attach
+  the previews to the pull request yourself.
 - Update the [roadmap](docs/roadmap.md), [parity matrix](docs/burp-parity.md),
   or user docs when a change affects them.
 

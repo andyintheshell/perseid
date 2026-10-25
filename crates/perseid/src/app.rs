@@ -1,31 +1,44 @@
 //! The egui application: a Burp-style workspace over the captured traffic.
 //!
 //! The navigation intentionally mirrors the tools Burp users already know:
-//! Target, Proxy, Intruder, Repeater, Decoder, and Comparer. Proxy history,
-//! editable interception, the Target site map, scope enforcement,
+//! Target, Proxy, Intruder, Repeater, Sequencer, Decoder, and Comparer. Proxy
+//! history, editable interception, the Target site map, scope enforcement,
 //! match/replace rules, the direct Repeater, Intruder's payload attacks,
-//! Decoder's encode/decode/hash chain, Comparer's word/byte diffs, and the
-//! global Search window are live.
+//! Sequencer's token sampling and randomness analysis, Decoder's
+//! encode/decode/hash chain, Comparer's word/byte diffs, and the global Search
+//! window are live.
 //!
-//! This module holds the application state, the window shell, and the shared
-//! top-level panels. The tabs and supporting pieces are split by area:
-//! [`comparer`], [`decoder`], [`intercept`], [`intruder`], [`proxy`],
-//! [`repeater`], [`rules`], [`search`], [`target`], [`windows`], [`widgets`],
-//! [`message_view`], [`util`], and [`scale`].
+//! This module holds the application state and the eframe shell. The tabs,
+//! shared top-level panels, and supporting pieces are split by area:
+//! [`chrome`], [`comparer`], [`curl`], [`decoder`], [`events`], [`input`],
+//! [`inspector`], [`intercept`], [`intruder`], [`listing`], [`project_ui`], [`proxy`],
+//! [`proxy_control`], [`repeater`], [`rules`], [`search`], [`selection`],
+//! [`sequencer`], [`target`], [`tls`], [`windows`], [`widgets`],
+//! [`message_view`], [`util`], [`scale`], and the feature-gated
+//! [`screenshots`] driver.
 
+mod chrome;
 mod comparer;
+mod curl;
 mod decoder;
+mod events;
+mod input;
 mod inspector;
 mod intercept;
 mod intruder;
+mod listing;
 mod message_view;
+mod project_ui;
 mod proxy;
+mod proxy_control;
 mod repeater;
 mod rules;
 mod scale;
 #[cfg(feature = "screenshots")]
 mod screenshots;
 mod search;
+mod selection;
+mod sequencer;
 mod target;
 mod tls;
 mod util;
@@ -39,8 +52,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::proxy::{
-    CertificateAuthority, InterceptKey, Intruder, MatchReplaceRule, Proxy, ProxyConfig, ProxyEvent,
-    ProxySettings, Repeater, TlsConfig,
+    CertificateAuthority, InterceptKey, Intruder, MatchReplaceRule, Proxy, ProxyEvent, Repeater,
 };
 use egui::{Color32, Key, RichText, Stroke};
 
@@ -51,17 +63,17 @@ use crate::branding;
 use crate::ca_store;
 use crate::history::History;
 use crate::memory::MemoryMeter;
+use crate::project::{
+    MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace, RetentionLimits, WorkspaceState,
+};
 use crate::site_map::{self, SiteMap};
 use crate::theme;
 use crate::view::{self, MessageViews};
 use crate::websocket_history::WebSocketHistory;
 
 use self::scale::{desktop_scale_override, resize_initial_window, resolve_ui_scale, stepped_scale};
-use self::util::{matches_filter, websocket_matches_filter};
 use self::widgets::{main_tab_button, search_button};
 
-/// Bound on events applied per frame so a flood cannot stall rendering.
-const MAX_EVENTS_PER_FRAME: usize = 1024;
 const FILTER_ID: &str = "perseid.filter";
 const WEBSOCKET_FILTER_ID: &str = "perseid.websocket.filter";
 const PROXY_DETAIL_ID: &str = "perseid.proxy.detail";
@@ -99,6 +111,10 @@ const TAB_REPEATER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::ne
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::R,
 );
+const TAB_SEQUENCER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    Key::S,
+);
 const TAB_DECODER_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::D,
@@ -111,6 +127,9 @@ const SEARCH_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     Key::F,
 );
+#[cfg(target_os = "macos")]
+const FULL_SCREEN_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::CTRL.plus(egui::Modifiers::COMMAND), Key::F);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum MainTab {
@@ -119,17 +138,19 @@ enum MainTab {
     Proxy,
     Intruder,
     Repeater,
+    Sequencer,
     Decoder,
     Comparer,
 }
 
 impl MainTab {
     /// Burp's tool order, so muscle memory carries over.
-    const ALL: [(Self, &'static str); 6] = [
+    const ALL: [(Self, &'static str); 7] = [
         (Self::Target, "Target"),
         (Self::Proxy, "Proxy"),
         (Self::Intruder, "Intruder"),
         (Self::Repeater, "Repeater"),
+        (Self::Sequencer, "Sequencer"),
         (Self::Decoder, "Decoder"),
         (Self::Comparer, "Comparer"),
     ];
@@ -150,6 +171,7 @@ enum TargetSection {
     #[default]
     SiteMap,
     Scope,
+    Issues,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -172,6 +194,64 @@ enum WindowControl {
     Minimize,
     Maximize,
     Close,
+}
+
+impl From<MessagePane> for MessagePaneRecord {
+    fn from(pane: MessagePane) -> Self {
+        match pane {
+            MessagePane::Request => Self::Request,
+            MessagePane::Response => Self::Response,
+        }
+    }
+}
+
+impl From<MessagePaneRecord> for MessagePane {
+    fn from(pane: MessagePaneRecord) -> Self {
+        match pane {
+            MessagePaneRecord::Request => Self::Request,
+            MessagePaneRecord::Response => Self::Response,
+        }
+    }
+}
+
+impl From<MessageView> for MessageViewRecord {
+    fn from(view: MessageView) -> Self {
+        match view {
+            MessageView::Pretty => Self::Pretty,
+            MessageView::Raw => Self::Raw,
+            MessageView::Hex => Self::Hex,
+        }
+    }
+}
+
+impl From<MessageViewRecord> for MessageView {
+    fn from(view: MessageViewRecord) -> Self {
+        match view {
+            MessageViewRecord::Pretty => Self::Pretty,
+            MessageViewRecord::Raw => Self::Raw,
+            MessageViewRecord::Hex => Self::Hex,
+        }
+    }
+}
+
+impl From<&MessageViews> for MessageViewsWorkspace {
+    fn from(views: &MessageViews) -> Self {
+        Self {
+            pretty: views.pretty.clone(),
+            raw: views.raw.clone(),
+            hex: views.hex.clone(),
+        }
+    }
+}
+
+impl From<&MessageViewsWorkspace> for MessageViews {
+    fn from(views: &MessageViewsWorkspace) -> Self {
+        Self {
+            pretty: views.pretty.clone(),
+            raw: views.raw.clone(),
+            hex: views.hex.clone(),
+        }
+    }
 }
 
 pub struct PerseidApp {
@@ -228,7 +308,13 @@ pub struct PerseidApp {
     intruder: intruder::IntruderState,
     decoder: decoder::DecoderState,
     comparer: comparer::ComparerState,
+    sequencer: sequencer::SequencerState,
+    project: project_ui::ProjectUi,
+    /// Workspace captured when the current project was opened, used to detect
+    /// unsaved workbench edits before replacing a temporary project.
+    project_baseline_workspace: WorkspaceState,
     site_map: Option<(u64, SiteMap)>,
+    site_map_ui: target::SiteMapUi,
     scope: BTreeSet<String>,
     scope_enabled: bool,
     scope_input: String,
@@ -271,78 +357,6 @@ struct DetailCache {
 struct WebSocketDetailCache {
     id: u64,
     views: MessageViews,
-}
-
-/// Draw one custom title-bar window control.
-fn window_control(ui: &mut egui::Ui, control: WindowControl, maximized: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(26.0, 22.0), egui::Sense::click());
-    let hovered = response.hovered();
-    let (fill, color) = match control {
-        WindowControl::Close if hovered => (theme::RED, Color32::WHITE),
-        _ if hovered => (theme::ACCENT_WASH, theme::TEXT),
-        _ => (Color32::TRANSPARENT, theme::TEXT),
-    };
-    if fill != Color32::TRANSPARENT {
-        ui.painter().rect_filled(rect, 3.0, fill);
-    }
-
-    let center = rect.center();
-    let stroke = Stroke::new(1.0, color);
-    match control {
-        WindowControl::Minimize => {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(center.x - 4.0, center.y + 3.0),
-                    egui::pos2(center.x + 4.0, center.y + 3.0),
-                ],
-                stroke,
-            );
-        }
-        WindowControl::Maximize if maximized => {
-            let back = egui::Rect::from_min_size(
-                egui::pos2(center.x - 2.0, center.y - 4.0),
-                egui::vec2(6.0, 6.0),
-            );
-            let front = egui::Rect::from_min_size(
-                egui::pos2(center.x - 4.0, center.y - 2.0),
-                egui::vec2(6.0, 6.0),
-            );
-            ui.painter()
-                .rect_stroke(back, 0.0, stroke, egui::StrokeKind::Inside);
-            ui.painter()
-                .rect_stroke(front, 0.0, stroke, egui::StrokeKind::Inside);
-        }
-        WindowControl::Maximize => {
-            let square = egui::Rect::from_center_size(center, egui::vec2(7.0, 7.0));
-            ui.painter()
-                .rect_stroke(square, 0.0, stroke, egui::StrokeKind::Inside);
-        }
-        WindowControl::Close => {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(center.x - 3.5, center.y - 3.5),
-                    egui::pos2(center.x + 3.5, center.y + 3.5),
-                ],
-                stroke,
-            );
-            ui.painter().line_segment(
-                [
-                    egui::pos2(center.x + 3.5, center.y - 3.5),
-                    egui::pos2(center.x - 3.5, center.y + 3.5),
-                ],
-                stroke,
-            );
-        }
-    }
-
-    response
-        .on_hover_text(match control {
-            WindowControl::Minimize => "Minimize",
-            WindowControl::Maximize if maximized => "Restore",
-            WindowControl::Maximize => "Maximize",
-            WindowControl::Close => "Close",
-        })
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 impl PerseidApp {
@@ -417,6 +431,7 @@ impl PerseidApp {
         }
         let tls_intercept = !args.no_tls_intercept && tls_ca.is_some();
         let tls_setup_open = ca_created && tls_intercept;
+        let temporary_retention = configured_retention(&args);
 
         let mut app = Self {
             proxy: None,
@@ -467,7 +482,15 @@ impl PerseidApp {
             intruder: intruder::IntruderState::new(),
             decoder: decoder::DecoderState::new(),
             comparer: comparer::ComparerState::new(),
+            sequencer: sequencer::SequencerState::new(),
+            project: project_ui::ProjectUi::new(
+                args.history_limit,
+                args.history_bytes,
+                temporary_retention,
+            ),
+            project_baseline_workspace: WorkspaceState::default(),
             site_map: None,
+            site_map_ui: target::SiteMapUi::new(),
             scope: BTreeSet::new(),
             scope_enabled: false,
             scope_input: String::new(),
@@ -488,6 +511,7 @@ impl PerseidApp {
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
+        app.project_baseline_workspace = app.workspace_snapshot();
         #[cfg(feature = "screenshots")]
         if let Some(dir) = args.screenshot_dir.clone() {
             match screenshots::ScreenshotDriver::new(dir) {
@@ -514,863 +538,104 @@ impl PerseidApp {
         app
     }
 
-    /// URL of the built-in certificate page for the running proxy, if any.
-    ///
-    /// Loopback aliases are used when the proxy binds a wildcard address so
-    /// the link is clickable from the same machine.
-    pub(super) fn certificate_page_url(&self) -> Option<String> {
-        self.proxy.as_ref().map(|proxy| {
-            let addr = proxy.local_addr();
-            let host = match addr.ip() {
-                std::net::IpAddr::V4(ip) if ip.is_unspecified() => "127.0.0.1".to_string(),
-                std::net::IpAddr::V6(ip) if ip.is_unspecified() => "[::1]".to_string(),
-                std::net::IpAddr::V4(ip) => ip.to_string(),
-                std::net::IpAddr::V6(ip) => format!("[{ip}]"),
-            };
-            format!("http://{host}:{}/", addr.port())
-        })
-    }
-
-    fn start_proxy(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
-        let (settings, rule_error) = self.sanitized_proxy_settings();
-        self.rules_error = rule_error;
-        let config = ProxyConfig {
-            listen: self.listen,
-            capture_limit: self.capture_limit,
-            intercept_limit: self.intercept_limit,
-            settings,
-            tls: TlsConfig {
-                authority: self.tls_ca.clone(),
-                extra_roots_pem: Vec::new(),
-            },
-            notify: Some(notify),
-            ..ProxyConfig::default()
-        };
-        match Proxy::start(config) {
-            Ok(proxy) => {
-                log::info!("proxy listening on {}", proxy.local_addr());
-                proxy.set_paused(self.paused);
-                self.proxy = Some(proxy);
-                self.proxy_error = None;
-                self.dropped_seen = 0;
-                self.clear_intercept_queue();
-            }
-            Err(err) => {
-                log::error!("could not start the proxy: {err}");
-                self.proxy = None;
-                self.proxy_error = Some(err.to_string());
-            }
-        }
-    }
-
-    fn proxy_settings(&self) -> ProxySettings {
-        ProxySettings {
-            // Burp's master toggle arms interception; requests are held by
-            // default, while responses need the separate response rule set.
-            intercept_requests: self.intercept_enabled,
-            intercept_responses: self.intercept_enabled && self.intercept_responses,
-            scope_enforce: self.scope_enforce,
-            scope_rules: self.scope.iter().cloned().collect(),
-            tls_intercept: self.tls_intercept,
-            tls_passthrough: self.tls_passthrough.clone(),
-            match_replace: self.match_replace.clone(),
-        }
-    }
-
-    /// Settings sent to the proxy: enabled rules that compile. A broken regex
-    /// stays visible in the editor but never becomes part of the live policy.
-    fn sanitized_proxy_settings(&self) -> (ProxySettings, Option<String>) {
-        let mut settings = self.proxy_settings();
-        let error = settings.validate().err().map(|err| err.to_string());
-        if error.is_some() {
-            settings
-                .match_replace
-                .retain(|rule| rule.validate().is_ok());
-        }
-        (settings, error)
-    }
-
-    /// Push interception, scope, and rewrite settings to the running proxy.
-    /// Invalid regular expressions stay visible in the UI while valid rules
-    /// and toggles remain active.
-    fn apply_proxy_settings(&mut self) {
-        let (settings, rule_error) = self.sanitized_proxy_settings();
-        let applied = if let Some(proxy) = &self.proxy {
-            proxy.set_settings(settings)
-        } else {
-            Ok(())
-        };
-        self.rules_error = match (rule_error, applied) {
-            (Some(err), _) => Some(err),
-            (None, Ok(())) => None,
-            (None, Err(err)) => Some(err.to_string()),
-        };
-    }
-
-    fn drain_events(&mut self, ctx: &egui::Context) {
-        // Repeater and Intruder are independent of the proxy, so drain them
-        // before the proxy early return. Results may arrive while the proxy is
-        // stopped.
-        self.drain_repeater_results();
-        self.drain_intruder_results();
-        if self
-            .repeater_tabs
-            .iter()
-            .any(repeater::RepeaterTab::is_pending)
-            || self.intruder.is_running()
-        {
-            ctx.request_repaint_after(Duration::from_millis(100));
-        }
-
-        let mut selected_changed = false;
-        let mut received_intercept = false;
-        let mut queue_drained = false;
-        let stopped;
-        {
-            let Some(proxy) = self.proxy.as_mut() else {
-                return;
-            };
-            // Only discard a stopped runtime after draining a queue sampled
-            // after it stopped. Shutdown itself may enqueue final
-            // body-completion events.
-            let was_stopped = !proxy.is_running();
-            let dropped = proxy.dropped_events();
-            let selected = self.selected;
-            let websocket_selected = self.websocket_selected;
-            for _ in 0..MAX_EVENTS_PER_FRAME {
-                let Some(event) = proxy.try_recv() else {
-                    queue_drained = true;
-                    break;
-                };
-                let id = event.id();
-                selected_changed |= selected == Some(id) || websocket_selected == Some(id);
-                match event {
-                    ProxyEvent::WebSocketMessage { .. } => {
-                        self.websocket_history.apply(event);
-                    }
-                    event => {
-                        self.history.apply(event);
-                    }
-                }
-            }
-            if queue_drained && dropped > self.dropped_seen {
-                self.dropped_seen = dropped;
-                selected_changed |= self.history.interrupt_in_flight(
-                    "capture events were dropped; the exchange result is unavailable",
-                ) > 0;
-            }
-            if !queue_drained || proxy.dropped_events() > self.dropped_seen {
-                ctx.request_repaint();
-            }
-            // Interception has its own bounded, backpressured channel.
-            // Draining it here keeps held requests moving even when the
-            // history event queue is full or capture is paused.
-            for _ in 0..MAX_EVENTS_PER_FRAME {
-                let Some(item) = proxy.try_recv_intercept() else {
-                    break;
-                };
-                self.intercept_queue.push_back(InterceptEntry::new(item));
-                received_intercept = true;
-            }
-            // Drain what the proxy queued before declaring it stopped, then
-            // resolve any exchange whose terminal event never made it through.
-            if !was_stopped && !proxy.is_running() {
-                ctx.request_repaint();
-            }
-            stopped = was_stopped && queue_drained;
-        }
-        if stopped {
-            self.proxy = None;
-            self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
-            self.history
-                .interrupt_in_flight("proxy stopped before the exchange finished");
-            selected_changed = true;
-            self.clear_intercept_queue();
-        }
-        if selected_changed {
-            self.detail = None;
-            self.websocket_detail = None;
-        }
-        if self
-            .selected
-            .is_some_and(|id| self.history.get(id).is_none())
-        {
-            self.selected = None;
-            self.detail = None;
-        }
-        if self
-            .websocket_selected
-            .is_some_and(|id| self.websocket_history.get(id).is_none())
-        {
-            self.websocket_selected = None;
-            self.websocket_detail = None;
-        }
-        if received_intercept {
-            self.intercept_scroll_to_active = true;
-        }
-        if received_intercept || !self.intercept_queue.is_empty() {
-            self.sync_intercept_selection();
-        }
-        // Keep durations and in-flight rows ticking while anything is open.
-        if self.history.in_flight() > 0 {
-            ctx.request_repaint_after(Duration::from_millis(100));
-        }
-    }
-
-    fn rebuild_visible(&mut self) {
-        self.rebuild_http_visible();
-        self.rebuild_websocket_visible();
-    }
-
-    fn rebuild_http_visible(&mut self) {
-        let key = (self.filter.clone(), self.history.revision());
-        if self.visible_key.as_ref() == Some(&key) {
-            return;
-        }
-        self.visible.clear();
-
-        let needle = self.filter.trim().to_lowercase();
-        let scope_active = self.scope_enabled && !self.scope.is_empty();
-        for item in self.history.iter() {
-            if scope_active && !site_map::host_in_scope(&item.request.host, &self.scope) {
-                continue;
-            }
-            if needle.is_empty() || matches_filter(item, &needle) {
-                self.visible.push(item.id);
-            }
-        }
-        self.visible_key = Some(key);
-    }
-
-    fn rebuild_websocket_visible(&mut self) {
-        let key = (
-            self.websocket_filter.clone(),
-            self.websocket_history.revision(),
-        );
-        if self.websocket_visible_key.as_ref() == Some(&key) {
-            return;
-        }
-        self.websocket_visible.clear();
-
-        let needle = self.websocket_filter.trim().to_lowercase();
-        let scope_active = self.scope_enabled && !self.scope.is_empty();
-        for item in self.websocket_history.iter() {
-            if scope_active && !site_map::host_in_scope(&item.connection.host, &self.scope) {
-                continue;
-            }
-            if needle.is_empty() || websocket_matches_filter(item, &needle) {
-                self.websocket_visible.push(item.id);
-            }
-        }
-        self.websocket_visible_key = Some(key);
-    }
-
-    fn invalidate_views(&mut self) {
-        self.visible_key = None;
-        self.websocket_visible_key = None;
-        self.site_map = None;
-    }
-
-    fn ensure_site_map(&mut self) {
-        let revision = self.history.revision();
-        if self
-            .site_map
-            .as_ref()
-            .is_some_and(|(cached_revision, _)| *cached_revision == revision)
-        {
-            return;
-        }
-        let scope = self.scope_enabled.then_some(&self.scope);
-        let map = SiteMap::build(&self.history, scope);
-        self.site_map = Some((revision, map));
-    }
-
-    fn clear_history(&mut self) {
-        self.history.clear();
-        self.selected = None;
-        self.detail = None;
-        self.inspector.clear_notes();
-        self.search.clear_history();
-        self.invalidate_views();
-    }
-
-    fn clear_websocket_history(&mut self) {
-        self.websocket_history.clear();
-        self.websocket_selected = None;
-        self.websocket_detail = None;
-        self.invalidate_views();
-    }
-
-    fn selected_row_index(&self) -> Option<usize> {
-        self.selected
-            .and_then(|id| self.visible.iter().position(|&visible| visible == id))
-    }
-
-    fn selected_websocket_row_index(&self) -> Option<usize> {
-        self.websocket_selected.and_then(|id| {
-            self.websocket_visible
-                .iter()
-                .position(|&visible| visible == id)
-        })
-    }
-
-    fn move_selection(&mut self, delta: isize) {
-        if self.visible.is_empty() {
-            self.selected = None;
-            return;
-        }
-        let next = match self.selected_row_index() {
-            Some(position) => {
-                (position as isize + delta).clamp(0, self.visible.len() as isize - 1) as usize
-            }
-            None => 0,
-        };
-        self.select_id(self.visible[next]);
-    }
-
-    fn move_websocket_selection(&mut self, delta: isize) {
-        if self.websocket_visible.is_empty() {
-            self.websocket_selected = None;
-            return;
-        }
-        let next = match self.selected_websocket_row_index() {
-            Some(position) => (position as isize + delta)
-                .clamp(0, self.websocket_visible.len() as isize - 1)
-                as usize,
-            None => 0,
-        };
-        self.select_websocket_id(self.websocket_visible[next]);
-    }
-
-    fn select_id(&mut self, id: u64) {
-        if self.selected != Some(id) {
-            self.selected = Some(id);
-            self.detail = None;
-        }
-        self.scroll_to_selected = true;
-    }
-
-    fn select_websocket_id(&mut self, id: u64) {
-        if self.websocket_selected != Some(id) {
-            self.websocket_selected = Some(id);
-            self.websocket_detail = None;
-        }
-        self.websocket_scroll_to_selected = true;
-    }
-
-    fn keyboard(&mut self, ctx: &egui::Context) {
-        self.zoom_shortcuts(ctx);
-
-        if ctx.input_mut(|input| input.consume_shortcut(&SEARCH_SHORTCUT)) {
-            self.search.focus_or_open();
-        }
-
-        let (target, proxy, intruder, repeater, decoder, comparer) = ctx.input_mut(|input| {
-            (
-                input.consume_shortcut(&TAB_TARGET_SHORTCUT),
-                input.consume_shortcut(&TAB_PROXY_SHORTCUT),
-                input.consume_shortcut(&TAB_INTRUDER_SHORTCUT),
-                input.consume_shortcut(&TAB_REPEATER_SHORTCUT),
-                input.consume_shortcut(&TAB_DECODER_SHORTCUT),
-                input.consume_shortcut(&TAB_COMPARER_SHORTCUT),
-            )
-        });
-        if target {
-            self.main_tab = MainTab::Target;
-        }
-        if proxy {
-            self.main_tab = MainTab::Proxy;
-        }
-        if intruder {
-            self.main_tab = MainTab::Intruder;
-        }
-        if repeater {
-            self.main_tab = MainTab::Repeater;
-        }
-        if decoder {
-            self.main_tab = MainTab::Decoder;
-        }
-        if comparer {
-            self.main_tab = MainTab::Comparer;
-        }
-
-        // Ctrl+Enter is the Burp-style send gesture. Consume it before
-        // `egui_wants_keyboard_input` so it works while an editor has focus.
-        if self.main_tab == MainTab::Intruder
-            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::Enter))
-        {
-            self.toggle_intruder_attack();
-        } else if self.main_tab == MainTab::Repeater
-            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::Enter))
-        {
-            self.send_active_repeater();
-        }
-
-        let on_http_history =
-            self.main_tab == MainTab::Proxy && self.proxy_section == ProxySection::HttpHistory;
-        let on_websocket_history = self.main_tab == MainTab::Proxy
-            && self.proxy_section == ProxySection::WebSocketsHistory;
-        let on_history = on_http_history || on_websocket_history;
-        if on_history {
-            let filter_id = egui::Id::unique(if on_http_history {
-                FILTER_ID
-            } else {
-                WEBSOCKET_FILTER_ID
-            });
-            if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::F)) {
-                ctx.memory_mut(|memory| memory.request_focus(filter_id));
-                return;
-            }
-            if ctx.memory(|memory| memory.focused()) == Some(filter_id) {
-                if ctx.input(|input| input.key_pressed(Key::Escape)) {
-                    ctx.memory_mut(|memory| memory.surrender_focus(filter_id));
-                }
-                return;
-            }
-        }
-
-        if ctx.egui_wants_keyboard_input() || !on_history {
-            return;
-        }
-
-        let down =
-            ctx.input(|input| input.key_pressed(Key::ArrowDown) || input.key_pressed(Key::J));
-        let up = ctx.input(|input| input.key_pressed(Key::ArrowUp) || input.key_pressed(Key::K));
-        let home = ctx.input(|input| input.key_pressed(Key::Home));
-        let end = ctx.input(|input| input.key_pressed(Key::End));
-        if on_http_history {
-            if down {
-                self.move_selection(1);
-            }
-            if up {
-                self.move_selection(-1);
-            }
-            if home && !self.visible.is_empty() {
-                self.select_id(self.visible[0]);
-            }
-            if end && !self.visible.is_empty() {
-                self.select_id(self.visible[self.visible.len() - 1]);
-            }
-        } else {
-            if down {
-                self.move_websocket_selection(1);
-            }
-            if up {
-                self.move_websocket_selection(-1);
-            }
-            if home && !self.websocket_visible.is_empty() {
-                self.select_websocket_id(self.websocket_visible[0]);
-            }
-            if end && !self.websocket_visible.is_empty() {
-                self.select_websocket_id(self.websocket_visible[self.websocket_visible.len() - 1]);
-            }
-        }
-    }
-
-    /// Set the total UI scale (system scale times zoom) in physical pixels per
-    /// point, clamped to the supported range.
-    fn set_ui_scale(&self, ctx: &egui::Context, scale: f32) {
-        let scale = scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
-        let zoom = (scale / self.native_ui_scale).clamp(0.2, 5.0);
-        ctx.set_zoom_factor(zoom);
-    }
-
-    fn zoom_shortcuts(&mut self, ctx: &egui::Context) {
-        let (zoom_in, zoom_out, reset) = ctx.input_mut(|input| {
-            (
-                input.consume_shortcut(&ZOOM_IN_SHORTCUT)
-                    || input.consume_shortcut(&ZOOM_IN_SECONDARY_SHORTCUT),
-                input.consume_shortcut(&ZOOM_OUT_SHORTCUT),
-                input.consume_shortcut(&ZOOM_RESET_SHORTCUT),
-            )
-        });
-        if reset {
-            self.set_ui_scale(ctx, self.base_ui_scale);
-        } else if zoom_in {
-            self.set_ui_scale(ctx, stepped_scale(ctx.pixels_per_point(), 0.1));
-        } else if zoom_out {
-            self.set_ui_scale(ctx, stepped_scale(ctx.pixels_per_point(), -0.1));
-        }
-    }
-
-    fn title_bar(&mut self, ui: &mut egui::Ui) {
-        let maximized = ui
-            .ctx()
-            .input(|input| input.viewport().maximized.unwrap_or(false));
-
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
-            ui.spacing_mut().button_padding = egui::vec2(7.0, 2.0);
-
-            if let Some(mark) = &self.mark {
-                let response = ui
-                    .add(
-                        egui::Image::from_texture(mark)
-                            .fit_to_exact_size(egui::vec2(17.0, 17.0))
-                            .corner_radius(4.0)
-                            .sense(egui::Sense::click()),
-                    )
-                    .on_hover_text("About Perseid")
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if response.clicked() {
-                    self.about_open = true;
-                }
-            }
-            ui.add_space(3.0);
-
-            ui.scope(|ui| {
-                let widgets = &mut ui.style_mut().visuals.widgets;
-                widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-                widgets.inactive.bg_stroke = Stroke::NONE;
-                widgets.inactive.fg_stroke = Stroke::new(1.0, theme::TEXT);
-                widgets.hovered.weak_bg_fill = theme::ACCENT_WASH;
-                widgets.hovered.bg_stroke = Stroke::NONE;
-                widgets.hovered.fg_stroke = Stroke::new(1.0, theme::TEXT);
-                widgets.active.weak_bg_fill = theme::ACCENT_SOFT;
-                widgets.active.bg_stroke = Stroke::NONE;
-                widgets.active.fg_stroke = Stroke::new(1.0, theme::TEXT);
-
-                ui.menu_button("Perseid", |ui| {
-                    if ui.button("About Perseid").clicked() {
-                        self.about_open = true;
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button("Quit").clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-                ui.menu_button("View", |ui| {
-                    let ctx = ui.ctx().clone();
-                    let current = ctx.pixels_per_point();
-
-                    let zoom_in = egui::Button::new("Zoom In")
-                        .shortcut_text(ctx.format_shortcut(&ZOOM_IN_SHORTCUT));
-                    if ui.add(zoom_in).clicked() {
-                        self.set_ui_scale(&ctx, stepped_scale(current, 0.1));
-                    }
-                    let zoom_out = egui::Button::new("Zoom Out")
-                        .shortcut_text(ctx.format_shortcut(&ZOOM_OUT_SHORTCUT));
-                    if ui.add(zoom_out).clicked() {
-                        self.set_ui_scale(&ctx, stepped_scale(current, -0.1));
-                    }
-                    let reset = egui::Button::new("Reset Zoom")
-                        .shortcut_text(ctx.format_shortcut(&ZOOM_RESET_SHORTCUT));
-                    if ui
-                        .add_enabled((current - self.base_ui_scale).abs() > 1e-3, reset)
-                        .clicked()
-                    {
-                        self.set_ui_scale(&ctx, self.base_ui_scale);
-                    }
-
-                    ui.separator();
-                    ui.weak(format!(
-                        "UI scale: {:.0}% (system {:.0}%)",
-                        current * 100.0,
-                        self.native_ui_scale * 100.0,
-                    ));
-                });
-                ui.menu_button("Help", |ui| {
-                    if ui.button("About Perseid").clicked() {
-                        self.about_open = true;
-                        ui.close();
-                    }
-                    ui.hyperlink_to(
-                        "Project on GitHub",
-                        "https://github.com/andyintheshell/perseid",
-                    );
-                });
-            });
-
-            // The empty part of the title bar drags the window, like Burp's
-            // menu bar. Reserve room on the right for the window controls.
-            let drag_height = ui.spacing().interact_size.y.max(20.0);
-            let drag_width = (ui.available_width() - 3.0 * 26.0 - 10.0).max(0.0);
-            let (drag_rect, drag_response) = ui.allocate_exact_size(
-                egui::vec2(drag_width, drag_height),
-                egui::Sense::click_and_drag(),
-            );
-            if drag_response.drag_started() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-            if drag_response.double_clicked() {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-            }
-            if drag_rect.width() > 0.0 {
-                ui.painter().text(
-                    drag_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Perseid",
-                    egui::FontId::proportional(10.5),
-                    theme::TEXT_MUTED,
-                );
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if window_control(ui, WindowControl::Close, maximized).clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                if window_control(ui, WindowControl::Maximize, maximized).clicked() {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-                }
-                if window_control(ui, WindowControl::Minimize, maximized).clicked() {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                }
-            });
-        });
-    }
-
-    fn main_tabs(&mut self, ui: &mut egui::Ui) {
-        let shortcuts = [
-            ui.ctx().format_shortcut(&TAB_TARGET_SHORTCUT),
-            ui.ctx().format_shortcut(&TAB_PROXY_SHORTCUT),
-            ui.ctx().format_shortcut(&TAB_INTRUDER_SHORTCUT),
-            ui.ctx().format_shortcut(&TAB_REPEATER_SHORTCUT),
-            ui.ctx().format_shortcut(&TAB_DECODER_SHORTCUT),
-            ui.ctx().format_shortcut(&TAB_COMPARER_SHORTCUT),
-        ];
-        let search_shortcut = ui.ctx().format_shortcut(&SEARCH_SHORTCUT);
-        ui.horizontal(|ui| {
-            for (index, (tab, label)) in MainTab::ALL.iter().enumerate() {
-                let response = main_tab_button(ui, self.main_tab == *tab, label)
-                    .on_hover_text(format!("{} ({})", label, shortcuts[index]));
-                if response.clicked() && self.main_tab != *tab {
-                    self.main_tab = *tab;
-                    ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                }
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if search_button(ui, self.search.open)
-                    .on_hover_text(format!("Search ({search_shortcut})"))
-                    .clicked()
-                {
-                    self.search.toggle();
-                }
-                ui.separator();
-                self.capture_toggle(ui);
-                ui.separator();
-                if let Some(proxy) = &self.proxy {
-                    ui.colored_label(theme::GREEN, format!("proxy on {}", proxy.local_addr()));
-                } else {
-                    let response = ui.colored_label(theme::RED, "proxy not running");
-                    if let Some(error) = &self.proxy_error {
-                        response.on_hover_text(error);
-                    }
-                    if ui.button("Retry").clicked() {
-                        let notify = self.notify.clone();
-                        self.start_proxy(notify);
-                    }
-                }
-            });
-        });
-    }
-
-    fn capture_toggle(&mut self, ui: &mut egui::Ui) {
-        let mut capturing = !self.paused;
-        if ui
-            .checkbox(&mut capturing, "Capture")
-            .on_hover_text("Record new exchanges in HTTP history")
-            .changed()
-        {
-            self.paused = !capturing;
-            if let Some(proxy) = &self.proxy {
-                proxy.set_paused(self.paused);
-            }
-        }
-    }
-
-    fn status_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!("{} exchanges", self.history.len()))
-                    .small()
-                    .color(theme::TEXT_MUTED),
-            )
-            .on_hover_text(format!(
-                "{} of {} captured body bytes retained",
-                view::human_bytes(self.history.retained_bytes() as u64),
-                view::human_bytes(self.history.byte_limit() as u64)
-            ));
-
-            let in_flight = self.history.in_flight();
-            if in_flight > 0 {
-                ui.separator();
-                ui.colored_label(theme::BLUE, format!("{in_flight} in flight"));
-            }
-
-            let pending = self.intercept_queue.len();
-            if pending > 0 {
-                ui.separator();
-                ui.colored_label(theme::AMBER, format!("{pending} awaiting intercept"));
-            } else if self.proxy.is_some() && self.intercept_enabled {
-                ui.separator();
-                ui.label(
-                    RichText::new("intercept armed")
-                        .small()
-                        .color(theme::ACCENT_DARK),
-                );
-            }
-
-            let repeater_pending = self
-                .repeater_tabs
-                .iter()
-                .filter(|tab| tab.is_pending())
-                .count();
-            if repeater_pending > 0 {
-                ui.separator();
-                ui.colored_label(theme::BLUE, format!("{repeater_pending} Repeater pending"));
-            }
-
-            if let Some(summary) = self.intruder.status_summary() {
-                ui.separator();
-                ui.colored_label(theme::BLUE, summary);
-            }
-
-            if let Some(proxy) = &self.proxy {
-                let dropped = proxy.dropped_events();
-                if dropped > 0 {
-                    ui.separator();
-                    ui.colored_label(
-                        theme::AMBER,
-                        format!("{dropped} events dropped (consumer too slow)"),
-                    );
-                }
-                let rejected = proxy.rejected_connections() + proxy.rejected_tunnels();
-                if rejected > 0 {
-                    ui.separator();
-                    ui.colored_label(
-                        theme::AMBER,
-                        format!("{rejected} rejected by connection limits"),
-                    );
-                }
-                let blocked = proxy.blocked_by_scope();
-                if blocked > 0 {
-                    ui.separator();
-                    ui.colored_label(theme::AMBER, format!("{blocked} blocked by scope"));
-                }
-            }
-            let evicted = self.history.evicted();
-            if evicted > 0 {
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("{evicted} evicted by history limit"))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
-            }
-
-            if self.paused {
-                ui.separator();
-                ui.colored_label(theme::AMBER, "capture paused");
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.memory_indicator(ui);
-            });
-        });
-    }
-
-    /// The window is undecorated so the menu can share the title-bar row with
-    /// the window controls. Draw its resize border ourselves.
-    fn resize_handles(&self, ui: &mut egui::Ui) {
-        let rect = ui.ctx().content_rect();
-        let edge = 4.0;
-        let corner = 10.0;
-        let handles = [
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + corner, rect.top()),
-                    egui::pos2(rect.right() - corner, rect.top() + edge),
-                ),
-                egui::ResizeDirection::North,
-                egui::CursorIcon::ResizeVertical,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + corner, rect.bottom() - edge),
-                    egui::pos2(rect.right() - corner, rect.bottom()),
-                ),
-                egui::ResizeDirection::South,
-                egui::CursorIcon::ResizeVertical,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left(), rect.top() + corner),
-                    egui::pos2(rect.left() + edge, rect.bottom() - corner),
-                ),
-                egui::ResizeDirection::West,
-                egui::CursorIcon::ResizeHorizontal,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.right() - edge, rect.top() + corner),
-                    egui::pos2(rect.right(), rect.bottom() - corner),
-                ),
-                egui::ResizeDirection::East,
-                egui::CursorIcon::ResizeHorizontal,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left(), rect.top()),
-                    egui::pos2(rect.left() + corner, rect.top() + corner),
-                ),
-                egui::ResizeDirection::NorthWest,
-                egui::CursorIcon::ResizeNwSe,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.right() - corner, rect.top()),
-                    egui::pos2(rect.right(), rect.top() + corner),
-                ),
-                egui::ResizeDirection::NorthEast,
-                egui::CursorIcon::ResizeNeSw,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left(), rect.bottom() - corner),
-                    egui::pos2(rect.left() + corner, rect.bottom()),
-                ),
-                egui::ResizeDirection::SouthWest,
-                egui::CursorIcon::ResizeNeSw,
-            ),
-            (
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.right() - corner, rect.bottom() - corner),
-                    egui::pos2(rect.right(), rect.bottom()),
-                ),
-                egui::ResizeDirection::SouthEast,
-                egui::CursorIcon::ResizeNwSe,
-            ),
-        ];
-
-        for (index, (rect, direction, cursor)) in handles.into_iter().enumerate() {
-            let response = ui
-                .interact(
-                    rect,
-                    egui::Id::unique(("perseid.window.resize", index)),
-                    egui::Sense::drag(),
-                )
-                .on_hover_cursor(cursor);
-            if response.drag_started() {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
-            }
-        }
-    }
-
     fn main_content(&mut self, ui: &mut egui::Ui) {
         match self.main_tab {
             MainTab::Target => self.target_tab(ui),
             MainTab::Proxy => self.proxy_tab(ui),
             MainTab::Intruder => self.intruder_view(ui),
             MainTab::Repeater => self.repeater_view(ui),
+            MainTab::Sequencer => self.sequencer_view(ui),
             MainTab::Decoder => self.decoder_view(ui),
             MainTab::Comparer => self.comparer_view(ui),
         }
+    }
+}
+
+#[cfg(test)]
+impl PerseidApp {
+    /// Minimal app state for tests that exercise tab controllers without
+    /// constructing the eframe shell, proxy, or TLS material.
+    pub(super) fn test_app() -> Self {
+        let mut app = Self {
+            proxy: None,
+            proxy_error: None,
+            notify: Arc::new(|| {}),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            capture_limit: crate::proxy::DEFAULT_CAPTURE_LIMIT,
+            intercept_limit: crate::proxy::DEFAULT_INTERCEPT_LIMIT,
+            history: History::new(10, 1024),
+            dropped_seen: 0,
+            paused: false,
+            intercept_enabled: false,
+            intercept_responses: false,
+            intercept_queue: VecDeque::new(),
+            intercept_selected: BTreeSet::new(),
+            intercept_active: None,
+            intercept_anchor: None,
+            intercept_scroll_to_active: false,
+            scope_enforce: false,
+            match_replace: Vec::new(),
+            rules_error: None,
+            filter: String::new(),
+            visible: Vec::new(),
+            visible_key: None,
+            selected: None,
+            scroll_to_selected: false,
+            detail: None,
+            websocket_history: WebSocketHistory::new(10, 1024),
+            websocket_filter: String::new(),
+            websocket_visible: Vec::new(),
+            websocket_visible_key: None,
+            websocket_selected: None,
+            websocket_scroll_to_selected: false,
+            websocket_detail: None,
+            websocket_view: MessageView::default(),
+            main_tab: MainTab::default(),
+            proxy_section: ProxySection::default(),
+            target_section: TargetSection::default(),
+            request_view: MessageView::default(),
+            response_view: MessageView::default(),
+            inspector: inspector::InspectorState::default(),
+            search: search::SearchState::default(),
+            repeater: None,
+            repeater_tabs: Vec::new(),
+            repeater_active: 0,
+            repeater_next_tab: 1,
+            intruder_engine: None,
+            intruder: intruder::IntruderState::new(),
+            decoder: decoder::DecoderState::new(),
+            comparer: comparer::ComparerState::new(),
+            sequencer: sequencer::SequencerState::new(),
+            project: project_ui::ProjectUi::new(
+                10,
+                1024,
+                crate::project::RetentionLimits::default(),
+            ),
+            project_baseline_workspace: WorkspaceState::default(),
+            site_map: None,
+            site_map_ui: target::SiteMapUi::new(),
+            scope: BTreeSet::new(),
+            scope_enabled: false,
+            scope_input: String::new(),
+            ca_dir: PathBuf::new(),
+            tls_ca: None,
+            tls_ca_error: None,
+            tls_intercept: false,
+            tls_setup_open: false,
+            tls_passthrough: Vec::new(),
+            tls_passthrough_input: String::new(),
+            native_ui_scale: 1.0,
+            base_ui_scale: 1.0,
+            mark: None,
+            lockup: None,
+            memory: MemoryMeter::new(),
+            memory_open: false,
+            about_open: false,
+            #[cfg(feature = "screenshots")]
+            screenshots: None,
+        };
+        app.project_baseline_workspace = app.workspace_snapshot();
+        app
     }
 }
 
@@ -1378,8 +643,10 @@ impl eframe::App for PerseidApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
+        self.poll_project();
         self.drain_events(&ctx);
         self.comparer.handle_input(&ctx);
+        self.poll_sequencer(&ctx);
         self.keyboard(&ctx);
         self.rebuild_visible();
 
@@ -1419,7 +686,9 @@ impl eframe::App for PerseidApp {
         self.memory_window(&ctx);
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
+        self.project_windows(&ctx);
         self.comparer_windows(&ctx);
+        self.sequencer_windows(&ctx);
         self.search_window(&ctx);
         self.resize_handles(ui);
 
@@ -1436,11 +705,93 @@ impl eframe::App for PerseidApp {
         }
         ctx.request_repaint_after(self.memory.time_until_next_sample());
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.shutdown_project();
+    }
+}
+
+/// Temporary retention defaults to the effective UI cache limits (clamped to
+/// at least one, as the caches are) but can be configured independently. An
+/// explicit `--temporary-retention-* 0` disables that dimension; saved projects
+/// never evict.
+fn configured_retention(args: &Args) -> RetentionLimits {
+    RetentionLimits::new(
+        args.temporary_retention_limit
+            .unwrap_or(args.history_limit.max(1) as u64),
+        args.temporary_retention_bytes
+            .unwrap_or(args.history_bytes.max(1) as u64),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn temporary_retention_defaults_to_the_history_limits_and_honours_overrides() {
+        let mut args =
+            Args::parse_from(["perseid", "--history-limit", "7", "--history-bytes", "99"]);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(7, 99));
+
+        args.temporary_retention_limit = Some(3);
+        args.temporary_retention_bytes = Some(0);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(3, 0));
+    }
+
+    #[test]
+    fn temporary_retention_follows_the_effective_cache_limits_when_unset() {
+        // The UI caches clamp zero to one, so the default retention limits do
+        // the same instead of silently disabling retention.
+        let args = Args::parse_from(["perseid", "--history-limit", "0", "--history-bytes", "0"]);
+        assert_eq!(configured_retention(&args), RetentionLimits::new(1, 1));
+    }
+
+    fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn sequencer_shortcut_selects_the_tab_and_chrome_renders_its_status() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: Key::S,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_ui| app.keyboard(&ctx));
+        output.textures_delta.clear();
+        assert_eq!(app.main_tab, MainTab::Sequencer);
+
+        let output = frame(|ui| {
+            app.main_tabs(ui);
+            app.main_content(ui);
+        });
+        assert!(!output.shapes.is_empty());
+    }
 
     #[test]
     fn tabs_follow_burp_order() {
@@ -1452,6 +803,7 @@ mod tests {
                 MainTab::Proxy,
                 MainTab::Intruder,
                 MainTab::Repeater,
+                MainTab::Sequencer,
                 MainTab::Decoder,
                 MainTab::Comparer
             ]
