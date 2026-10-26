@@ -78,9 +78,10 @@ exchanges are also separate from Proxy history by design.
 
 ## A project does not open or appears to be missing history
 
-- **Check the path and permissions.** Project dialogs take a path directly and
-  do not provide a native file picker. Save As and Save Copy require a new path;
-  they will not overwrite an existing file.
+- **Check the path and permissions.** Project dialogs include a folder browser
+  for navigating to a project. Save As and Save Copy ask before replacing an
+  existing file; choose **Keep Existing** or a different name if the file is
+  not the project you meant to replace.
 - **Check the version.** Project files require Perseid `0.2.0` or newer. Newer
   or unsupported schema versions are rejected rather than silently rewritten.
 - **History limits do not delete old saved records.** Opening a project loads a

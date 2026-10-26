@@ -260,7 +260,7 @@ fn save_as_switches_to_a_persistent_project_that_reopens() {
     wait(project.flush()).expect("flush");
 
     let file = TempProject::new("save-as");
-    wait(project.save_as(file.path.clone())).expect("save as");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
     let status = project.status();
     assert_eq!(status.mode.path(), Some(file.path.as_path()));
     assert_eq!(status.http_count, 1);
@@ -300,7 +300,7 @@ fn save_copy_leaves_the_source_open_and_creates_a_reopenable_file() {
     wait(project.flush()).expect("flush");
 
     let file = TempProject::new("save-copy");
-    wait(project.save_copy(file.path.clone())).expect("save copy");
+    wait(project.save_copy(file.path.clone(), false)).expect("save copy");
 
     assert_eq!(project.status().mode, ProjectMode::Temporary);
     assert!(project.status().mode.path().is_none());
@@ -326,7 +326,7 @@ fn save_as_refuses_to_replace_an_existing_file() {
     let file = TempProject::new("existing");
     std::fs::write(&file.path, b"do not replace me").expect("write existing file");
 
-    let error = wait(project.save_as(file.path.clone())).expect_err("save must be refused");
+    let error = wait(project.save_as(file.path.clone(), false)).expect_err("save must be refused");
     assert!(matches!(
         error,
         ProjectError::DestinationExists(ref path) if path == &file.path
@@ -337,6 +337,88 @@ fn save_as_refuses_to_replace_an_existing_file() {
     );
     assert_eq!(project.status().mode, ProjectMode::Temporary);
     assert!(project.get_http(1).expect("read project").is_none());
+}
+
+#[test]
+fn save_as_replaces_an_existing_file_when_overwrite_is_allowed() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(
+        &project,
+        &[started(31, "GET"), finished(31, b"", b"replaced")],
+    );
+    let http_id = ids[0];
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("overwrite");
+    std::fs::write(&file.path, b"old project bytes").expect("write existing file");
+
+    wait(project.save_as(file.path.clone(), true)).expect("overwrite save");
+    assert_eq!(project.status().mode.path(), Some(file.path.as_path()));
+    assert_eq!(project.status().http_count, 1);
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open project");
+    assert_eq!(opened.http_total, 1);
+    assert_eq!(opened.http[0].id, http_id);
+    assert_eq!(
+        opened.http[0]
+            .response_body()
+            .expect("response body")
+            .data(),
+        b"replaced"
+    );
+}
+
+#[test]
+fn save_as_can_write_to_the_active_project_path() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    capture_all(
+        &project,
+        &[started(32, "GET"), finished(32, b"", b"same path")],
+    );
+    let file = TempProject::new("same-path");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
+
+    wait(project.save_as(file.path.clone(), true)).expect("overwrite the open project");
+    assert_eq!(project.status().mode.path(), Some(file.path.as_path()));
+    assert_eq!(project.status().http_count, 1);
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open project");
+    assert_eq!(opened.http_total, 1);
+    assert_eq!(
+        opened.http[0]
+            .response_body()
+            .expect("response body")
+            .data(),
+        b"same path"
+    );
+}
+
+#[test]
+fn save_copy_can_replace_an_existing_file_without_switching() {
+    let project = ProjectHandle::temporary().expect("temporary project");
+    let ids = capture_all(
+        &project,
+        &[started(33, "GET"), finished(33, b"", b"copy over")],
+    );
+    let http_id = ids[0];
+    wait(project.flush()).expect("flush");
+
+    let file = TempProject::new("copy-overwrite");
+    std::fs::write(&file.path, b"old copy bytes").expect("write existing file");
+    wait(project.save_copy(file.path.clone(), true)).expect("overwrite copy");
+
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    assert!(project.status().mode.path().is_none());
+    drop(project);
+
+    let reopened = ProjectHandle::temporary().expect("temporary project");
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).expect("open copy");
+    assert_eq!(opened.http_total, 1);
+    assert_eq!(opened.http[0].id, http_id);
 }
 
 #[test]
@@ -382,7 +464,7 @@ fn open_rejects_an_interrupted_creation() {
 fn open_rejects_a_newer_schema_version() {
     let project = ProjectHandle::temporary().expect("temporary project");
     let file = TempProject::new("future-schema");
-    wait(project.save_as(file.path.clone())).expect("save as");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
     drop(project);
 
     // Bump the schema version behind the service's back.
@@ -420,7 +502,7 @@ fn open_repairs_exchanges_left_in_flight() {
     wait(project.flush()).expect("flush");
 
     let file = TempProject::new("in-flight");
-    wait(project.save_as(file.path.clone())).expect("save as");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
     drop(project);
 
     let reopened = ProjectHandle::temporary().expect("temporary project");
@@ -466,7 +548,7 @@ fn clearing_history_is_persisted() {
     assert_eq!(persisted_meta(&project).ws_body_bytes, 0);
 
     let file = TempProject::new("cleared");
-    wait(project.save_as(file.path.clone())).expect("save as");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
     drop(project);
 
     let reopened = ProjectHandle::temporary().expect("temporary project");
@@ -515,7 +597,7 @@ fn workspace_is_persisted_without_switching_projects() {
     wait(project.flush()).expect("flush");
 
     let file = TempProject::new("workspace");
-    wait(project.save_copy(file.path.clone())).expect("save copy");
+    wait(project.save_copy(file.path.clone(), false)).expect("save copy");
     drop(project);
 
     let reopened = ProjectHandle::temporary().expect("temporary project");
@@ -572,7 +654,7 @@ fn project_mode_reports_its_file_path() {
 fn open_rejects_migrating_and_unknown_states() {
     let project = ProjectHandle::temporary().expect("temporary project");
     let file = TempProject::new("bad-state");
-    wait(project.save_as(file.path.clone())).expect("save as");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
     drop(project);
 
     let set_state = |state: &str| {
@@ -802,7 +884,7 @@ fn saved_projects_never_apply_temporary_retention_limits() {
     let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(1, 0))
         .expect("bounded temporary project");
     let file = TempProject::new("saved-retention");
-    wait(project.save_as(file.path.clone())).expect("save as");
+    wait(project.save_as(file.path.clone(), false)).expect("save as");
 
     let ids = capture_all(
         &project,
@@ -840,7 +922,7 @@ fn open_surfaces_corrupt_http_snapshots_and_preserves_the_current_project() {
     )[0];
     wait(source.flush()).expect("flush");
     let file = TempProject::new("corrupt-http-snapshot");
-    wait(source.save_as(file.path.clone())).expect("save as");
+    wait(source.save_as(file.path.clone(), false)).expect("save as");
     drop(source);
     corrupt_project(&file, |tx| {
         tx.open_table(schema::HTTP_EXCHANGES)
@@ -876,7 +958,7 @@ fn open_surfaces_corrupt_websocket_snapshots_and_preserves_the_current_project()
     let saved_id = capture_all(&source, &[ws_message(1, 1, b"persisted")])[0];
     wait(source.flush()).expect("flush");
     let file = TempProject::new("corrupt-ws-snapshot");
-    wait(source.save_as(file.path.clone())).expect("save as");
+    wait(source.save_as(file.path.clone(), false)).expect("save as");
     drop(source);
     corrupt_project(&file, |tx| {
         tx.open_table(schema::WS_MESSAGES)
@@ -908,7 +990,7 @@ fn open_surfaces_corrupt_workspace_state_and_preserves_the_current_project() {
     assert!(source.set_workspace(workspace));
     wait(source.flush()).expect("flush");
     let file = TempProject::new("corrupt-workspace");
-    wait(source.save_as(file.path.clone())).expect("save as");
+    wait(source.save_as(file.path.clone(), false)).expect("save as");
     drop(source);
     corrupt_project(&file, |tx| {
         tx.open_table(schema::WORKSPACE)

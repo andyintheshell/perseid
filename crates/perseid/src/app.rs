@@ -22,6 +22,7 @@ mod comparer;
 mod curl;
 mod decoder;
 mod events;
+mod file_dialog;
 mod input;
 mod inspector;
 mod intercept;

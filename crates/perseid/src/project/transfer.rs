@@ -1,11 +1,12 @@
-//! Copying a consistent project snapshot into a new file.
+//! Copying a consistent project snapshot into a file.
 //!
 //! The transfer deliberately uses a redb read transaction rather than
 //! `std::fs::copy`: the source database may be live. Every destination is
 //! created in `initializing` state and only switched to `ready` after all
-//! tables have been copied and committed.
+//! tables have been copied and committed. Explicit overwrites are staged next
+//! to the destination and published only once complete.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use redb::{
     Database, Durability, Key, ReadTransaction, ReadableDatabase, ReadableTable, Value,
@@ -34,6 +35,76 @@ pub fn copy_to_new_file(
         return Err(err);
     }
     Ok(destination_db)
+}
+
+/// Copy every data table into `destination`, optionally replacing an existing
+/// file after the new project has been fully written.
+///
+/// Overwrites never truncate `destination` in place. The copy is written to a
+/// uniquely named sibling first and only published when it is complete, so a
+/// failed transfer leaves the previous file untouched.
+pub fn copy_to_file(
+    source: &Database,
+    destination: &Path,
+    meta: &ProjectMeta,
+    overwrite: bool,
+) -> Result<Database> {
+    if !overwrite {
+        return copy_to_new_file(source, destination, meta);
+    }
+
+    let temporary = temporary_path(destination);
+    let copied = copy_to_new_file(source, &temporary, meta);
+    let copied = match copied {
+        Ok(copied) => copied,
+        Err(err) => {
+            backend::remove_incomplete(&temporary);
+            return Err(err);
+        }
+    };
+    // redb keeps the file handle open; release it before publishing the file.
+    drop(copied);
+    if let Err(err) = replace_file(&temporary, destination) {
+        backend::remove_incomplete(&temporary);
+        return Err(err);
+    }
+    backend::open_file(destination)
+}
+
+fn temporary_path(destination: &Path) -> PathBuf {
+    let name = destination
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "project.perseid".to_string());
+    destination.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()))
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::rename(source, destination)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+    // Windows cannot rename over an existing file. Only remove the old file
+    // after the rename proves that the replacement is blocked; a different
+    // failure must leave the existing project untouched.
+    match std::fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(err)
+            if destination.exists()
+                && matches!(
+                    err.kind(),
+                    std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
+                ) =>
+        {
+            std::fs::remove_file(destination)?;
+            std::fs::rename(source, destination)?;
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn copy_contents(source: &Database, destination: &Database, meta: &ProjectMeta) -> Result<()> {
@@ -93,12 +164,12 @@ where
     Ok(())
 }
 
-/// Copy a live project to a new file, leaving the source open.
-pub fn save_copy(source: &Database, destination: &Path) -> Result<()> {
+/// Copy a live project to a file, leaving the source open.
+pub fn save_copy(source: &Database, destination: &Path, overwrite: bool) -> Result<()> {
     let read = source.begin_read()?;
     let meta = schema::read_meta(&read)?;
     drop(read);
-    let destination_db = copy_to_new_file(source, destination, &meta)?;
+    let destination_db = copy_to_file(source, destination, &meta, overwrite)?;
     drop(destination_db);
     Ok(())
 }
@@ -304,7 +375,7 @@ mod tests {
         seed_http(&source, &http_record(7, 1, 7_000), b"", b"copy");
 
         let destination = TempProject::new("save-copy");
-        save_copy(&source, &destination.path).expect("save copy");
+        save_copy(&source, &destination.path, false).expect("save copy");
 
         let copied = backend::open_file(&destination.path).expect("open copy");
         let item = queries::get_http(&copied, 7)
@@ -312,6 +383,85 @@ mod tests {
             .expect("copied exchange");
         assert_eq!(item.response_body().expect("response body").data(), b"copy");
         assert_eq!(queries::count_http(&source).expect("source stays open"), 1);
+    }
+
+    #[test]
+    fn copy_can_replace_an_existing_file_after_the_new_copy_is_complete() {
+        let meta = ProjectMeta::new("transfer-overwrite".to_string());
+        let source = backend::create_memory(&meta).expect("source project");
+        seed_http(&source, &http_record(8, 1, 8_000), b"", b"new");
+
+        let destination = TempProject::new("overwrite");
+        std::fs::write(&destination.path, b"old project bytes").expect("write existing file");
+
+        let copied =
+            copy_to_file(&source, &destination.path, &meta, true).expect("overwrite project");
+        let read = copied.begin_read().expect("read transaction");
+        assert_eq!(schema::read_meta(&read).expect("meta").state, STATE_READY);
+        drop(read);
+        assert_eq!(queries::count_http(&copied).expect("count"), 1);
+        drop(copied);
+
+        let reopened = backend::open_file(&destination.path).expect("reopen replacement");
+        let item = queries::get_http(&reopened, 8)
+            .expect("read replacement")
+            .expect("replacement record");
+        assert_eq!(item.response_body().expect("response body").data(), b"new");
+    }
+
+    #[test]
+    fn a_failed_overwrite_leaves_the_existing_file_and_no_temporary_file() {
+        let source = tableless_source();
+        let meta = ProjectMeta::new("transfer-overwrite-failed".to_string());
+        let destination = TempProject::new("overwrite-failed");
+        std::fs::write(&destination.path, b"old project bytes").expect("write existing file");
+
+        let error = copy_to_file(&source, &destination.path, &meta, true)
+            .expect_err("copying a database without Perseid tables must fail");
+
+        assert!(matches!(error, ProjectError::Table(_)));
+        assert_eq!(
+            std::fs::read(&destination.path).expect("read existing file"),
+            b"old project bytes"
+        );
+        let parent = destination.path.parent().expect("temp parent");
+        let prefix = format!(
+            ".{}.",
+            destination
+                .path
+                .file_name()
+                .expect("file name")
+                .to_string_lossy()
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(parent)
+            .expect("read temp directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(&prefix) && name.ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "a failed overwrite must clean up temporary files: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn copy_without_overwrite_still_refuses_an_existing_file() {
+        let meta = ProjectMeta::new("transfer-no-overwrite".to_string());
+        let source = backend::create_memory(&meta).expect("source project");
+        let destination = TempProject::new("no-overwrite");
+        std::fs::write(&destination.path, b"old project bytes").expect("write existing file");
+
+        let error = copy_to_file(&source, &destination.path, &meta, false)
+            .expect_err("an existing destination must be refused");
+        assert!(matches!(
+            error,
+            ProjectError::DestinationExists(ref path) if path == &destination.path
+        ));
+        assert_eq!(
+            std::fs::read(&destination.path).expect("read existing file"),
+            b"old project bytes"
+        );
     }
 
     #[test]
