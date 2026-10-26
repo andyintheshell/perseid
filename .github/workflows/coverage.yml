@@ -19,7 +19,11 @@ env:
 jobs:
   coverage:
     name: Rust coverage
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,7 +38,7 @@ jobs:
         run: cargo install cargo-llvm-cov --version 0.9.1 --locked
 
       - name: Generate LCOV report
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --locked --features native-menu-test --lcov --output-path lcov.info
 
       # The secret is used on main and same-repository PRs; Codecov supports
       # tokenless uploads for fork PRs to public repositories.

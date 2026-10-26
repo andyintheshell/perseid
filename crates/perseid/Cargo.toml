@@ -22,9 +22,20 @@ path = "src/main.rs"
 [features]
 # Development-only mode that renders the documentation screenshots headlessly.
 screenshots = []
+# Enables the main-thread AppKit integration test used by coverage CI.
+native-menu-test = []
+
+[[test]]
+name = "native_macos_menu"
+path = "tests/native_macos_menu.rs"
+harness = false
+required-features = ["native-menu-test"]
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21", default-features = false }
 
 [dependencies]
 base64 = "0.23"
@@ -41,7 +52,7 @@ egui_extras.workspace = true
 env_logger.workspace = true
 flate2.workspace = true
 form_urlencoded.workspace = true
-html-escape = "0.2"
+html-escape = "0.3"
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true

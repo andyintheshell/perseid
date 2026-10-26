@@ -3,11 +3,13 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(any(not(target_os = "macos"), test))]
 enum WindowControlAction {
     Fullscreen(bool),
     Maximized(bool),
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn window_control_action(
     is_macos: bool,
     fullscreen: bool,
@@ -28,6 +30,7 @@ fn window_control_action(
 }
 
 /// Draw one custom title-bar window control.
+#[cfg(not(target_os = "macos"))]
 fn window_control(
     ui: &mut egui::Ui,
     control: WindowControl,
@@ -114,6 +117,7 @@ fn window_control(
 }
 
 impl PerseidApp {
+    #[cfg(not(target_os = "macos"))]
     pub(super) fn title_bar(&mut self, ui: &mut egui::Ui) {
         let (maximized, fullscreen) = ui.ctx().input(|input| {
             (
@@ -427,6 +431,7 @@ impl PerseidApp {
 
     /// The window is undecorated so the menu can share the title-bar row with
     /// the window controls. Draw its resize border ourselves.
+    #[cfg(not(target_os = "macos"))]
     pub(super) fn resize_handles(&self, ui: &mut egui::Ui) {
         if ui
             .ctx()

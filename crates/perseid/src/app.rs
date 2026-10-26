@@ -10,18 +10,20 @@
 //!
 //! This module holds the application state and the eframe shell. The tabs,
 //! shared top-level panels, and supporting pieces are split by area:
-//! [`chrome`], [`comparer`], [`curl`], [`decoder`], [`events`], [`input`],
-//! [`inspector`], [`intercept`], [`intruder`], [`listing`], [`project_ui`], [`proxy`],
-//! [`proxy_control`], [`repeater`], [`rules`], [`search`], [`selection`],
-//! [`sequencer`], [`target`], [`tls`], [`windows`], [`widgets`],
-//! [`message_view`], [`util`], [`scale`], and the feature-gated
-//! [`screenshots`] driver.
+//! [`chrome`], [`comparer`], [`curl`], [`decoder`], [`events`],
+//! [`history_filter`], [`input`], [`inspector`], [`intercept`], [`intruder`],
+//! [`listing`], [`project_ui`], [`proxy`], [`proxy_control`], [`repeater`],
+//! [`rules`], [`search`], [`selection`], [`sequencer`], [`target`], [`tls`],
+//! [`windows`], [`widgets`], [`message_view`], [`util`], [`scale`], and the
+//! feature-gated [`screenshots`] driver.
 
 mod chrome;
 mod comparer;
 mod curl;
 mod decoder;
 mod events;
+mod file_dialog;
+mod history_filter;
 mod input;
 mod inspector;
 mod intercept;
@@ -56,7 +58,11 @@ use crate::proxy::{
 };
 use egui::{Color32, Key, RichText, Stroke};
 
-use self::intercept::InterceptEntry;
+#[cfg(target_os = "macos")]
+mod macos_menu;
+
+#[cfg(all(target_os = "macos", feature = "native-menu-test"))]
+pub(crate) use macos_menu::test_native_macos_menu;
 
 use crate::Args;
 use crate::branding;
@@ -71,6 +77,8 @@ use crate::theme;
 use crate::view::{self, MessageViews};
 use crate::websocket_history::WebSocketHistory;
 
+use self::history_filter::HistoryFilter;
+use self::intercept::InterceptEntry;
 use self::scale::{desktop_scale_override, resize_initial_window, resolve_ui_scale, stepped_scale};
 use self::widgets::{main_tab_button, search_button};
 
@@ -190,6 +198,7 @@ enum MessageView {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(not(target_os = "macos"))]
 enum WindowControl {
     Minimize,
     Maximize,
@@ -254,6 +263,17 @@ impl From<&MessageViewsWorkspace> for MessageViews {
     }
 }
 
+/// Cache key for the HTTP history rows after search, display filters, and the
+/// global scope have been applied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HttpVisibleKey {
+    quick_search: String,
+    filter: HistoryFilter,
+    scope_enabled: bool,
+    scope: BTreeSet<String>,
+    revision: u64,
+}
+
 pub struct PerseidApp {
     proxy: Option<Proxy>,
     proxy_error: Option<String>,
@@ -278,7 +298,11 @@ pub struct PerseidApp {
     rules_error: Option<String>,
     filter: String,
     visible: Vec<u64>,
-    visible_key: Option<(String, u64)>,
+    visible_key: Option<HttpVisibleKey>,
+    history_filter: HistoryFilter,
+    /// Staged edits for the HTTP history filter modal.
+    history_filter_draft: Option<HistoryFilter>,
+    title_cache: util::TitleCache,
     selected: Option<u64>,
     scroll_to_selected: bool,
     detail: Option<DetailCache>,
@@ -335,11 +359,20 @@ pub struct PerseidApp {
     /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
     base_ui_scale: f32,
     /// Toolbar brand mark; the About lockup is decoded on first use.
+    #[cfg(not(target_os = "macos"))]
     mark: Option<egui::TextureHandle>,
     lockup: Option<egui::TextureHandle>,
     memory: MemoryMeter,
     memory_open: bool,
     about_open: bool,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<macos_menu::NativeMenu>,
+    /// Forget the stored detail-panel height on the next HTTP history frame.
+    /// The screenshot runner resizes the window during warmup, which stores a
+    /// panel height from the smaller intermediate window before the scene is
+    /// prepared.
+    #[cfg(feature = "screenshots")]
+    reset_http_detail_size: bool,
     #[cfg(feature = "screenshots")]
     screenshots: Option<screenshots::ScreenshotDriver>,
 }
@@ -391,6 +424,7 @@ impl PerseidApp {
             Arc::new(move || ctx.request_repaint())
         };
 
+        #[cfg(not(target_os = "macos"))]
         let mark = branding::mark_texture(&cc.egui_ctx);
 
         let screenshot_mode = {
@@ -456,6 +490,9 @@ impl PerseidApp {
             filter: String::new(),
             visible: Vec::new(),
             visible_key: None,
+            history_filter: HistoryFilter::default(),
+            history_filter_draft: None,
+            title_cache: util::TitleCache::default(),
             selected: None,
             scroll_to_selected: false,
             detail: None,
@@ -503,11 +540,16 @@ impl PerseidApp {
             tls_passthrough_input: String::new(),
             native_ui_scale,
             base_ui_scale,
+            #[cfg(not(target_os = "macos"))]
             mark,
             lockup: None,
             memory: MemoryMeter::new(),
             memory_open: false,
             about_open: false,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
+            #[cfg(feature = "screenshots")]
+            reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
@@ -579,6 +621,9 @@ impl PerseidApp {
             filter: String::new(),
             visible: Vec::new(),
             visible_key: None,
+            history_filter: HistoryFilter::default(),
+            history_filter_draft: None,
+            title_cache: util::TitleCache::default(),
             selected: None,
             scroll_to_selected: false,
             detail: None,
@@ -626,11 +671,16 @@ impl PerseidApp {
             tls_passthrough_input: String::new(),
             native_ui_scale: 1.0,
             base_ui_scale: 1.0,
+            #[cfg(not(target_os = "macos"))]
             mark: None,
             lockup: None,
             memory: MemoryMeter::new(),
             memory_open: false,
             about_open: false,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
+            #[cfg(feature = "screenshots")]
+            reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
@@ -650,6 +700,10 @@ impl eframe::App for PerseidApp {
         self.keyboard(&ctx);
         self.rebuild_visible();
 
+        #[cfg(target_os = "macos")]
+        self.poll_native_menu(&ctx);
+
+        #[cfg(not(target_os = "macos"))]
         egui::Panel::top("perseid.titlebar")
             .frame(
                 egui::Frame::NONE
@@ -687,9 +741,11 @@ impl eframe::App for PerseidApp {
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
         self.project_windows(&ctx);
+        self.history_filter_window(&ctx);
         self.comparer_windows(&ctx);
         self.sequencer_windows(&ctx);
         self.search_window(&ctx);
+        #[cfg(not(target_os = "macos"))]
         self.resize_handles(ui);
 
         #[cfg(feature = "screenshots")]

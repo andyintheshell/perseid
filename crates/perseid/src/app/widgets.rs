@@ -251,3 +251,29 @@ pub(super) fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {
         ui.label(RichText::new(body).color(theme::TEXT_MUTED));
     });
 }
+
+/// A small painted check mark for dense table cells.
+///
+/// Burp uses check marks for the Params and TLS columns. Painting the mark
+/// avoids relying on an emoji glyph that may be missing from the UI font.
+pub(super) fn check_mark(ui: &mut egui::Ui, color: Color32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let stroke = Stroke::new(1.6, color);
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.left() + 2.5, rect.center().y),
+                egui::pos2(rect.center().x - 0.5, rect.bottom() - 3.0),
+            ],
+            stroke,
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.center().x - 0.5, rect.bottom() - 3.0),
+                egui::pos2(rect.right() - 2.0, rect.top() + 3.0),
+            ],
+            stroke,
+        );
+    }
+    response
+}

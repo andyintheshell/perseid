@@ -5,8 +5,9 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version:** `0.2.0`, including the first project-persistence
-implementation.
+**Current version status:** `v0.2.0` is the latest published crate and GitHub
+release, including the first project-persistence implementation. The workspace
+on `main` is `0.3.0-dev` for ongoing development.
 
 ## Current release formats
 
@@ -25,11 +26,10 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
 
-1. For a new release, set `[workspace.package] version` in the root `Cargo.toml`
-   on `main` and run `cargo check --workspace` to update `Cargo.lock`; review
-   and commit both files through the normal pull-request flow. For this release
-   preparation, `0.2.0` is already set. The version produces tag `v<version>` and
-   determines all asset names.
+1. Set `[workspace.package] version` in the root `Cargo.toml` on `main` to the
+   version being prepared. Run `cargo check --workspace` to update `Cargo.lock`;
+   review and commit both files through the normal pull-request flow. The version
+   produces tag `v<version>` and determines all asset names.
 2. Merge the reviewed `main` branch into the protected `release` branch and push
    it. Manual dispatch can preflight the builders on another branch without
    publishing; dispatching on `release` will create or update the draft as usual.
@@ -42,7 +42,7 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 The version in `Cargo.toml` is the only release-version input. Stable versions
 create ordinary releases; a SemVer pre-release version (for example
-`0.2.0-rc.1`) is marked as a GitHub pre-release. MSI and macOS bundle versions
+`0.3.0-rc.1`) is marked as a GitHub pre-release. MSI and macOS bundle versions
 use the numeric `X.Y.Z` portion because those package formats do not represent
 SemVer pre-release labels consistently.
 
@@ -106,7 +106,7 @@ wix extension add -g WixToolset.UI.wixext/5.0.2
 pwsh scripts/package-windows.ps1 -Arch x64 # or arm64
 ```
 
-The previous release completed all five hosted package builders. That checks
-artifact generation, not every installer and runtime on clean machines.
+The previous release completed all five hosted package builders. That
+checks artifact generation, not every installer and runtime on clean machines.
 Continue smoke-testing native ARM64 builds, MSI install/upgrade behavior, the
 macOS Gatekeeper experience, and Linux runtime dependencies before each release.

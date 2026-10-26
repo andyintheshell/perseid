@@ -1,7 +1,7 @@
 # Perseid storage and project persistence design
 
-**Status:** Original design proposal; the first persistence implementation is
-in the current `0.2.0` source/workspace. See §0 for current status and deviations.<br>
+**Status:** Original design proposal; the first persistence implementation
+shipped in `0.2.0`. See §0 for implementation status and deviations.<br>
 **Design baseline:** Perseid `v0.1.0` (release commit `b8e51e9`, 2026-10-23)<br>
 **Initial storage engine:** `redb` 4.4.x, version pinned through `Cargo.lock`  
 **User-visible extension:** `.perseid`  
@@ -11,9 +11,9 @@ in the current `0.2.0` source/workspace. See §0 for current status and deviatio
 
 ## 0. Review and implementation status
 
-**Reviewed:** 2026-10-23, against the `0.2.0` workspace implementation.
+**Reviewed:** 2026-10-23, against the `0.2.0` implementation.
 
-**Verdict:** the design was adopted in part, with the deviations and unfinished requirements listed below. In particular, temporary-project aggregate retention is implemented, while persistent-disk retention caps are not. The document was written against the `v0.1.0` release tag, while the implementing checkout is `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
+**Verdict:** the design was adopted in part, with the deviations and unfinished requirements listed below. In particular, temporary-project aggregate retention is implemented, while persistent-disk retention caps are not. The document was written against the `v0.1.0` release tag, while the implementation shipped in `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
 
 ### 0.1 Implementation status
 
@@ -44,7 +44,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 
 ### 0.3 Test and follow-up notes
 
-- Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
+- Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal without explicit consent, staged overwrite of an existing file, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
 - Follow-up work, in priority order: (1) wire history views and Search to the paged persistent queries so users can reach older saved records; (2) add a recent-project list and a quit prompt; (3) add schema migration/integrity handling and more crash, scale, and sidecar tests; (4) define persistent disk-capacity/retention controls.
 
 ## 1. Original proposal decision
@@ -162,7 +162,9 @@ current behavior.
 
 ### 4.2 Save Project As…: temporary to persistent
 
-- Prompt for a new `.perseid` path; reject existing files unless an explicit, separately designed replace workflow is invoked.
+- Prompt for a `.perseid` path. Existing files are refused unless the user
+  explicitly confirms an overwrite in a separate prompt. An overwrite is staged
+  to a temporary sibling and published only after the new project is complete.
 - On success, change the project mode to persistent **only after** the target has a complete committed schema and all selected state has been transferred through the agreed handover boundary.
 - Preserve original IDs, ordering, relevant selections and workspace state.
 - Keep the in-memory project available if the transfer fails. Do **not** move the only copy of user data before the new project is committed.
@@ -195,7 +197,7 @@ A file already write-open elsewhere must show an actionable **Already open** err
 - Create a new, independent `.perseid` file containing a **point-in-time consistent snapshot**. Keep the original project active and writable while the copy is prepared where practical.
 - Copy using a **redb read-transaction snapshot and logical table iteration**, not `std::fs::copy` on a live open database file. Copy all core data and indexes consistently; alternatively rebuild indexes in the destination and validate counts.
 - Mark the copy `Initializing` until the final durable commit switches it to `Ready`. If copied to a user-selected target that is later found incomplete, report that it is an interrupted copy, not a valid project.
-- Reuse the same transfer engine where possible. **Never silently replace an existing project**. If overwrite support is later added, require staging and an atomic replacement strategy with platform-specific verification; avoid permanent sidecars.
+- Reuse the same transfer engine where possible. **Never silently replace an existing project**. An explicit overwrite uses a staged temporary sibling plus an atomic rename (with a verified remove-and-rename fallback on Windows); no permanent sidecars are created.
 
 ## 5. Architecture and threading
 
@@ -531,9 +533,9 @@ Implement the transfer as a project-service operation, **not** on the egui threa
 
 ### 9.3 Destination-path and incomplete-file rules
 
-- Reserve the path with exclusive creation (e.g. `OpenOptions::create_new(true)` and redb `Builder::create_file`) to avoid overwriting an existing project. **Do not use `Database::create(path)` as an existence check:** redb may open an existing valid database.
+- Reserve a new path with exclusive creation (e.g. `OpenOptions::create_new(true)` and redb `Builder::create_file`) to avoid overwriting an existing project. **Do not use `Database::create(path)` as an existence check:** redb may open an existing valid database. An explicit overwrite is written to a uniquely named, hidden temporary sibling in the same directory and renamed into place only after it is complete; the temporary file is removed on failure.
 - On a normal failed transfer, close handles and offer removal of the incomplete destination. If the process crashes, a single `initializing` `.perseid` file may remain; opening it must show “Incomplete project creation” and must **not** convert it into a ready project automatically.
-- Strict *no sidecars next to project* is maintained during normal operation. Do not create `.perseid-wal`, backup directories or sibling binary-blob files. If future overwrite/rename behavior requires staging, specify the temporary-file policy separately and clearly in the UI.
+- Strict *no sidecars next to project* is maintained during normal operation. Do not create `.perseid-wal`, backup directories or sibling binary-blob files. An explicit overwrite temporarily stages a hidden sibling file in the same directory; it is removed after a successful publish or a failed transfer.
 
 ## 10. Redb implementation specifics
 
@@ -714,7 +716,7 @@ Capture write throughput, p50/p95/p99 transaction/commit time, UI frame-time whi
 - [WebSocket history](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/websocket_history.rs).
 - [Workbench app](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/app.rs) — current state ownership and capture drain.
 
-The links above point to current `main` (workspace `0.2.0`) for readable source paths. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for what has since shipped and verify paths against current source before implementing follow-up work.
+The links above point to current `main` (workspace `0.3.0-dev`) for readable source paths. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for what has since shipped and verify paths against current source before implementing follow-up work.
 
 ### redb
 

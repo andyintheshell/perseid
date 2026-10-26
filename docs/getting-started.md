@@ -37,8 +37,9 @@ cargo install perseid --locked
 perseid
 ```
 
-Perseid `0.2.0` includes persistent projects. Install the current crate from
-crates.io or download a prebuilt package from GitHub Releases to use them.
+Perseid `0.2.0` is published on crates.io and includes persistent projects.
+Prebuilt packages are available from GitHub Releases. A source checkout of
+`main` contains ongoing `0.3.0-dev` development.
 
 ### Download a prebuilt binary
 
@@ -231,16 +232,15 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-The current `0.2.0` workspace supports saved projects, but the first UI
-integration opens only a bounded newest-first snapshot of stored history; older
-records stay in the project file but cannot yet be paged or searched from the
-app. Temporary projects evict the oldest captured records and released body
-bytes when they exceed the configurable aggregate retention limits, which
-default to the history flags. New and Open ask Save/Discard/Cancel before
-replacing a temporary project with unsaved work; a failed save or a cancelled
-switch keeps the current project. Saved files are not automatically pruned and
-have no disk-retention cap. Project files are not encrypted and schema
-migrations are not implemented.
+Perseid `0.2.0` introduced saved projects. The current UI opens only a bounded
+newest-first snapshot of stored history; older records stay in the project file
+but cannot yet be paged or searched from the app. Temporary projects evict the
+oldest captured records and released body bytes when they exceed the configurable
+aggregate retention limits, which default to the history flags. New and Open ask
+Save/Discard/Cancel before replacing a temporary project with unsaved work; a
+failed save or a cancelled switch keeps the current project. Saved files are not
+automatically pruned and have no disk-retention cap. Project files are not
+encrypted and schema migrations are not implemented.
 WebSocket messages can be captured and inspected, but not edited or replayed;
 HTTP/3/QUIC is absent. Sequencer capture is regex-based and its statistical
 results are indicative. See [limits and persistence](workbench.md#limits-and-persistence)

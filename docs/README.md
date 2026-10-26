@@ -7,9 +7,10 @@ Perseid is an **early prototype** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
-The current source/workspace version is `0.2.0` and includes the first local
-project-persistence support. Install the current crate from crates.io or use a
-prebuilt package from GitHub Releases; see [Getting started](getting-started.md).
+The latest published release, Perseid `0.2.0`, includes the first local
+project-persistence support. The `main` branch is preparing `0.3.0-dev`; install
+the published crate or a prebuilt release, or build from source for current
+development.
 
 ## New to Perseid?
 

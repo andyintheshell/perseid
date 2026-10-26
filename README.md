@@ -71,9 +71,9 @@ The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
 macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
 are unsigned; the macOS app is ad-hoc signed but not notarized. See the
 [platform requirements](docs/getting-started.md#requirements) before installing.
-Version `0.2.0` includes the first project-persistence support. Install the
-current crate from crates.io or download a prebuilt package from GitHub Releases
-to use projects.
+Perseid `0.2.0`, published on crates.io and GitHub Releases, includes the first
+project-persistence support. Install the current crate or download a prebuilt
+package to use projects.
 
 ### Install from crates.io
 
