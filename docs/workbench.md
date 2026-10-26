@@ -35,16 +35,20 @@ from the open project.
 - **New Project** starts an empty temporary project. If the current temporary
   project has unsaved records or workbench edits, Perseid first asks
   Save/Discard/Cancel. Nothing is deleted from an existing saved file.
-- **Open Project…** opens an existing `.perseid` file. Enter its path in the
-  dialog; there is no native file picker. If the proxy is running, it stops for
+- **Open Project…** opens an existing `.perseid` file. Use the modal folder
+  browser to navigate to its directory and select the file, or type a path in
+  the **Look in** bar. The toolbar provides up, home, refresh, new-folder,
+  hidden-file, and list/grid controls. If the proxy is running, it stops for
   the switch and restarts afterward. When the current temporary project has
   unsaved work, Open asks Save/Discard/Cancel first; a cancelled prompt or a
   failed open leaves the current project active.
 - **Save Project As…** transfers the current project into a new file and makes
-  that file active. The destination must not already exist; Perseid does not
-  overwrite projects.
+  that file active. Choose a folder in the **Save in** bar, then enter a file
+  name. If the destination already exists, Perseid asks before replacing it.
+  The replacement is written alongside the old file and only swapped in once
+  the new project is complete.
 - **Save Project Copy…** writes a consistent copy to a new path and leaves the
-  current project active. Its destination must also be new.
+  current project active. It also asks before replacing an existing file.
 
 Saved projects persist HTTP and WebSocket captures plus the workbench state:
 scope and match/replace rules, the selected tab/section, filters, message views,
@@ -633,7 +637,7 @@ separate Space, matching the system green-button behavior.
 | Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, are never pruned automatically, and are not encrypted. |
 | Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
-| Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy refuse to overwrite an existing file. |
+| Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
 | Sequencer work | At most 10,000 tokens of 16,384 characters; analysis uses 5,000 tokens, 1,024 character positions, and 4,096 bit positions. Capture is limited to the retained history. |
 | Missing tools/protocols | No WebSocket message interception/replay or HTTP/3/QUIC support. |

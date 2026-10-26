@@ -103,9 +103,13 @@ pub(super) fn run_writer(
                     Err(err) => shared.set_status_error(err.to_string()),
                 }
             }
-            Command::SaveAs { path, reply } => {
+            Command::SaveAs {
+                path,
+                overwrite,
+                reply,
+            } => {
                 absorb_pending_loss(&shared, &mut meta);
-                let result = save_as(&mut db, &shared, &mut meta, &path);
+                let result = save_as(&mut db, &shared, &mut meta, &path, overwrite);
                 match result {
                     Ok(()) => {
                         // Saved projects keep every record; retention applies
@@ -119,8 +123,19 @@ pub(super) fn run_writer(
                     }
                 }
             }
-            Command::SaveCopy { path, reply } => {
-                let result = super::super::transfer::save_copy(&db, &path);
+            Command::SaveCopy {
+                path,
+                overwrite,
+                reply,
+            } => {
+                // A copy onto the file that is already open is a no-op except
+                // for making pending metadata durable. Avoid replacing a live
+                // database file, which Windows cannot do.
+                let result = if overwrite && shared.status().mode.path() == Some(path.as_path()) {
+                    commit_counters(&db, &meta)
+                } else {
+                    super::super::transfer::save_copy(&db, &path, overwrite)
+                };
                 match result {
                     Ok(()) => {
                         let _ = reply.send(Ok(()));
