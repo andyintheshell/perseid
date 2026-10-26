@@ -57,6 +57,9 @@ use crate::proxy::{
 };
 use egui::{Color32, Key, RichText, Stroke};
 
+#[cfg(target_os = "macos")]
+mod macos_menu;
+
 use self::intercept::InterceptEntry;
 
 use crate::Args;
@@ -191,6 +194,7 @@ enum MessageView {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(not(target_os = "macos"))]
 enum WindowControl {
     Minimize,
     Maximize,
@@ -336,11 +340,14 @@ pub struct PerseidApp {
     /// Scale chosen at startup (CLI flag or auto-detected); Ctrl+0 resets here.
     base_ui_scale: f32,
     /// Toolbar brand mark; the About lockup is decoded on first use.
+    #[cfg(not(target_os = "macos"))]
     mark: Option<egui::TextureHandle>,
     lockup: Option<egui::TextureHandle>,
     memory: MemoryMeter,
     memory_open: bool,
     about_open: bool,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<macos_menu::NativeMenu>,
     #[cfg(feature = "screenshots")]
     screenshots: Option<screenshots::ScreenshotDriver>,
 }
@@ -392,6 +399,7 @@ impl PerseidApp {
             Arc::new(move || ctx.request_repaint())
         };
 
+        #[cfg(not(target_os = "macos"))]
         let mark = branding::mark_texture(&cc.egui_ctx);
 
         let screenshot_mode = {
@@ -504,11 +512,14 @@ impl PerseidApp {
             tls_passthrough_input: String::new(),
             native_ui_scale,
             base_ui_scale,
+            #[cfg(not(target_os = "macos"))]
             mark,
             lockup: None,
             memory: MemoryMeter::new(),
             memory_open: false,
             about_open: false,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
@@ -627,11 +638,14 @@ impl PerseidApp {
             tls_passthrough_input: String::new(),
             native_ui_scale: 1.0,
             base_ui_scale: 1.0,
+            #[cfg(not(target_os = "macos"))]
             mark: None,
             lockup: None,
             memory: MemoryMeter::new(),
             memory_open: false,
             about_open: false,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
@@ -651,6 +665,10 @@ impl eframe::App for PerseidApp {
         self.keyboard(&ctx);
         self.rebuild_visible();
 
+        #[cfg(target_os = "macos")]
+        self.poll_native_menu(&ctx);
+
+        #[cfg(not(target_os = "macos"))]
         egui::Panel::top("perseid.titlebar")
             .frame(
                 egui::Frame::NONE
@@ -691,6 +709,7 @@ impl eframe::App for PerseidApp {
         self.comparer_windows(&ctx);
         self.sequencer_windows(&ctx);
         self.search_window(&ctx);
+        #[cfg(not(target_os = "macos"))]
         self.resize_handles(ui);
 
         #[cfg(feature = "screenshots")]

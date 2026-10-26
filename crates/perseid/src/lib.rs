@@ -119,7 +119,7 @@ pub fn run() -> eframe::Result {
         .with_min_inner_size([720.0, 480.0])
         // The menu shares the title-bar row with the window controls, Burp
         // style. The app draws the drag area and resize border itself.
-        .with_decorations(false);
+        .with_decorations(cfg!(target_os = "macos"));
     #[cfg(target_os = "macos")]
     let running_from_app_bundle = std::env::current_exe()
         .ok()

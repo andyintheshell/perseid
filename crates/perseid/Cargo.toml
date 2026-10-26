@@ -26,6 +26,9 @@ screenshots = []
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21", default-features = false }
+
 [dependencies]
 base64 = "0.23"
 bytes.workspace = true
