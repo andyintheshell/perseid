@@ -60,6 +60,9 @@ use egui::{Color32, Key, RichText, Stroke};
 #[cfg(target_os = "macos")]
 mod macos_menu;
 
+#[cfg(all(target_os = "macos", feature = "native-menu-test"))]
+pub(crate) use macos_menu::test_native_macos_menu;
+
 use self::intercept::InterceptEntry;
 
 use crate::Args;

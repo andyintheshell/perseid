@@ -38,7 +38,7 @@ jobs:
         run: cargo install cargo-llvm-cov --version 0.9.1 --locked
 
       - name: Generate LCOV report
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --locked --features native-menu-test --lcov --output-path lcov.info
 
       # The secret is used on main and same-repository PRs; Codecov supports
       # tokenless uploads for fork PRs to public repositories.

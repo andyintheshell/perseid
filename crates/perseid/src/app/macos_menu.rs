@@ -86,19 +86,25 @@ impl NativeMenu {
             fullscreen,
         }
     }
+
+    fn update_state(&self, fullscreen: bool, can_reset: bool) {
+        self.fullscreen.set_text(if fullscreen {
+            "Exit Full Screen"
+        } else {
+            "Enter Full Screen"
+        });
+        self.reset.set_enabled(can_reset);
+    }
 }
 
 impl PerseidApp {
     pub(super) fn poll_native_menu(&mut self, ctx: &egui::Context) {
         let menu = self.native_menu.get_or_insert_with(|| NativeMenu::new(ctx));
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        menu.fullscreen.set_text(if fullscreen {
-            "Exit Full Screen"
-        } else {
-            "Enter Full Screen"
-        });
-        menu.reset
-            .set_enabled((ctx.pixels_per_point() - self.base_ui_scale).abs() > 1e-3);
+        menu.update_state(
+            fullscreen,
+            (ctx.pixels_per_point() - self.base_ui_scale).abs() > 1e-3,
+        );
         let events: Vec<_> = menu.events.try_iter().collect();
         for event in events {
             self.handle_native_menu_action(ctx, &event);
@@ -130,6 +136,29 @@ impl PerseidApp {
             _ => log::warn!("unknown native menu action: {event}"),
         }
     }
+}
+
+/// Runs in a dedicated process so AppKit is initialized on its main thread.
+#[cfg(feature = "native-menu-test")]
+pub(crate) fn test_native_macos_menu() {
+    let ctx = egui::Context::default();
+    let menu = NativeMenu::new(&ctx);
+    let names: Vec<_> = menu
+        ._menu
+        .items()
+        .into_iter()
+        .map(|item| match item {
+            muda::MenuItemKind::Submenu(submenu) => submenu.text(),
+            _ => panic!("top-level menu must be a submenu"),
+        })
+        .collect();
+    assert_eq!(names, ["Perseid", "File", "View", "Help"]);
+    menu.update_state(true, false);
+    assert_eq!(menu.fullscreen.text(), "Exit Full Screen");
+    assert!(!menu.reset.is_enabled());
+    menu.update_state(false, true);
+    assert_eq!(menu.fullscreen.text(), "Enter Full Screen");
+    assert!(menu.reset.is_enabled());
 }
 
 #[cfg(test)]

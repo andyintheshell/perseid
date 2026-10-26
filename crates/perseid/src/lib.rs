@@ -24,6 +24,13 @@ pub mod proxy;
 
 pub use memory::TrackingAllocator;
 
+/// Entry point for the main-thread AppKit integration test.
+#[cfg(all(target_os = "macos", feature = "native-menu-test"))]
+#[doc(hidden)]
+pub fn test_native_macos_menu() {
+    app::test_native_macos_menu();
+}
+
 use std::net::SocketAddr;
 
 use clap::Parser;
