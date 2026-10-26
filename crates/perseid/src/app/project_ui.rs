@@ -1954,6 +1954,27 @@ mod tests {
         ));
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_file_menu_opens_each_project_dialog_and_respects_unsaved_work() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        for (action, expected) in [
+            ("open", ProjectDialogKind::Open),
+            ("save_as", ProjectDialogKind::SaveAs),
+            ("save_copy", ProjectDialogKind::SaveCopy),
+        ] {
+            app.handle_native_menu_action(&ctx, action);
+            assert_eq!(app.project.dialog.as_ref().unwrap().kind, expected);
+        }
+        app.project.dialog = None;
+        app.scope_enabled = true;
+        app.handle_native_menu_action(&ctx, "new");
+        assert!(app.project.switch_prompt.is_some());
+        assert!(app.project.pending.is_empty());
+        app.shutdown_project();
+    }
+
     #[test]
     fn switch_prompt_buttons_cancel_discard_and_save() {
         let ctx = egui::Context::default();

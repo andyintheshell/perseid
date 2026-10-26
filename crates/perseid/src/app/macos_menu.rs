@@ -105,7 +105,7 @@ impl PerseidApp {
         }
     }
 
-    fn handle_native_menu_action(&mut self, ctx: &egui::Context, event: &str) {
+    pub(super) fn handle_native_menu_action(&mut self, ctx: &egui::Context, event: &str) {
         match event {
             "about" => self.about_open = true,
             "quit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -144,5 +144,40 @@ mod tests {
         assert!(app.about_open);
         app.handle_native_menu_action(&ctx, "unknown");
         assert!(app.about_open);
+    }
+
+    #[test]
+    fn menu_zoom_actions_change_and_reset_scale() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        let frame = |action: &mut dyn FnMut()| {
+            ctx.run_ui(egui::RawInput::default(), |_| action())
+                .textures_delta
+                .clear();
+            ctx.run_ui(egui::RawInput::default(), |_| {})
+                .textures_delta
+                .clear();
+        };
+        frame(&mut || app.handle_native_menu_action(&ctx, "zoom_in"));
+        assert!(ctx.zoom_factor() > 1.0);
+        frame(&mut || app.handle_native_menu_action(&ctx, "zoom_out"));
+        assert!((ctx.zoom_factor() - 1.0).abs() < 1e-3);
+        frame(&mut || ctx.set_zoom_factor(1.5));
+        frame(&mut || app.handle_native_menu_action(&ctx, "reset"));
+        assert!((ctx.zoom_factor() - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn menu_quit_and_fullscreen_issue_viewport_commands() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {
+            app.handle_native_menu_action(&ctx, "quit");
+            app.handle_native_menu_action(&ctx, "fullscreen");
+        });
+        out.textures_delta.clear();
+        let commands = &out.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(commands.contains(&egui::ViewportCommand::Close));
+        assert!(commands.contains(&egui::ViewportCommand::Fullscreen(true)));
     }
 }
