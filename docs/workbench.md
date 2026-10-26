@@ -137,10 +137,17 @@ is a quick way to verify the path without a browser or CA trust.
 
 - **HTTP history** has one row per HTTP exchange, including decrypted HTTPS.
   `CONNECT` transport tunnels do not get their own rows. Right-click a row to
-  send its request or response to Repeater, Intruder, or Comparer, or send its
-  response to Sequencer.
-- The text filter matches method, host, path, URI, and status—not response-body
-  contents. Scope filtering can narrow the view further.
+  send its request or response to Repeater, Intruder, or Comparer, send its
+  response to Sequencer, or **Clear history**.
+- The text filter matches method, host, path, URI, status, MIME type, and file
+  extension—not response-body contents. The filter bar opens a Burp-style
+  display-filter dialog with in-scope, missing-response, parameterized-request,
+  MIME class, status class, regex or negative search, and file-extension
+  controls. Like Burp, the default filter hides CSS and image responses plus
+  common static extensions (`.js`, `.gif`, `.jpg`, `.png`, `.ico`, `.css`,
+  `.woff`, and `.woff2`). The **Filter on** switch temporarily disables every
+  display filter. Filters only hide rows; captured exchanges stay in the
+  project. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
 - The in-memory history view is bounded by exchange count and retained-body
   bytes. These limits evict rows from the UI cache; they do not cap the temporary

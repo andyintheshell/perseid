@@ -1,10 +1,12 @@
 //! Data helpers shared by the UI modules.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::history::{History, HistoryItem};
 use crate::proxy::RequestInfo;
-use crate::view::{websocket_direction_text, websocket_opcode_text};
+use crate::site_map;
+use crate::view::{self, websocket_direction_text, websocket_opcode_text};
 use crate::websocket_history::WebSocketMessageItem;
 
 pub(super) fn request_url(item: &HistoryItem) -> String {
@@ -18,13 +20,67 @@ pub(super) fn request_info_url(request: &RequestInfo) -> String {
     if request.uri.starts_with("http://") || request.uri.starts_with("https://") {
         request.uri.clone()
     } else {
-        let scheme = if request.scheme.is_empty() {
-            "http"
-        } else {
-            request.scheme.as_str()
-        };
-        format!("{scheme}://{}{}", request.host, request.path)
+        format!(
+            "{}://{}{}",
+            request_scheme(request),
+            request.host,
+            request.path
+        )
     }
+}
+
+/// Scheme for a captured request, including absolute-form request targets.
+fn request_scheme(request: &RequestInfo) -> &str {
+    if !request.scheme.is_empty() {
+        &request.scheme
+    } else if request.uri.starts_with("https://") {
+        "https"
+    } else {
+        "http"
+    }
+}
+
+/// Burp's Host column: the scheme and authority without the path.
+pub(super) fn request_host_label(item: &HistoryItem) -> String {
+    if item.is_tunnel() {
+        return format!("https://{}", item.request.host);
+    }
+    format!("{}://{}", request_scheme(&item.request), item.request.host)
+}
+
+/// Burp's URL column: the request path rather than the full absolute URL.
+pub(super) fn request_path_label(item: &HistoryItem) -> String {
+    if item.is_tunnel() {
+        return String::new();
+    }
+    if item.request.path.is_empty() {
+        "/".to_string()
+    } else {
+        item.request.path.clone()
+    }
+}
+
+/// Lower-case file extension for a URL path, without the leading dot.
+pub(super) fn path_extension(path: &str) -> String {
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return String::new();
+    };
+    if stem.is_empty() || extension.is_empty() {
+        String::new()
+    } else {
+        extension.to_ascii_lowercase()
+    }
+}
+
+pub(super) fn request_extension(item: &HistoryItem) -> String {
+    path_extension(&request_path_label(item))
+}
+
+/// Whether the exchange travelled over TLS. CONNECT tunnels are always TLS.
+pub(super) fn request_uses_tls(item: &HistoryItem) -> bool {
+    item.is_tunnel() || request_scheme(&item.request).eq_ignore_ascii_case("https")
 }
 
 pub(super) fn mime_type(item: &HistoryItem) -> String {
@@ -47,6 +103,53 @@ pub(super) fn mime_type(item: &HistoryItem) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+/// Cached HTML title for one response body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CachedTitle {
+    signature: (u16, u64, bool),
+    title: String,
+}
+
+pub(super) type TitleCache = RefCell<HashMap<u64, CachedTitle>>;
+
+/// HTML title for the history Title column.
+///
+/// The title is cached by response status, observed body length, and completion
+/// so scrolling a large history does not repeatedly decode the same body. A
+/// streaming response stays blank until the body is complete or truncated; the
+/// title is not a status indicator and should not flicker while bytes arrive.
+pub(super) fn history_title(cache: &TitleCache, item: &HistoryItem) -> String {
+    if item.is_tunnel() || site_map::mime_label(&mime_type(item)) != "HTML" {
+        return String::new();
+    }
+    let Some(head) = item.response.as_ref() else {
+        return String::new();
+    };
+    let Some(body) = item.response_body() else {
+        return String::new();
+    };
+    if !body.is_complete() && !body.is_truncated() {
+        return String::new();
+    }
+    let signature = (head.status, body.total_len(), body.is_complete());
+    if let Some(cached) = cache
+        .borrow()
+        .get(&item.id)
+        .filter(|cached| cached.signature == signature)
+    {
+        return cached.title.clone();
+    }
+    let title = site_map::html_title(&view::response_body_for_search(item)).unwrap_or_default();
+    cache.borrow_mut().insert(
+        item.id,
+        CachedTitle {
+            signature,
+            title: title.clone(),
+        },
+    );
+    title
+}
+
 pub(super) fn captured_hosts(history: &History) -> Vec<(String, usize)> {
     let mut hosts: BTreeMap<String, usize> = BTreeMap::new();
     for item in history.iter() {
@@ -63,8 +166,14 @@ pub(super) fn matches_filter(item: &HistoryItem, needle: &str) -> bool {
         .map(|status| status.to_string())
         .unwrap_or_default();
     let haystack = format!(
-        "{} {} {} {} {}",
-        item.request.method, item.request.host, item.request.path, item.request.uri, status
+        "{} {} {} {} {} {} {}",
+        item.request.method,
+        item.request.host,
+        item.request.path,
+        item.request.uri,
+        status,
+        mime_type(item),
+        request_extension(item)
     );
     haystack.to_lowercase().contains(needle)
 }
@@ -281,6 +390,96 @@ mod tests {
     fn matches_filter_is_case_insensitive() {
         let item = get("/x", "http", "Example.COM", "/x");
         assert!(matches_filter(&item, "example.com"));
+    }
+
+    #[test]
+    fn matches_filter_searches_mime_and_extension() {
+        let mut item = get("/assets/app.css", "https", "example.com", "/assets/app.css");
+        item.response = Some(response(
+            200,
+            vec![header("content-type", "text/css; charset=utf-8")],
+        ));
+        assert!(matches_filter(&item, "text/css"));
+        assert!(matches_filter(&item, "css"));
+    }
+
+    #[test]
+    fn host_and_path_labels_split_the_url_like_burp() {
+        let search = get(
+            "/search?q=one",
+            "https",
+            "example.com:8443",
+            "/search?q=one",
+        );
+        assert_eq!(request_host_label(&search), "https://example.com:8443");
+        assert_eq!(request_path_label(&search), "/search?q=one");
+        assert_eq!(request_extension(&search), "");
+
+        let schemeless = get("/", "", "example.com", "/");
+        assert_eq!(request_host_label(&schemeless), "http://example.com");
+        assert_eq!(request_path_label(&schemeless), "/");
+
+        let absolute = get("https://example.com/", "", "example.com", "/");
+        assert_eq!(request_host_label(&absolute), "https://example.com");
+        assert!(request_uses_tls(&absolute));
+
+        let tunnel = item(request(
+            "CONNECT",
+            "example.com:443",
+            "https",
+            "example.com:443",
+            "",
+        ));
+        assert_eq!(request_host_label(&tunnel), "https://example.com:443");
+        assert_eq!(request_path_label(&tunnel), "");
+        assert!(request_uses_tls(&tunnel));
+    }
+
+    #[test]
+    fn path_extension_uses_the_last_segment_without_the_query() {
+        assert_eq!(path_extension("/app.js?v=2"), "js");
+        assert_eq!(path_extension("/assets/logo.PNG#frag"), "png");
+        assert_eq!(path_extension("/archive.tar.gz"), "gz");
+        assert_eq!(path_extension("/.well-known/security.txt"), "txt");
+        assert_eq!(path_extension("/.hidden"), "");
+        assert_eq!(path_extension("/folder.d/file"), "");
+        assert_eq!(path_extension("/"), "");
+    }
+
+    #[test]
+    fn request_uses_tls_for_https_requests_and_tunnels() {
+        assert!(request_uses_tls(&get("/", "https", "example.com", "/")));
+        assert!(request_uses_tls(&get(
+            "https://example.com/",
+            "",
+            "example.com",
+            "/"
+        )));
+        assert!(!request_uses_tls(&get("/", "http", "example.com", "/")));
+    }
+
+    #[test]
+    fn history_title_caches_and_ignores_non_html_responses() {
+        let cache = TitleCache::default();
+        let mut html = get("/", "https", "example.com", "/");
+        html.response = Some(response(
+            200,
+            vec![header("content-type", "text/html; charset=utf-8")],
+        ));
+        html.phase = Phase::Finished {
+            duration: Duration::from_millis(1),
+            result: ExchangeResult::Response {
+                body: CapturedBody::from_bytes(
+                    b"<html><head><title>Example Domain</title></head></html>".to_vec(),
+                ),
+            },
+        };
+        assert_eq!(history_title(&cache, &html), "Example Domain");
+        assert_eq!(history_title(&cache, &html), "Example Domain");
+        assert!(cache.borrow().contains_key(&html.id));
+
+        let plain = get("/", "https", "example.com", "/");
+        assert_eq!(history_title(&cache, &plain), "");
     }
 
     fn websocket_item() -> WebSocketMessageItem {
