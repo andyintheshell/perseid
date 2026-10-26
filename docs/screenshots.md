@@ -25,6 +25,8 @@ on the right and per-exchange Notes behind its rail tab. The detail split
 defaults to roughly half of the workspace. The filter bar above the table opens
 Burp-style display filters for scope, MIME and status classes, search terms, and
 file extensions; the search field beside it narrows the visible rows directly.
+As in Burp, CSS and image responses plus common static extensions are hidden by
+default.
 
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
 

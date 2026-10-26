@@ -442,6 +442,9 @@ pub enum SideTabRecord {
     Notes,
 }
 
+/// Burp hides these static asset extensions by default.
+const BURP_HIDDEN_EXTENSIONS: &str = "js,gif,jpg,png,ico,css,woff,woff2";
+
 /// Burp-style HTTP history display filter, persisted with the project.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistoryFilterWorkspace {
@@ -459,11 +462,11 @@ pub struct HistoryFilterWorkspace {
     pub show_script: bool,
     #[serde(default = "default_true")]
     pub show_xml: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub show_css: bool,
     #[serde(default = "default_true")]
     pub show_other_text: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub show_images: bool,
     #[serde(default = "default_true")]
     pub show_flash: bool,
@@ -489,10 +492,14 @@ pub struct HistoryFilterWorkspace {
     pub extension_show_only_enabled: bool,
     #[serde(default)]
     pub extension_show_only: String,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub extension_hide_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_hidden_extensions")]
     pub extension_hide: String,
+}
+
+fn default_hidden_extensions() -> String {
+    BURP_HIDDEN_EXTENSIONS.to_string()
 }
 
 impl Default for HistoryFilterWorkspace {
@@ -505,9 +512,9 @@ impl Default for HistoryFilterWorkspace {
             show_html: true,
             show_script: true,
             show_xml: true,
-            show_css: true,
+            show_css: false,
             show_other_text: true,
-            show_images: true,
+            show_images: false,
             show_flash: true,
             show_other_binary: true,
             show_2xx: true,
@@ -520,8 +527,8 @@ impl Default for HistoryFilterWorkspace {
             search_negative: false,
             extension_show_only_enabled: false,
             extension_show_only: String::new(),
-            extension_hide_enabled: false,
-            extension_hide: String::new(),
+            extension_hide_enabled: true,
+            extension_hide: default_hidden_extensions(),
         }
     }
 }
@@ -1290,6 +1297,13 @@ mod tests {
         assert_eq!(decoded.intruder.concurrency, 4);
         assert_eq!(decoded.comparer, [vec![1, 2, 3]]);
         assert_eq!(decoded.ui, UiWorkspace::default());
+        assert!(!decoded.ui.history_filter.show_css);
+        assert!(!decoded.ui.history_filter.show_images);
+        assert!(decoded.ui.history_filter.extension_hide_enabled);
+        assert_eq!(
+            decoded.ui.history_filter.extension_hide,
+            "js,gif,jpg,png,ico,css,woff,woff2"
+        );
         assert_eq!(decoded.inspector, InspectorWorkspace::default());
         assert_eq!(decoded.comparer_ui, ComparerWorkspace::default());
         assert_eq!(decoded.search, SearchWorkspace::default());

@@ -56,7 +56,9 @@ pub(super) struct HistoryFilter {
 
 impl Default for HistoryFilter {
     fn default() -> Self {
-        Self::SHOW_ALL
+        // Keep the initial history view aligned with Burp's default display
+        // filter instead of showing every static asset.
+        Self::from_workspace(&HistoryFilterWorkspace::default())
     }
 }
 
@@ -555,35 +557,11 @@ fn truncate_summary(text: &str) -> String {
 impl PerseidApp {
     /// Toolbar above the HTTP history table.
     pub(super) fn history_toolbar(&mut self, ui: &mut egui::Ui) {
-        let mut clear = false;
         let mut open_filter = false;
         ui.horizontal(|ui| {
-            let available = ui.available_width();
-            let summary_width = (available - 620.0).clamp(200.0, 900.0);
-            let summary = self.history_filter_summary();
-            if history_filter_bar(ui, summary_width, &summary).clicked() {
-                open_filter = true;
-            }
-            ui.add_space(4.0);
-
-            if history_search_field(ui, &mut self.filter, egui::Id::unique(FILTER_ID)) {
-                self.visible_key = None;
-            }
-
-            let switch = filter_switch(ui, &mut self.history_filter.enabled);
-            if switch.changed() {
-                self.visible_key = None;
-            }
-            filter_help_badge(ui);
-
+            // Lay the row out from the right so the width-hungry summary bar
+            // can shrink without colliding with the search field or switch.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button("Clear history")
-                    .on_hover_text("Discard all captured exchanges")
-                    .clicked()
-                {
-                    clear = true;
-                }
                 ui.label(
                     RichText::new(format!(
                         "{} shown / {} captured",
@@ -593,14 +571,28 @@ impl PerseidApp {
                     .small()
                     .color(theme::TEXT_MUTED),
                 );
+                ui.add_space(4.0);
+                filter_help_badge(ui);
+
+                let switch = filter_switch(ui, &mut self.history_filter.enabled);
+                if switch.changed() {
+                    self.visible_key = None;
+                }
+
+                if history_search_field(ui, &mut self.filter, egui::Id::unique(FILTER_ID)) {
+                    self.visible_key = None;
+                }
+                ui.add_space(4.0);
+
+                let summary = self.history_filter_summary();
+                if history_filter_bar(ui, ui.available_width(), &summary).clicked() {
+                    open_filter = true;
+                }
             });
         });
 
         if open_filter {
             self.history_filter_draft = Some(self.history_filter.clone());
-        }
-        if clear {
-            self.clear_history();
         }
     }
 
@@ -941,7 +933,10 @@ fn history_search_field(ui: &mut egui::Ui, text: &mut String, id: egui::Id) -> b
         egui::pos2(rect.left() + 8.0, rect.top() + 3.0),
         egui::pos2(rect.right() - 27.0, rect.bottom() - 3.0),
     );
-    let response = ui.put(
+    // Place the editor without advancing the manual layout cursor. `put`
+    // would move the cursor to the editor's right edge and make the next
+    // toolbar item overlap the search field.
+    let response = ui.place(
         edit_rect,
         egui::TextEdit::singleline(text)
             .id(id)
@@ -1148,8 +1143,52 @@ mod tests {
     }
 
     #[test]
-    fn show_all_matches_everything_by_default() {
+    fn default_filter_matches_burp_and_hides_static_assets() {
         let filter = HistoryFilter::default();
+        assert!(filter.enabled);
+        assert!(!filter.is_show_all());
+        assert!(!filter.show_css);
+        assert!(!filter.show_images);
+        assert!(filter.extension_hide_enabled);
+        assert_eq!(filter.extension_hide, "js,gif,jpg,png,ico,css,woff,woff2");
+
+        let html = with_response(item("GET", "example.com", "/"), 200, "text/html", b"");
+        let css = with_response(
+            item("GET", "example.com", "/site.css"),
+            200,
+            "text/css",
+            b"",
+        );
+        let image = with_response(
+            item("GET", "example.com", "/logo.png"),
+            200,
+            "image/png",
+            b"",
+        );
+        let script = with_response(
+            item("GET", "example.com", "/assets/app.js"),
+            200,
+            "application/javascript",
+            b"",
+        );
+        let json = with_response(
+            item("GET", "example.com", "/api.json"),
+            200,
+            "application/json",
+            b"",
+        );
+        assert!(matches(&filter, &html));
+        assert!(!matches(&filter, &css));
+        assert!(!matches(&filter, &image));
+        assert!(!matches(&filter, &script));
+        assert!(matches(&filter, &json));
+        assert!(filter.summary().contains("Hiding CSS and image content"));
+        assert!(filter.summary().contains("hiding .js"));
+    }
+
+    #[test]
+    fn show_all_matches_everything() {
+        let filter = HistoryFilter::SHOW_ALL;
         assert!(filter.is_show_all());
         assert_eq!(filter.summary(), "Showing all items");
         assert!(matches(&filter, &item("GET", "example.com", "/")));
@@ -1504,10 +1543,12 @@ mod tests {
         assert_eq!(HistoryFilter::from_workspace(&workspace), filter);
 
         let default = HistoryFilterWorkspace::default();
-        assert_eq!(
-            HistoryFilter::from_workspace(&default),
-            HistoryFilter::SHOW_ALL
-        );
+        let restored = HistoryFilter::from_workspace(&default);
+        assert_eq!(restored, HistoryFilter::default());
+        assert!(!restored.is_show_all());
+        assert!(!restored.show_css);
+        assert!(!restored.show_images);
+        assert!(restored.extension_hide_enabled);
     }
 
     #[test]

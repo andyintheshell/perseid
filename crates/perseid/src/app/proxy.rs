@@ -24,6 +24,7 @@ enum HistoryRowAction {
     Sequencer,
     ComparerRequest,
     ComparerResponse,
+    ClearHistory,
 }
 
 impl PerseidApp {
@@ -822,6 +823,15 @@ impl PerseidApp {
                                 ui.close();
                             }
                             super::curl::context_menu(ui, item);
+                            ui.separator();
+                            if ui
+                                .button("Clear history")
+                                .on_hover_text("Discard all captured exchanges")
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::ClearHistory);
+                                ui.close();
+                            }
                         });
                     });
                 });
@@ -840,6 +850,7 @@ impl PerseidApp {
             Some(HistoryRowAction::ComparerResponse) => {
                 self.send_selected_to_comparer(MessagePane::Response);
             }
+            Some(HistoryRowAction::ClearHistory) => self.clear_history(),
             None => {}
         }
     }

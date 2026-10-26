@@ -295,7 +295,7 @@ impl PerseidApp {
         self.inspector.reset();
         self.filter.clear();
         self.visible_key = None;
-        self.history_filter = HistoryFilter::SHOW_ALL;
+        self.history_filter = HistoryFilter::default();
         self.history_filter_draft = None;
         self.title_cache.borrow_mut().clear();
         self.selected = Some(2);
