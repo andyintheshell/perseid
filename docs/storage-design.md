@@ -1,7 +1,7 @@
 # Perseid storage and project persistence design
 
-**Status:** Original design proposal; the first persistence implementation is
-in `main` (`0.2.0` in development). See §0 for current status and deviations.<br>
+**Status:** Original design proposal; the first persistence implementation
+shipped in `0.2.0`. See §0 for implementation status and deviations.<br>
 **Design baseline:** Perseid `v0.1.0` (release commit `b8e51e9`, 2026-10-23)<br>
 **Initial storage engine:** `redb` 4.4.x, version pinned through `Cargo.lock`  
 **User-visible extension:** `.perseid`  
@@ -11,9 +11,9 @@ in `main` (`0.2.0` in development). See §0 for current status and deviations.<b
 
 ## 0. Review and implementation status
 
-**Reviewed:** 2026-10-23, against the `0.2.0` workspace implementation.
+**Reviewed:** 2026-10-23, against the `0.2.0` implementation.
 
-**Verdict:** the design was adopted in part, with the deviations and unfinished requirements listed below. In particular, temporary-project aggregate retention is implemented, while persistent-disk retention caps are not. The document was written against the `v0.1.0` release tag, while the implementing checkout is `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
+**Verdict:** the design was adopted in part, with the deviations and unfinished requirements listed below. In particular, temporary-project aggregate retention is implemented, while persistent-disk retention caps are not. The document was written against the `v0.1.0` release tag, while the implementation shipped in `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
 
 ### 0.1 Implementation status
 
@@ -714,7 +714,7 @@ Capture write throughput, p50/p95/p99 transaction/commit time, UI frame-time whi
 - [WebSocket history](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/websocket_history.rs).
 - [Workbench app](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/app.rs) — current state ownership and capture drain.
 
-The links above point to current `main` (workspace `0.2.0`) for readable source paths. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for what has since shipped and verify paths against current source before implementing follow-up work.
+The links above point to current `main` (workspace `0.3.0-dev`) for readable source paths. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for what has since shipped and verify paths against current source before implementing follow-up work.
 
 ### redb
 
