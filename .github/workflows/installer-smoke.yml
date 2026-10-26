@@ -1,0 +1,114 @@
+name: Installed release smoke test
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: windows-x64-msi, artifact: windows-x64, runner: windows-2025, format: msi }
+          - { id: windows-arm64-msi, artifact: windows-arm64, runner: windows-11-arm, format: msi }
+          - { id: windows-x64-portable, artifact: windows-x64, runner: windows-2025, format: portable }
+          - { id: windows-arm64-portable, artifact: windows-arm64, runner: windows-11-arm, format: portable }
+          - { id: linux-x64-deb, artifact: linux-x64, runner: ubuntu-22.04, format: deb }
+          - { id: linux-arm64-deb, artifact: linux-arm64, runner: ubuntu-22.04-arm, format: deb }
+          - { id: linux-x64-appimage, artifact: linux-x64, runner: ubuntu-22.04, format: appimage }
+          - { id: linux-arm64-appimage, artifact: linux-arm64, runner: ubuntu-22.04-arm, format: appimage }
+          - { id: macos-arm64-dmg, artifact: macos-universal, runner: macos-15, format: dmg }
+          - { id: macos-x64-dmg, artifact: macos-universal, runner: macos-15-intel, format: dmg }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ matrix.artifact }}
+          path: packages
+
+      - name: Test smoke-test failure handling
+        run: python -m unittest discover -s scripts -p test_installer_smoke.py
+
+      - name: Install capture dependencies
+        run: python -m pip install Pillow==11.3.0
+
+      - name: Install and launch Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          FORMAT: ${{ matrix.format }}
+          SMOKE_ID: ${{ matrix.id }}
+        run: |
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          if ($env:FORMAT -eq 'msi') {
+            $msi = (Get-ChildItem packages/*.msi).FullName
+            $log = Join-Path $PWD 'smoke/installer.log'
+            $install = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
+            if ($install.ExitCode -notin @(0, 3010)) { throw "MSI failed: $($install.ExitCode)" }
+            $exe = Join-Path $env:ProgramFiles 'Perseid/perseid.exe'
+          } else {
+            Expand-Archive -Path (Get-ChildItem packages/*.zip).FullName -DestinationPath portable
+            $exe = Join-Path $PWD 'portable/perseid.exe'
+          }
+          python scripts/installer-smoke.py "$exe" "smoke/$env:SMOKE_ID.png"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed app smoke test failed' }
+
+      - name: Install and launch Linux package
+        if: runner.os == 'Linux'
+        env:
+          FORMAT: ${{ matrix.format }}
+          SMOKE_ID: ${{ matrix.id }}
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth xdotool openbox libfuse2 libegl1 libgl1-mesa-dri libglx-mesa0 libxkbcommon-x11-0 libxcb-shape0 libxcb-xfixes0 libxcursor1 libxrandr2 libxi6
+          if [[ "$FORMAT" == deb ]]; then
+            sudo apt-get install -y "$PWD"/packages/*.deb 2>&1 | tee smoke/installer.log
+            exe=$(command -v perseid)
+          else
+            exe=$(realpath packages/*.AppImage)
+            chmod +x "$exe"
+          fi
+          export EXE="$exe"
+          # Variables are intentionally expanded by the child shell.
+          # shellcheck disable=SC2016
+          xvfb-run -a -s '-screen 0 1440x1000x24' bash -euc '
+            openbox > smoke/window-manager.log 2>&1 &
+            python scripts/installer-smoke.py "$EXE" "smoke/$SMOKE_ID.png"
+          '
+
+      - name: Install and launch macOS disk image
+        if: runner.os == 'macOS'
+        env:
+          SMOKE_ID: ${{ matrix.id }}
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          python -m pip install pyobjc-framework-Quartz==11.1
+          mount="$RUNNER_TEMP/perseid-dmg"
+          hdiutil attach packages/*.dmg -nobrowse -mountpoint "$mount" | tee smoke/installer.log
+          trap 'hdiutil detach "$mount"' EXIT
+          ditto "$mount/Perseid.app" /Applications/Perseid.app
+          python scripts/installer-smoke.py /Applications/Perseid.app/Contents/MacOS/perseid "smoke/$SMOKE_ID.png"
+
+      - name: Upload screenshot and diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-${{ matrix.id }}
+          path: smoke/
+          if-no-files-found: warn
+          retention-days: 14
