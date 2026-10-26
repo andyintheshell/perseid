@@ -36,7 +36,7 @@ const PROJECT_EXTENSION: &str = "perseid";
 const TEMPORARY_LABEL: &str = "Untitled (temporary)";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectDialogKind {
+pub(super) enum ProjectDialogKind {
     Open,
     SaveAs,
     SaveCopy,
@@ -70,7 +70,7 @@ impl ProjectDialogKind {
 /// A project switch that may need to be postponed until the current temporary
 /// project is saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ProjectSwitch {
+pub(super) enum ProjectSwitch {
     New,
     Open(PathBuf),
 }
@@ -264,7 +264,7 @@ impl ProjectUi {
         Some((&notice.text, notice.error))
     }
 
-    fn open_dialog(&mut self, kind: ProjectDialogKind, current: Option<&Path>) {
+    pub(super) fn open_dialog(&mut self, kind: ProjectDialogKind, current: Option<&Path>) {
         let (directory, file_name) = default_project_location(kind, current);
         let mut dialog = ProjectDialog {
             kind,
@@ -861,6 +861,7 @@ fn target_section_from_record(section: TargetSectionRecord) -> TargetSection {
 
 impl PerseidApp {
     /// The File menu: project lifecycle commands live above Quit.
+    #[cfg(any(not(target_os = "macos"), test))]
     pub(super) fn project_menu(&mut self, ui: &mut egui::Ui) {
         let response = ui.menu_button("File", |ui| {
             if ui.button("New Project").clicked() {
@@ -901,7 +902,7 @@ impl PerseidApp {
         let _ = response;
     }
 
-    fn current_project_path(&self) -> Option<PathBuf> {
+    pub(super) fn current_project_path(&self) -> Option<PathBuf> {
         self.project
             .status()
             .and_then(|status| status.mode.path().map(Path::to_path_buf))
@@ -928,7 +929,7 @@ impl PerseidApp {
             || self.workspace_snapshot() != self.project_baseline_workspace
     }
 
-    fn request_project_switch(&mut self, request: ProjectSwitch) {
+    pub(super) fn request_project_switch(&mut self, request: ProjectSwitch) {
         if self.project.is_busy() {
             self.notify_project_busy();
             return;
@@ -1951,6 +1952,27 @@ mod tests {
             app.project.pending.as_slice(),
             [PendingProject::New { .. }]
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_file_menu_opens_each_project_dialog_and_respects_unsaved_work() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        for (action, expected) in [
+            ("open", ProjectDialogKind::Open),
+            ("save_as", ProjectDialogKind::SaveAs),
+            ("save_copy", ProjectDialogKind::SaveCopy),
+        ] {
+            app.handle_native_menu_action(&ctx, action);
+            assert_eq!(app.project.dialog.as_ref().unwrap().kind, expected);
+        }
+        app.project.dialog = None;
+        app.scope_enabled = true;
+        app.handle_native_menu_action(&ctx, "new");
+        assert!(app.project.switch_prompt.is_some());
+        assert!(app.project.pending.is_empty());
+        app.shutdown_project();
     }
 
     #[test]
