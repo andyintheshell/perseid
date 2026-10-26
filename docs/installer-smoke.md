@@ -18,6 +18,21 @@ captures fail. Screenshots and logs are uploaded as workflow artifacts even
 on failure; successful screenshots are also attached to the draft GitHub
 Release as `installer-*.png`. Linux uses Xvfb and a window manager.
 
+Windows hosted runners lack suitable hardware OpenGL. After installing/extracting
+the package, CI downloads Mesa llvmpipe 26.2.5 from
+[`mmozeiko/build-mesa`](https://github.com/mmozeiko/build-mesa/releases/tag/26.2.5),
+verifies its pinned SHA256 and DLL architecture, and places `opengl32.dll` beside
+the installed executable. The executable's PE header selects x64 or ARM64;
+neither case uses an emulated x64 app to stand in for ARM64. The driver is
+statically linked and software rendering is explicitly selected. Provisioning
+fails rather than overwriting an existing packaged OpenGL DLL.
+
+This is a CI environment dependency only: the original release packages and
+checksums are unchanged, and no Mesa DLL is published in release assets. It
+does not solve OpenGL availability for end users or test their GPU drivers.
+When updating Mesa, update both architecture-specific digests in
+`scripts/windows_smoke_opengl.py` and validate both Windows architectures.
+
 This is a packaging/startup smoke test, not a functional or visual regression
 test. Inspect the screenshots when reviewing a release. It does not exercise
 installer wizard interactions, shortcuts, upgrades, uninstall, all supported OS
