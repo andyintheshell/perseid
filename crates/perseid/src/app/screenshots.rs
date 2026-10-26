@@ -277,6 +277,10 @@ impl PerseidApp {
             self.tls_ca = Some(Arc::new(ca));
         }
         self.tls_ca_error = None;
+        // Warmup resized the window after egui had already stored a detail
+        // panel height for the smaller native-scale frame. Reset it once so
+        // the first captured HTTP history frame uses the settled window size.
+        self.reset_http_detail_size = true;
         Ok(())
     }
 
@@ -291,6 +295,9 @@ impl PerseidApp {
         self.inspector.reset();
         self.filter.clear();
         self.visible_key = None;
+        self.history_filter = HistoryFilter::default();
+        self.history_filter_draft = None;
+        self.title_cache.borrow_mut().clear();
         self.selected = Some(2);
         self.scroll_to_selected = false;
         self.detail = None;
