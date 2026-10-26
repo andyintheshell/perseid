@@ -8,6 +8,7 @@ The workflow is deliberately separate from the normal `main`/pull-request CI.
 **Current version status:** `v0.2.0` is the latest published crate and GitHub
 release, including the first project-persistence implementation. The workspace
 on `main` is `0.3.0-dev` for ongoing development.
+The release branch is preparing `0.2.1` from the current `main` snapshot.
 
 ## Current release formats
 
@@ -26,12 +27,13 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
 
-1. Set `[workspace.package] version` in the root `Cargo.toml` on `main` to the
-   version being prepared. Run `cargo check --workspace` to update `Cargo.lock`;
-   review and commit both files through the normal pull-request flow. The version
+1. Create a release-preparation branch from the reviewed `main` snapshot, and
+   incorporate the protected `release` branch's history. Set
+   `[workspace.package] version` in the root `Cargo.toml` to the version being
+   prepared. Run `cargo check --workspace` to update `Cargo.lock`. The version
    produces tag `v<version>` and determines all asset names.
-2. Merge the reviewed `main` branch into the protected `release` branch and push
-   it. Manual dispatch can preflight the builders on another branch without
+2. Review and merge the preparation branch into the protected `release` branch.
+   Manual dispatch can preflight the builders on another branch without
    publishing; dispatching on `release` will create or update the draft as usual.
 3. Wait for all five native build jobs and the draft job to finish. The draft is
    not public until someone publishes it. On a failed build, fix the issue on
