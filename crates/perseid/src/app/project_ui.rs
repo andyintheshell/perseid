@@ -1635,10 +1635,16 @@ mod tests {
 
     #[test]
     fn copy_default_uses_the_source_name() {
-        let source = Path::new("/tmp/session.perseid");
-        let (directory, name) = default_project_location(ProjectDialogKind::SaveCopy, Some(source));
-        assert_eq!(directory, Path::new("/tmp"));
+        let directory =
+            std::env::temp_dir().join(format!("perseid-copy-default-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("create temporary directory");
+        let source = directory.join("session.perseid");
+
+        let (parent, name) = default_project_location(ProjectDialogKind::SaveCopy, Some(&source));
+
+        assert_eq!(parent, directory);
         assert_eq!(name, "session-copy.perseid");
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     use crate::history::{HistoryItem, Phase};
