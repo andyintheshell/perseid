@@ -10,12 +10,12 @@
 //!
 //! This module holds the application state and the eframe shell. The tabs,
 //! shared top-level panels, and supporting pieces are split by area:
-//! [`chrome`], [`comparer`], [`curl`], [`decoder`], [`events`], [`input`],
-//! [`inspector`], [`intercept`], [`intruder`], [`listing`], [`project_ui`], [`proxy`],
-//! [`proxy_control`], [`repeater`], [`rules`], [`search`], [`selection`],
-//! [`sequencer`], [`target`], [`tls`], [`windows`], [`widgets`],
-//! [`message_view`], [`util`], [`scale`], and the feature-gated
-//! [`screenshots`] driver.
+//! [`chrome`], [`comparer`], [`curl`], [`decoder`], [`events`],
+//! [`history_filter`], [`input`], [`inspector`], [`intercept`], [`intruder`],
+//! [`listing`], [`project_ui`], [`proxy`], [`proxy_control`], [`repeater`],
+//! [`rules`], [`search`], [`selection`], [`sequencer`], [`target`], [`tls`],
+//! [`windows`], [`widgets`], [`message_view`], [`util`], [`scale`], and the
+//! feature-gated [`screenshots`] driver.
 
 mod chrome;
 mod comparer;
@@ -23,6 +23,7 @@ mod curl;
 mod decoder;
 mod events;
 mod file_dialog;
+mod history_filter;
 mod input;
 mod inspector;
 mod intercept;
@@ -63,8 +64,6 @@ mod macos_menu;
 #[cfg(all(target_os = "macos", feature = "native-menu-test"))]
 pub(crate) use macos_menu::test_native_macos_menu;
 
-use self::intercept::InterceptEntry;
-
 use crate::Args;
 use crate::branding;
 use crate::ca_store;
@@ -78,6 +77,8 @@ use crate::theme;
 use crate::view::{self, MessageViews};
 use crate::websocket_history::WebSocketHistory;
 
+use self::history_filter::HistoryFilter;
+use self::intercept::InterceptEntry;
 use self::scale::{desktop_scale_override, resize_initial_window, resolve_ui_scale, stepped_scale};
 use self::widgets::{main_tab_button, search_button};
 
@@ -262,6 +263,17 @@ impl From<&MessageViewsWorkspace> for MessageViews {
     }
 }
 
+/// Cache key for the HTTP history rows after search, display filters, and the
+/// global scope have been applied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HttpVisibleKey {
+    quick_search: String,
+    filter: HistoryFilter,
+    scope_enabled: bool,
+    scope: BTreeSet<String>,
+    revision: u64,
+}
+
 pub struct PerseidApp {
     proxy: Option<Proxy>,
     proxy_error: Option<String>,
@@ -286,7 +298,11 @@ pub struct PerseidApp {
     rules_error: Option<String>,
     filter: String,
     visible: Vec<u64>,
-    visible_key: Option<(String, u64)>,
+    visible_key: Option<HttpVisibleKey>,
+    history_filter: HistoryFilter,
+    /// Staged edits for the HTTP history filter modal.
+    history_filter_draft: Option<HistoryFilter>,
+    title_cache: util::TitleCache,
     selected: Option<u64>,
     scroll_to_selected: bool,
     detail: Option<DetailCache>,
@@ -351,6 +367,12 @@ pub struct PerseidApp {
     about_open: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<macos_menu::NativeMenu>,
+    /// Forget the stored detail-panel height on the next HTTP history frame.
+    /// The screenshot runner resizes the window during warmup, which stores a
+    /// panel height from the smaller intermediate window before the scene is
+    /// prepared.
+    #[cfg(feature = "screenshots")]
+    reset_http_detail_size: bool,
     #[cfg(feature = "screenshots")]
     screenshots: Option<screenshots::ScreenshotDriver>,
 }
@@ -468,6 +490,9 @@ impl PerseidApp {
             filter: String::new(),
             visible: Vec::new(),
             visible_key: None,
+            history_filter: HistoryFilter::default(),
+            history_filter_draft: None,
+            title_cache: util::TitleCache::default(),
             selected: None,
             scroll_to_selected: false,
             detail: None,
@@ -523,6 +548,8 @@ impl PerseidApp {
             about_open: false,
             #[cfg(target_os = "macos")]
             native_menu: None,
+            #[cfg(feature = "screenshots")]
+            reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
@@ -594,6 +621,9 @@ impl PerseidApp {
             filter: String::new(),
             visible: Vec::new(),
             visible_key: None,
+            history_filter: HistoryFilter::default(),
+            history_filter_draft: None,
+            title_cache: util::TitleCache::default(),
             selected: None,
             scroll_to_selected: false,
             detail: None,
@@ -649,6 +679,8 @@ impl PerseidApp {
             about_open: false,
             #[cfg(target_os = "macos")]
             native_menu: None,
+            #[cfg(feature = "screenshots")]
+            reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
@@ -709,6 +741,7 @@ impl eframe::App for PerseidApp {
         self.about_window(&ctx);
         self.tls_setup_window(&ctx);
         self.project_windows(&ctx);
+        self.history_filter_window(&ctx);
         self.comparer_windows(&ctx);
         self.sequencer_windows(&ctx);
         self.search_window(&ctx);

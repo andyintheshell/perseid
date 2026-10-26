@@ -891,12 +891,16 @@ impl PerseidApp {
         #[cfg(feature = "screenshots")]
         {
             // Keep the menu open only for its own scene. Popup state would
-            // otherwise leak into every later screenshot.
-            let popup_id = response.response.id.with("popup");
-            if self.project.file_menu_forced_open {
-                egui::Popup::open_id(ui.ctx(), popup_id);
-            } else {
-                egui::Popup::close_id(ui.ctx(), popup_id);
+            // otherwise leak into every later screenshot. The forced state is
+            // only for the screenshot runner; normal builds of the feature
+            // still need the menu to open and close through user input.
+            if self.screenshots.is_some() {
+                let popup_id = response.response.id.with("popup");
+                if self.project.file_menu_forced_open {
+                    egui::Popup::open_id(ui.ctx(), popup_id);
+                } else {
+                    egui::Popup::close_id(ui.ctx(), popup_id);
+                }
             }
         }
         let _ = response;
@@ -1157,6 +1161,7 @@ impl PerseidApp {
             response_view: self.response_view.into(),
             websocket_view: self.websocket_view.into(),
             http_filter: self.filter.clone(),
+            history_filter: self.history_filter.to_workspace(),
             websocket_filter: self.websocket_filter.clone(),
             selected_http_id: self.selected,
             selected_websocket_id: self.websocket_selected,
@@ -1172,6 +1177,9 @@ impl PerseidApp {
         self.response_view = workspace.response_view.into();
         self.websocket_view = workspace.websocket_view.into();
         self.filter = workspace.http_filter.clone();
+        self.history_filter = HistoryFilter::from_workspace(&workspace.history_filter);
+        self.history_filter_draft = None;
+        self.title_cache.borrow_mut().clear();
         self.websocket_filter = workspace.websocket_filter.clone();
         self.selected = workspace
             .selected_http_id
@@ -1395,12 +1403,13 @@ mod tests {
     use crate::project::{
         BodyWorkspace, CapturePartRecord, CompareModeRecord, ComparerWorkspace, DecoderCodecRecord,
         DecoderColorTagRecord, DecoderOperationRecord, DecoderPanelWorkspace, DecoderSpanWorkspace,
-        DecoderViewRecord, InspectorNoteWorkspace, InspectorWorkspace, IntruderAttackRecord,
-        IntruderPlanWorkspace, IntruderResultOutcomeWorkspace, IntruderResultWorkspace,
-        IntruderWorkspace, MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace,
-        RepeaterResponseWorkspace, RepeaterWorkspace, ResultViewRecord, SearchWorkspace,
-        SequencerResultTabRecord, SequencerSectionRecord, SequencerSettingsWorkspace,
-        SideTabRecord, TextSelectionWorkspace, TlsWorkspace, UiWorkspace,
+        DecoderViewRecord, HistoryFilterWorkspace, InspectorNoteWorkspace, InspectorWorkspace,
+        IntruderAttackRecord, IntruderPlanWorkspace, IntruderResultOutcomeWorkspace,
+        IntruderResultWorkspace, IntruderWorkspace, MessagePaneRecord, MessageViewRecord,
+        MessageViewsWorkspace, RepeaterResponseWorkspace, RepeaterWorkspace, ResultViewRecord,
+        SearchWorkspace, SequencerResultTabRecord, SequencerSectionRecord,
+        SequencerSettingsWorkspace, SideTabRecord, TextSelectionWorkspace, TlsWorkspace,
+        UiWorkspace,
     };
 
     fn sample_workspace() -> WorkspaceState {
@@ -1431,6 +1440,13 @@ mod tests {
                 response_view: MessageViewRecord::Raw,
                 websocket_view: MessageViewRecord::Hex,
                 http_filter: "status:200".to_string(),
+                history_filter: HistoryFilterWorkspace {
+                    show_css: false,
+                    show_images: false,
+                    search: "login".to_string(),
+                    search_regex: true,
+                    ..HistoryFilterWorkspace::default()
+                },
                 websocket_filter: "chat".to_string(),
                 selected_http_id: None,
                 selected_websocket_id: None,
@@ -1590,6 +1606,10 @@ mod tests {
         assert_eq!(app.target_section, TargetSection::Scope);
         assert_eq!(app.request_view, MessageView::Hex);
         assert_eq!(app.filter, "status:200");
+        assert_eq!(
+            app.history_filter.to_workspace(),
+            workspace.ui.history_filter
+        );
         assert!(app.scope_enabled);
         assert!(app.scope_enforce);
         assert!(app.tls_intercept);
