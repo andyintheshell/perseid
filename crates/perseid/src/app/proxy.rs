@@ -7,9 +7,15 @@ use egui_extras::{Column, TableBuilder};
 use super::message_view::{
     message_tabs, message_text, message_text_labeled, message_toolbar, message_view_text,
 };
-use super::util::{mime_type, request_url};
-use super::widgets::{empty_state, section_bar, section_tab, section_tab_gear, table_frame};
+use super::util::{
+    history_title, mime_type, request_extension, request_host_label, request_path_label,
+    request_url, request_uses_tls,
+};
+use super::widgets::{
+    check_mark, empty_state, section_bar, section_tab, section_tab_gear, table_frame,
+};
 use super::*;
+use crate::site_map;
 
 #[derive(Clone, Copy)]
 enum HistoryRowAction {
@@ -100,11 +106,11 @@ impl PerseidApp {
     }
 
     fn http_history_view(&mut self, ui: &mut egui::Ui) {
+        self.rebuild_visible();
         egui::Frame::NONE
             .fill(theme::SURFACE)
             .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| self.history_toolbar(ui));
-        self.rebuild_visible();
         // The filter or scope can hide the selected exchange. Do not leave its
         // detail visible next to a table where the row no longer exists.
         if self.selected.is_some_and(|id| !self.visible.contains(&id)) {
@@ -113,12 +119,19 @@ impl PerseidApp {
             self.scroll_to_selected = false;
         }
 
+        #[cfg(feature = "screenshots")]
+        if std::mem::take(&mut self.reset_http_detail_size) {
+            let id = ui.scope_id().with(PROXY_DETAIL_ID);
+            ui.ctx()
+                .data_mut(|data| data.remove::<egui::PanelState>(id));
+        }
+
         egui::Panel::bottom(PROXY_DETAIL_ID)
             .resizable(true)
             // Burp's history detail takes close to half of the workspace.
             // Computing it from the available height keeps that proportion on
             // both compact and large windows.
-            .default_size((ui.available_height() * 0.45).max(240.0))
+            .default_size((ui.available_height() * 0.52).max(260.0))
             .min_size(220.0)
             .frame(
                 egui::Frame::NONE
@@ -516,84 +529,37 @@ impl PerseidApp {
         self.websocket_view = message_view;
     }
 
-    fn history_toolbar(&mut self, ui: &mut egui::Ui) {
-        let mut clear = false;
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Filter").color(theme::TEXT));
-            let filter_id = egui::Id::unique(FILTER_ID);
-            let response = ui.add(
-                TextEdit::singleline(&mut self.filter)
-                    .id(filter_id)
-                    .hint_text("method, host, path, status")
-                    .desired_width(240.0),
-            );
-            if response.changed() {
-                self.visible_key = None;
-            }
-            let clear_filter = ui
-                .add_enabled(!self.filter.is_empty(), egui::Button::new("x"))
-                .on_hover_text("Clear the filter (Ctrl+F to focus)")
-                .on_disabled_hover_text("No filter is active");
-            if clear_filter.clicked() {
-                self.filter.clear();
-                self.visible_key = None;
-            }
-
-            if self.scope_enabled {
-                ui.separator();
-                if ui
-                    .link("scope filter")
-                    .on_hover_text(
-                        "Only in-scope hosts are shown. Click to edit the scope in Target.",
-                    )
-                    .clicked()
-                {
-                    self.main_tab = MainTab::Target;
-                    self.target_section = TargetSection::Scope;
-                }
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button("Clear history")
-                    .on_hover_text("Discard all captured exchanges")
-                    .clicked()
-                {
-                    clear = true;
-                }
-                ui.label(
-                    RichText::new("Right-click a row to send")
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
-                ui.separator();
-                ui.label(
-                    RichText::new(format!(
-                        "{} shown / {} captured",
-                        self.visible.len(),
-                        self.history.len()
-                    ))
-                    .small()
-                    .color(theme::TEXT_MUTED),
-                );
-            });
-        });
-        if clear {
-            self.clear_history();
-        }
-    }
-
     fn history_table(&mut self, ui: &mut egui::Ui) {
         // The row itself is the click target. Selectable labels inside the
         // cells would capture the click before the row response sees it.
         ui.style_mut().interaction.selectable_labels = false;
         let rows = self.visible.len();
         if rows == 0 {
-            empty_state(
-                ui,
-                "No exchanges to show",
-                "Start the proxy, point a browser at it, and browse an HTTP or HTTPS site. The filter and scope can also hide the history.",
-            );
+            if self.history.len() == 0 {
+                empty_state(
+                    ui,
+                    "No exchanges to show",
+                    "Start the proxy, point a browser at it, and browse an HTTP or HTTPS site. The filter and scope can also hide the history.",
+                );
+            } else {
+                empty_state(
+                    ui,
+                    "No exchanges match the filter",
+                    "Relax the display filter, clear the search, or turn off scope filtering. Filters never delete captured exchanges.",
+                );
+                ui.add_space(10.0);
+                ui.vertical_centered(|ui| {
+                    if ui.button("Show all exchanges").clicked() {
+                        self.history_filter = HistoryFilter::SHOW_ALL;
+                        self.filter.clear();
+                        self.visible_key = None;
+                    }
+                    if self.scope_enabled && ui.button("Turn off scope filtering").clicked() {
+                        self.scope_enabled = false;
+                        self.invalidate_views();
+                    }
+                });
+            }
             return;
         }
 
@@ -606,12 +572,17 @@ impl PerseidApp {
                 .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(Column::exact(40.0))
-                .column(Column::exact(56.0))
-                .column(Column::initial(420.0).at_least(180.0))
-                .column(Column::exact(50.0))
-                .column(Column::exact(68.0))
-                .column(Column::initial(115.0).at_least(80.0))
-                .column(Column::remainder().at_least(64.0));
+                .column(Column::initial(175.0).at_least(110.0))
+                .column(Column::exact(58.0))
+                .column(Column::initial(280.0).at_least(150.0))
+                .column(Column::exact(48.0))
+                .column(Column::exact(62.0))
+                .column(Column::exact(70.0))
+                .column(Column::initial(72.0).at_least(54.0))
+                .column(Column::exact(54.0))
+                .column(Column::initial(130.0).at_least(70.0))
+                .column(Column::exact(38.0))
+                .column(Column::remainder().at_least(74.0));
 
             if self.scroll_to_selected {
                 if let Some(row) = self.selected_row_index() {
@@ -624,11 +595,16 @@ impl PerseidApp {
                 .header(20.0, |mut header| {
                     for title in [
                         "#",
+                        "Host",
                         "Method",
                         "URL",
-                        "Status",
+                        "Params",
+                        "Status code",
                         "Length",
                         "MIME type",
+                        "Extension",
+                        "Title",
+                        "TLS",
                         "Time",
                     ] {
                         header.col(|ui| {
@@ -652,35 +628,107 @@ impl PerseidApp {
                                     .color(theme::TEXT),
                             );
                         });
-                        row.col(|ui| {
-                            ui.label(RichText::new(&item.request.method).color(theme::TEXT));
-                        });
                         let url = request_url(item);
                         row.col(|ui| {
-                            ui.add(Label::new(RichText::new(&url).color(theme::TEXT)).truncate())
+                            ui.add(
+                                Label::new(
+                                    RichText::new(request_host_label(item))
+                                        .small()
+                                        .color(theme::TEXT),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&url);
+                        });
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new(&item.request.method)
+                                    .small()
+                                    .color(theme::TEXT),
+                            );
+                        });
+                        let path = request_path_label(item);
+                        let path = if path.is_empty() {
+                            "-".to_string()
+                        } else {
+                            path
+                        };
+                        row.col(|ui| {
+                            ui.add(Label::new(RichText::new(&path).color(theme::TEXT)).truncate())
                                 .on_hover_text(&url);
+                        });
+                        let parameters =
+                            site_map::request_parameter_count(&item.request, &item.request_body);
+                        row.col(|ui| {
+                            if parameters.count > 0 {
+                                check_mark(ui, theme::GREEN).on_hover_text(format!(
+                                    "{} parameter{}",
+                                    parameters.count,
+                                    if parameters.count == 1 { "" } else { "s" }
+                                ));
+                            } else {
+                                ui.label(RichText::new("").small());
+                            }
                         });
                         row.col(|ui| {
                             ui.label(
                                 RichText::new(view::status_text(item))
+                                    .small()
                                     .color(view::status_color(item)),
                             );
                         });
                         row.col(|ui| {
                             ui.label(
-                                RichText::new(view::human_bytes(item.transferred()))
+                                RichText::new(item.transferred().to_string())
                                     .small()
                                     .color(theme::TEXT),
-                            );
+                            )
+                            .on_hover_text(format!(
+                                "{} transferred",
+                                view::human_bytes(item.transferred())
+                            ));
                         });
                         row.col(|ui| {
-                            let mime = mime_type(item);
+                            let mime = site_map::mime_label(&mime_type(item));
+                            let mime = if mime.is_empty() { "-".to_string() } else { mime };
                             let color = if item.is_tunnel() {
                                 theme::AMBER
                             } else {
                                 theme::TEXT
                             };
-                            ui.add(Label::new(RichText::new(mime).small().color(color)).truncate());
+                            ui.add(
+                                Label::new(RichText::new(&mime).small().color(color)).truncate(),
+                            )
+                            .on_hover_text(mime_type(item));
+                        });
+                        row.col(|ui| {
+                            let extension = request_extension(item);
+                            ui.label(
+                                RichText::new(extension)
+                                    .small()
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        });
+                        row.col(|ui| {
+                            let title = history_title(&self.title_cache, item);
+                            if title.is_empty() {
+                                ui.label(RichText::new("").small());
+                            } else {
+                                ui.add(
+                                    Label::new(RichText::new(&title).small().color(theme::TEXT))
+                                        .truncate(),
+                                )
+                                .on_hover_text(title);
+                            }
+                        });
+                        row.col(|ui| {
+                            if request_uses_tls(item) {
+                                check_mark(ui, theme::GREEN).on_hover_text("TLS");
+                            } else {
+                                ui.label(
+                                    RichText::new("-").small().color(theme::TEXT_MUTED),
+                                );
+                            }
                         });
                         row.col(|ui| {
                             ui.label(

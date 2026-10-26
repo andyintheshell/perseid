@@ -5,6 +5,7 @@ use super::*;
 impl PerseidApp {
     pub(super) fn clear_history(&mut self) {
         self.history.clear();
+        self.title_cache.borrow_mut().clear();
         self.selected = None;
         self.detail = None;
         self.inspector.clear_notes();

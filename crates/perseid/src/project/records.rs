@@ -442,6 +442,90 @@ pub enum SideTabRecord {
     Notes,
 }
 
+/// Burp-style HTTP history display filter, persisted with the project.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HistoryFilterWorkspace {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub in_scope_only: bool,
+    #[serde(default)]
+    pub hide_without_response: bool,
+    #[serde(default)]
+    pub parameterized_only: bool,
+    #[serde(default = "default_true")]
+    pub show_html: bool,
+    #[serde(default = "default_true")]
+    pub show_script: bool,
+    #[serde(default = "default_true")]
+    pub show_xml: bool,
+    #[serde(default = "default_true")]
+    pub show_css: bool,
+    #[serde(default = "default_true")]
+    pub show_other_text: bool,
+    #[serde(default = "default_true")]
+    pub show_images: bool,
+    #[serde(default = "default_true")]
+    pub show_flash: bool,
+    #[serde(default = "default_true")]
+    pub show_other_binary: bool,
+    #[serde(default = "default_true")]
+    pub show_2xx: bool,
+    #[serde(default = "default_true")]
+    pub show_3xx: bool,
+    #[serde(default = "default_true")]
+    pub show_4xx: bool,
+    #[serde(default = "default_true")]
+    pub show_5xx: bool,
+    #[serde(default)]
+    pub search: String,
+    #[serde(default)]
+    pub search_regex: bool,
+    #[serde(default)]
+    pub search_case_sensitive: bool,
+    #[serde(default)]
+    pub search_negative: bool,
+    #[serde(default)]
+    pub extension_show_only_enabled: bool,
+    #[serde(default)]
+    pub extension_show_only: String,
+    #[serde(default)]
+    pub extension_hide_enabled: bool,
+    #[serde(default)]
+    pub extension_hide: String,
+}
+
+impl Default for HistoryFilterWorkspace {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            in_scope_only: false,
+            hide_without_response: false,
+            parameterized_only: false,
+            show_html: true,
+            show_script: true,
+            show_xml: true,
+            show_css: true,
+            show_other_text: true,
+            show_images: true,
+            show_flash: true,
+            show_other_binary: true,
+            show_2xx: true,
+            show_3xx: true,
+            show_4xx: true,
+            show_5xx: true,
+            search: String::new(),
+            search_regex: false,
+            search_case_sensitive: false,
+            search_negative: false,
+            extension_show_only_enabled: false,
+            extension_show_only: String::new(),
+            extension_hide_enabled: false,
+            extension_hide: String::new(),
+        }
+    }
+}
+
 /// Active tool, section, filters, and selection for the main workspace.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiWorkspace {
@@ -459,6 +543,8 @@ pub struct UiWorkspace {
     pub websocket_view: MessageViewRecord,
     #[serde(default)]
     pub http_filter: String,
+    #[serde(default)]
+    pub history_filter: HistoryFilterWorkspace,
     #[serde(default)]
     pub websocket_filter: String,
     #[serde(default)]
@@ -1223,6 +1309,7 @@ mod tests {
                 response_view: MessageViewRecord::Hex,
                 websocket_view: MessageViewRecord::Raw,
                 http_filter: "status:200".to_string(),
+                history_filter: HistoryFilterWorkspace::default(),
                 websocket_filter: "chat".to_string(),
                 selected_http_id: Some(7),
                 selected_websocket_id: Some(8),

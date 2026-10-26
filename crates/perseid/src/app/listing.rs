@@ -11,7 +11,13 @@ impl PerseidApp {
     }
 
     pub(super) fn rebuild_http_visible(&mut self) {
-        let key = (self.filter.clone(), self.history.revision());
+        let key = HttpVisibleKey {
+            quick_search: self.filter.clone(),
+            filter: self.history_filter.clone(),
+            scope_enabled: self.scope_enabled,
+            scope: self.scope.clone(),
+            revision: self.history.revision(),
+        };
         if self.visible_key.as_ref() == Some(&key) {
             return;
         }
@@ -19,14 +25,23 @@ impl PerseidApp {
 
         let needle = self.filter.trim().to_lowercase();
         let scope_active = self.scope_enabled && !self.scope.is_empty();
+        let search = self.history_filter.search();
         for item in self.history.iter() {
             if scope_active && !site_map::host_in_scope(&item.request.host, &self.scope) {
                 continue;
             }
-            if needle.is_empty() || matches_filter(item, &needle) {
-                self.visible.push(item.id);
+            if !needle.is_empty() && !matches_filter(item, &needle) {
+                continue;
             }
+            if !self.history_filter.matches(item, &self.scope, &search) {
+                continue;
+            }
+            self.visible.push(item.id);
         }
+        // Drop titles for exchanges that have been evicted or cleared.
+        self.title_cache
+            .borrow_mut()
+            .retain(|id, _| self.history.get(*id).is_some());
         self.visible_key = Some(key);
     }
 

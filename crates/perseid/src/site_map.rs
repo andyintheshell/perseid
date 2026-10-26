@@ -715,9 +715,17 @@ fn parameter_count(request: &RequestInfo, body: &CapturedBody) -> ParameterCount
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ParameterCount {
-    count: usize,
-    uncertain: bool,
+pub struct ParameterCount {
+    pub count: usize,
+    pub uncertain: bool,
+}
+
+/// Count query and form parameters for one captured request.
+///
+/// This is the same count used for the site-map Params column and the HTTP
+/// history filter, so both views agree on what counts as parameterized.
+pub fn request_parameter_count(request: &RequestInfo, body: &CapturedBody) -> ParameterCount {
+    parameter_count(request, body)
 }
 
 fn parameter_count_in_path(path: &str) -> usize {
