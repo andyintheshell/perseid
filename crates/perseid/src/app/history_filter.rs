@@ -1088,7 +1088,156 @@ mod tests {
     use super::*;
     use crate::history::{History, Phase};
     use crate::proxy::{CapturedBody, ExchangeResult, RequestInfo, ResponseHead};
+    use std::cell::Cell;
     use std::time::{Duration, SystemTime};
+
+    fn screen_rect() -> egui::Rect {
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))
+    }
+
+    fn find_text_center(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + egui::vec2(text.galley.size().x / 2.0, text.galley.size().y / 2.0))
+            }
+            egui::Shape::Vec(shapes) => shapes
+                .iter()
+                .find_map(|shape| find_text_center(shape, label)),
+            _ => None,
+        }
+    }
+
+    fn collect_text(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.text().to_string()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect_text(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn rendered_text(mut run: impl FnMut(&mut egui::Ui)) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        // Toolbars and modals settle over multiple passes.
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        let mut text = Vec::new();
+        for clipped in &output.shapes {
+            collect_text(&clipped.shape, &mut text);
+        }
+        text
+    }
+
+    /// Click the first widget whose label matches inside a root Ui.
+    fn click_ui_text(ctx: &egui::Context, label: &str, mut run: impl FnMut(&mut egui::Ui)) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input.clone(), |ui| run(ui));
+        output.textures_delta.clear();
+        let Some(pos) = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, label))
+        else {
+            return false;
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| run(ui));
+        output.textures_delta.clear();
+        true
+    }
+
+    /// Click the first widget whose label matches inside a window or modal.
+    fn click_window_text(
+        ctx: &egui::Context,
+        label: &str,
+        mut run: impl FnMut(&egui::Context),
+    ) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let mut output = ctx.run_pass(input.clone(), |ctx| run(ctx));
+        output.textures_delta.clear();
+        let Some(pos) = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, label))
+        else {
+            return false;
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| run(ctx));
+        output.textures_delta.clear();
+        true
+    }
+
+    fn press_escape(ctx: &egui::Context, mut run: impl FnMut(&egui::Context)) {
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| run(ctx));
+        output.textures_delta.clear();
+    }
 
     fn request(method: &str, host: &str, path: &str) -> RequestInfo {
         RequestInfo {
@@ -1577,5 +1726,268 @@ mod tests {
                 .iter()
                 .all(|item| filter.matches(item, &BTreeSet::new(), &search))
         );
+    }
+
+    #[test]
+    fn toolbar_renders_and_toggles_the_filter() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.history.load(vec![
+            with_response(
+                numbered_item(1, "GET", "example.com", "/"),
+                200,
+                "text/html",
+                b"",
+            ),
+            numbered_item(2, "GET", "example.com", "/pending"),
+        ]);
+        app.history_filter = HistoryFilter::SHOW_ALL;
+        app.rebuild_http_visible();
+
+        let text = rendered_text(|ui| app.history_toolbar(ui));
+        assert!(text.iter().any(|line| line == "Showing all items"));
+        assert!(
+            text.iter().any(|line| line == "2 shown / 2 captured"),
+            "{text:?}"
+        );
+
+        assert!(click_ui_text(&ctx, "Showing all items", |ui| {
+            app.history_toolbar(ui)
+        }));
+        assert_eq!(app.history_filter_draft, Some(HistoryFilter::SHOW_ALL));
+
+        app.history_filter_draft = None;
+        app.history_filter.enabled = false;
+        app.visible_key = Some(HttpVisibleKey {
+            quick_search: String::new(),
+            filter: app.history_filter.clone(),
+            scope_enabled: false,
+            scope: BTreeSet::new(),
+            revision: 0,
+        });
+        let text = rendered_text(|ui| app.history_toolbar(ui));
+        assert!(
+            text.iter()
+                .any(|line| line == "Filter off — showing all items")
+        );
+        assert!(click_ui_text(&ctx, "Filter on", |ui| app.history_toolbar(ui)));
+        assert!(app.history_filter.enabled);
+        assert_eq!(app.visible_key, None);
+
+        app.history_filter = HistoryFilter::default();
+        let text = rendered_text(|ui| app.history_toolbar(ui));
+        assert!(
+            text.iter()
+                .any(|line| line.contains("Hiding CSS and image content"))
+        );
+    }
+
+    #[test]
+    fn toolbar_summary_reports_scope_filtering() {
+        let mut app = PerseidApp::test_app();
+        app.scope = BTreeSet::from(["example.com".to_string()]);
+        app.scope_enabled = true;
+
+        app.history_filter.enabled = false;
+        assert_eq!(app.history_filter_summary(), "Filter off; scope filter on");
+
+        app.history_filter = HistoryFilter::SHOW_ALL;
+        assert_eq!(app.history_filter_summary(), "Showing only in-scope items");
+
+        app.history_filter = HistoryFilter::default();
+        assert!(app.history_filter_summary().ends_with("; scope filter on"));
+
+        app.history_filter.in_scope_only = true;
+        assert_eq!(app.history_filter_summary(), app.history_filter.summary());
+    }
+
+    #[test]
+    fn search_field_renders_and_clears_its_text() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::unique("perseid.test.history.search");
+        let origin = Cell::new(egui::Pos2::ZERO);
+        let mut text = "admin".to_string();
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| {
+            origin.set(ui.cursor().min);
+            assert!(!history_search_field(ui, &mut text, id));
+        });
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(input, |ui| {
+            origin.set(ui.cursor().min);
+            assert!(!history_search_field(ui, &mut text, id));
+        });
+        output.textures_delta.clear();
+
+        let pos = origin.get() + egui::vec2(242.0 - 14.0, FILTER_BAR_HEIGHT * 0.5);
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut changed = false;
+        let mut output = ctx.run_ui(input, |ui| {
+            changed = history_search_field(ui, &mut text, id);
+        });
+        output.textures_delta.clear();
+        assert!(changed);
+        assert!(text.is_empty());
+
+        // With the text cleared, the action paints the magnifier again.
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            assert!(!history_search_field(ui, &mut text, id));
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn filter_modal_applies_and_closes() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.history_filter = HistoryFilter::SHOW_ALL;
+        let mut draft = HistoryFilter::SHOW_ALL;
+        draft.show_css = false;
+        draft.search = "admin".to_string();
+        app.history_filter_draft = Some(draft.clone());
+        app.visible_key = Some(HttpVisibleKey {
+            quick_search: String::new(),
+            filter: app.history_filter.clone(),
+            scope_enabled: false,
+            scope: BTreeSet::new(),
+            revision: 0,
+        });
+
+        assert!(click_window_text(&ctx, "Apply & close", |ctx| {
+            app.history_filter_window(ctx);
+        }));
+        assert_eq!(app.history_filter, draft);
+        assert!(app.visible_key.is_none());
+        assert!(app.history_filter_draft.is_none());
+    }
+
+    #[test]
+    fn filter_modal_apply_keeps_the_draft_open() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.history_filter = HistoryFilter::SHOW_ALL;
+        let mut draft = HistoryFilter::SHOW_ALL;
+        draft.show_images = false;
+        app.history_filter_draft = Some(draft.clone());
+
+        assert!(click_window_text(&ctx, "Apply", |ctx| {
+            app.history_filter_window(ctx);
+        }));
+        assert_eq!(app.history_filter, draft);
+        assert_eq!(app.history_filter_draft, Some(draft));
+    }
+
+    #[test]
+    fn filter_modal_cancel_and_revert_discard_edits() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.history_filter = HistoryFilter::default();
+        let draft = HistoryFilter {
+            show_script: false,
+            ..HistoryFilter::default()
+        };
+        app.history_filter_draft = Some(draft.clone());
+
+        assert!(click_window_text(&ctx, "Cancel", |ctx| {
+            app.history_filter_window(ctx);
+        }));
+        assert!(app.history_filter_draft.is_none());
+        assert_eq!(app.history_filter, HistoryFilter::default());
+
+        app.history_filter_draft = Some(HistoryFilter {
+            show_css: false,
+            show_images: false,
+            ..HistoryFilter::default()
+        });
+        assert!(click_window_text(&ctx, "Revert changes", |ctx| {
+            app.history_filter_window(ctx);
+        }));
+        assert_eq!(app.history_filter_draft, Some(HistoryFilter::default()));
+
+        assert!(click_window_text(&ctx, "Hide all", |ctx| {
+            app.history_filter_window(ctx);
+        }));
+        let hidden = app
+            .history_filter_draft
+            .clone()
+            .expect("hide-all keeps the draft open");
+        assert!(!hidden.show_html);
+        assert!(hidden.hide_without_response);
+
+        assert!(click_window_text(&ctx, "Show all", |ctx| {
+            app.history_filter_window(ctx);
+        }));
+        assert_eq!(app.history_filter_draft, Some(HistoryFilter::SHOW_ALL));
+    }
+
+    #[test]
+    fn filter_modal_flags_invalid_regex_and_escape_closes_it() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.history_filter = HistoryFilter::SHOW_ALL;
+        let mut draft = HistoryFilter::SHOW_ALL;
+        draft.search = "[".to_string();
+        draft.search_regex = true;
+        app.history_filter_draft = Some(draft);
+
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input.clone(), |ctx| app.history_filter_window(ctx));
+        output.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| app.history_filter_window(ctx));
+        output.textures_delta.clear();
+        let mut text = Vec::new();
+        for clipped in &output.shapes {
+            collect_text(&clipped.shape, &mut text);
+        }
+        assert!(text.iter().any(|line| {
+            line == "Invalid regular expression; the search is ignored until it is fixed."
+        }));
+
+        press_escape(&ctx, |ctx| app.history_filter_window(ctx));
+        assert!(app.history_filter_draft.is_none());
+        assert_eq!(app.history_filter, HistoryFilter::SHOW_ALL);
+    }
+
+    #[test]
+    fn filter_modal_without_a_draft_renders_nothing() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        assert!(app.history_filter_draft.is_none());
+
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect()),
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| app.history_filter_window(ctx));
+        output.textures_delta.clear();
+        assert!(output.shapes.is_empty());
     }
 }
