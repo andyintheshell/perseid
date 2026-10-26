@@ -35,11 +35,12 @@ commit automatically, and the status bar shows the open project.
 
 ![File menu with project commands over the HTTP history](images/perseid-project.png)
 
-The save dialog lists folders and `.perseid` files, lets you navigate by
-clicking a folder, and asks before replacing an existing file. The destination
-only becomes the open project once the complete copy is ready.
+The save dialog is a modal folder browser with a **Save in** location bar,
+list and grid views, and file-name and file-type fields. It asks before
+replacing an existing file, and the destination only becomes the open project
+once the complete copy is ready.
 
-![Save Project As dialog with a folder browser and destination file name](images/perseid-project-dialog.png)
+![Save Project As dialog with a location bar, file list, and destination file name](images/perseid-project-dialog.png)
 
 ## Search
 

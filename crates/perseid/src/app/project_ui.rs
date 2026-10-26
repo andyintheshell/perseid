@@ -161,6 +161,7 @@ enum ProjectDialogAction {
 pub(super) struct ProjectUi {
     handle: Option<ProjectHandle>,
     dialog: Option<ProjectDialog>,
+    dialog_icon: Option<egui::TextureHandle>,
     switch_prompt: Option<ProjectSwitchPrompt>,
     switch_after_save: Option<ProjectSwitch>,
     pending: Vec<PendingProject>,
@@ -186,6 +187,7 @@ impl ProjectUi {
         let mut ui = Self {
             handle,
             dialog: None,
+            dialog_icon: None,
             switch_prompt: None,
             switch_after_save: None,
             pending: Vec::new(),
@@ -209,6 +211,13 @@ impl ProjectUi {
 
     pub(super) fn status(&self) -> Option<ProjectStatus> {
         self.handle.as_ref().map(ProjectHandle::status)
+    }
+
+    fn dialog_icon(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        if self.dialog_icon.is_none() {
+            self.dialog_icon = branding::mark_texture(ctx);
+        }
+        self.dialog_icon.clone()
     }
 
     pub(super) fn is_busy(&self) -> bool {
@@ -354,36 +363,39 @@ impl ProjectUi {
 
     fn dialog(&mut self, ctx: &egui::Context) -> Option<ProjectDialogAction> {
         let kind = self.dialog.as_ref()?.kind;
-        let mut open = true;
+        let icon = self.dialog_icon(ctx);
+        let overwrite_already_open = self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.overwrite.is_some());
         let mut action = FileDialogAction::None;
-        egui::Window::new(kind.title())
-            .id(egui::Id::unique("perseid.project.dialog"))
-            .collapsible(false)
-            .resizable(true)
-            .default_width(640.0)
-            .default_height(480.0)
-            .open(&mut open)
-            .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+
+        egui::Modal::new(egui::Id::unique("perseid.project.dialog"))
+            .backdrop_color(if overwrite_already_open {
+                egui::Color32::TRANSPARENT
+            } else {
+                egui::Color32::from_black_alpha(42)
+            })
+            .frame(super::file_dialog::modal_frame())
             .show(ctx, |ui| {
-                let dialog = self.dialog.as_mut().expect("dialog is still open");
-                ui.set_min_width(620.0);
-                ui.label(match kind {
-                    ProjectDialogKind::Open => {
-                        "Choose an existing .perseid project. Click a folder to open it."
-                    }
-                    ProjectDialogKind::SaveAs => {
-                        "Save the current project to a file. Click a folder to open it."
-                    }
-                    ProjectDialogKind::SaveCopy => {
-                        "Write a copy without switching the open project. Click a folder to open it."
-                    }
-                });
-                ui.add_space(4.0);
-                action = dialog.browser.ui(ui, kind.submit_label());
-                if let Some(error) = &dialog.error {
-                    ui.add_space(3.0);
-                    ui.label(RichText::new(error).small().color(theme::RED));
+                ui.set_width(super::file_dialog::MODAL_WIDTH);
+                if super::file_dialog::title_bar(ui, kind.title(), icon.as_ref()) {
+                    action = FileDialogAction::Cancel;
                 }
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: 16,
+                        right: 16,
+                        top: 12,
+                        bottom: 14,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(super::file_dialog::MODAL_WIDTH - 32.0);
+                        let dialog = self.dialog.as_mut().expect("dialog is still open");
+                        let mut error = dialog.error.take();
+                        action = dialog.browser.ui(ui, kind.submit_label(), &mut error);
+                        dialog.error = error;
+                    });
             });
 
         let escape =
@@ -445,35 +457,58 @@ impl ProjectUi {
             .as_ref()
             .and_then(|dialog| dialog.overwrite.clone())
         {
-            let mut prompt_open = true;
             let mut choice = None;
-            egui::Window::new("Overwrite File?")
-                .id(egui::Id::unique("perseid.project.overwrite"))
-                .collapsible(false)
-                .resizable(false)
-                .open(&mut prompt_open)
-                .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            let mut closed = false;
+            egui::Modal::new(egui::Id::unique("perseid.project.overwrite"))
+                .backdrop_color(egui::Color32::from_black_alpha(70))
+                .frame(super::file_dialog::modal_frame())
                 .show(ctx, |ui| {
-                    ui.set_min_width(400.0);
-                    ui.label("A file already exists at:");
-                    ui.label(
-                        RichText::new(path.display().to_string())
-                            .small()
-                            .color(theme::TEXT_MUTED),
-                    );
-                    ui.add_space(4.0);
-                    ui.label("Replacing it cannot be undone.");
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Overwrite").clicked() {
-                            choice = Some(true);
-                        }
-                        if ui.button("Keep Existing").clicked() {
-                            choice = Some(false);
-                        }
-                    });
+                    ui.set_width(460.0);
+                    if super::file_dialog::title_bar(ui, "Overwrite File?", icon.as_ref()) {
+                        closed = true;
+                    }
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin {
+                            left: 16,
+                            right: 16,
+                            top: 14,
+                            bottom: 14,
+                        })
+                        .show(ui, |ui| {
+                            ui.set_width(460.0 - 32.0);
+                            ui.label("A file already exists at:");
+                            ui.label(
+                                RichText::new(path.display().to_string())
+                                    .color(theme::TEXT)
+                                    .strong(),
+                            );
+                            ui.add_space(6.0);
+                            ui.label("Replacing it cannot be undone.");
+                            ui.add_space(16.0);
+                            egui::Sides::new().height(30.0).show(
+                                ui,
+                                |_ui| {},
+                                |ui| {
+                                    if ui
+                                        .add_sized(
+                                            [104.0, 30.0],
+                                            egui::Button::new("Keep Existing"),
+                                        )
+                                        .clicked()
+                                    {
+                                        choice = Some(false);
+                                    }
+                                    if ui
+                                        .add_sized([88.0, 30.0], egui::Button::new("Overwrite"))
+                                        .clicked()
+                                    {
+                                        choice = Some(true);
+                                    }
+                                },
+                            );
+                        });
                 });
-            if !prompt_open && choice.is_none() {
+            if closed && choice.is_none() {
                 choice = Some(false);
             }
             match choice {
@@ -494,9 +529,6 @@ impl ProjectUi {
             }
         }
 
-        if !open {
-            self.close_dialog();
-        }
         None
     }
 

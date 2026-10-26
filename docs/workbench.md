@@ -35,16 +35,18 @@ from the open project.
 - **New Project** starts an empty temporary project. If the current temporary
   project has unsaved records or workbench edits, Perseid first asks
   Save/Discard/Cancel. Nothing is deleted from an existing saved file.
-- **Open Project…** opens an existing `.perseid` file. Use the folder browser
-  to navigate to its directory and select the file, or type its name directly.
-  If the proxy is running, it stops for the switch and restarts afterward.
-  When the current temporary project has unsaved work, Open asks
-  Save/Discard/Cancel first; a cancelled prompt or a failed open leaves the
-  current project active.
+- **Open Project…** opens an existing `.perseid` file. Use the modal folder
+  browser to navigate to its directory and select the file, or type a path in
+  the **Look in** bar. The toolbar provides up, home, refresh, new-folder,
+  hidden-file, and list/grid controls. If the proxy is running, it stops for
+  the switch and restarts afterward. When the current temporary project has
+  unsaved work, Open asks Save/Discard/Cancel first; a cancelled prompt or a
+  failed open leaves the current project active.
 - **Save Project As…** transfers the current project into a new file and makes
-  that file active. If the destination already exists, Perseid asks before
-  replacing it. The replacement is written alongside the old file and only
-  swapped in once the new project is complete.
+  that file active. Choose a folder in the **Save in** bar, then enter a file
+  name. If the destination already exists, Perseid asks before replacing it.
+  The replacement is written alongside the old file and only swapped in once
+  the new project is complete.
 - **Save Project Copy…** writes a consistent copy to a new path and leaves the
   current project active. It also asks before replacing an existing file.
 
