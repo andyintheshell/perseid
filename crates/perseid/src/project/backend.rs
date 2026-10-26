@@ -1,8 +1,9 @@
 //! Database creation and opening.
 //!
 //! Temporary projects live in redb's [`InMemoryBackend`]; persistent projects
-//! are one redb file. A fresh file is created exclusively so `Save As` can
-//! never overwrite an existing project.
+//! are one redb file. New files are created exclusively. An explicit overwrite
+//! is written to a temporary sibling first so the previous project is never
+//! truncated in place.
 
 use std::fs::OpenOptions;
 use std::path::Path;

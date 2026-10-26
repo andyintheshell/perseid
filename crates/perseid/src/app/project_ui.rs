@@ -2,7 +2,7 @@
 //!
 //! Perseid starts with a temporary in-memory project. `File > Save Project As`
 //! moves it into a `.perseid` file; `Open` switches to an existing one. The
-//! dialogs take a path directly instead of depending on a platform file picker.
+//! dialogs use an in-app folder browser rather than a platform file picker.
 //!
 //! Workbench state (scope, match/replace rules, UI selections, Inspector,
 //! Repeater, Intruder, Decoder, Comparer, Search, Sequencer, and TLS settings)
@@ -24,6 +24,7 @@ use crate::project::{
 };
 use crate::proxy::{MatchReplaceRule, RuleDirection, RulePart};
 
+use super::file_dialog::{FileDialog, FileDialogAction, FileDialogMode};
 use super::*;
 
 /// How often the unchanged-workstation check runs. Edits are still flushed on
@@ -57,6 +58,13 @@ impl ProjectDialogKind {
             Self::SaveCopy => "Save Copy",
         }
     }
+
+    fn file_mode(self) -> FileDialogMode {
+        match self {
+            Self::Open => FileDialogMode::Open,
+            Self::SaveAs | Self::SaveCopy => FileDialogMode::Save,
+        }
+    }
 }
 
 /// A project switch that may need to be postponed until the current temporary
@@ -79,8 +87,9 @@ enum ProjectSwitchAction {
 
 struct ProjectDialog {
     kind: ProjectDialogKind,
-    path: String,
+    browser: FileDialog,
     error: Option<String>,
+    overwrite: Option<PathBuf>,
 }
 
 struct ProjectNotice {
@@ -141,7 +150,11 @@ enum ProjectCompletion {
 }
 
 enum ProjectDialogAction {
-    Submit(ProjectDialogKind, PathBuf),
+    Submit {
+        kind: ProjectDialogKind,
+        path: PathBuf,
+        overwrite: bool,
+    },
 }
 
 /// UI state for the current project.
@@ -243,12 +256,27 @@ impl ProjectUi {
     }
 
     fn open_dialog(&mut self, kind: ProjectDialogKind, current: Option<&Path>) {
-        let path = default_project_path(current, kind == ProjectDialogKind::SaveCopy);
-        self.dialog = Some(ProjectDialog {
+        let (directory, file_name) = default_project_location(kind, current);
+        let mut dialog = ProjectDialog {
             kind,
-            path,
+            browser: FileDialog::new(directory, file_name, kind.file_mode()),
             error: None,
-        });
+            overwrite: None,
+        };
+        let candidate = dialog.browser.directory().join(dialog.browser.file_name());
+        if candidate.is_file() {
+            dialog.browser.set_path(&candidate);
+        }
+        self.dialog = Some(dialog);
+    }
+
+    /// Reopen a save dialog for a destination that appeared while a save was
+    /// in flight. The overwrite prompt is shown immediately.
+    fn reopen_save_dialog(&mut self, kind: ProjectDialogKind, path: &Path) {
+        self.open_dialog(kind, Some(path));
+        let dialog = self.dialog.as_mut().expect("dialog was just opened");
+        dialog.browser.set_path(path);
+        dialog.overwrite = Some(path.to_path_buf());
     }
 
     /// Ask for Save/Discard/Cancel before replacing a project with unsaved
@@ -309,91 +337,202 @@ impl ProjectUi {
     /// Documentation screenshots: show the Save As dialog with a demo path.
     #[cfg(feature = "screenshots")]
     pub(super) fn show_save_dialog_for_screenshot(&mut self) {
+        let directory = std::env::temp_dir().join("perseid-screenshot-assessments");
+        let _ = std::fs::create_dir_all(&directory);
+        let _ = std::fs::create_dir_all(directory.join("internal-lab"));
+        for name in ["demo-shop.perseid", "api-review.perseid"] {
+            let path = directory.join(name);
+            if !path.exists() {
+                let _ = std::fs::write(path, b"");
+            }
+        }
         self.open_dialog(
             ProjectDialogKind::SaveAs,
-            Some(Path::new("/home/user/assessments/demo-shop.perseid")),
+            Some(&directory.join("demo-shop.perseid")),
         );
     }
 
     fn dialog(&mut self, ctx: &egui::Context) -> Option<ProjectDialogAction> {
-        let dialog = self.dialog.as_ref()?;
-        let kind = dialog.kind;
+        let kind = self.dialog.as_ref()?.kind;
         let mut open = true;
-        let mut submit = false;
-        let mut cancel = false;
-        let response = egui::Window::new(kind.title())
+        let mut action = FileDialogAction::None;
+        egui::Window::new(kind.title())
             .id(egui::Id::unique("perseid.project.dialog"))
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
+            .default_width(640.0)
+            .default_height(480.0)
             .open(&mut open)
             .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 let dialog = self.dialog.as_mut().expect("dialog is still open");
-                ui.set_min_width(420.0);
-                match kind {
+                ui.set_min_width(620.0);
+                ui.label(match kind {
                     ProjectDialogKind::Open => {
-                        ui.label("Path to an existing .perseid project:");
-                        let edit = ui.add(
-                            egui::TextEdit::singleline(&mut dialog.path)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("/path/to/project.perseid"),
-                        );
-                        submit |= edit.lost_focus()
-                            && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                        "Choose an existing .perseid project. Click a folder to open it."
                     }
-                    ProjectDialogKind::SaveAs | ProjectDialogKind::SaveCopy => {
-                        ui.label(if kind == ProjectDialogKind::SaveAs {
-                            "Save the current project to a new file:"
-                        } else {
-                            "Write a copy without switching the open project:"
-                        });
-                        let edit = ui.add(
-                            egui::TextEdit::singleline(&mut dialog.path)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("/path/to/project.perseid"),
-                        );
-                        submit |= edit.lost_focus()
-                            && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new("The destination must not already exist.")
-                                .small()
-                                .color(theme::TEXT_MUTED),
-                        );
+                    ProjectDialogKind::SaveAs => {
+                        "Save the current project to a file. Click a folder to open it."
                     }
-                }
+                    ProjectDialogKind::SaveCopy => {
+                        "Write a copy without switching the open project. Click a folder to open it."
+                    }
+                });
+                ui.add_space(4.0);
+                action = dialog.browser.ui(ui, kind.submit_label());
                 if let Some(error) = &dialog.error {
                     ui.add_space(3.0);
                     ui.label(RichText::new(error).small().color(theme::RED));
                 }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.button(kind.submit_label()).clicked() {
-                        submit = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                });
             });
-        let _ = response;
 
-        if submit {
-            let dialog = self.dialog.as_mut()?;
-            let trimmed = dialog.path.trim();
-            if trimmed.is_empty() {
-                dialog.error = Some("Enter a project file path.".to_string());
+        let escape =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let overwrite_open = self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.overwrite.is_some());
+        if escape {
+            if overwrite_open {
+                if let Some(dialog) = self.dialog.as_mut() {
+                    dialog.overwrite = None;
+                }
+            } else {
+                self.close_dialog();
                 return None;
             }
-            let path = normalize_project_path(trimmed);
-            let kind = dialog.kind;
-            self.dialog = None;
-            return Some(ProjectDialogAction::Submit(kind, path));
         }
-        if !open || cancel {
+
+        if let FileDialogAction::Cancel = action {
+            self.close_dialog();
+            return None;
+        }
+
+        if !overwrite_open && matches!(action, FileDialogAction::Submit) {
+            match self.prepare_submission(kind) {
+                Ok(path) if kind == ProjectDialogKind::Open => {
+                    self.dialog = None;
+                    return Some(ProjectDialogAction::Submit {
+                        kind,
+                        path,
+                        overwrite: false,
+                    });
+                }
+                Ok(path) if path.is_file() => {
+                    if let Some(dialog) = self.dialog.as_mut() {
+                        dialog.overwrite = Some(path);
+                        dialog.error = None;
+                    }
+                }
+                Ok(path) => {
+                    self.dialog = None;
+                    return Some(ProjectDialogAction::Submit {
+                        kind,
+                        path,
+                        overwrite: false,
+                    });
+                }
+                Err(error) => {
+                    if let Some(dialog) = self.dialog.as_mut() {
+                        dialog.error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(path) = self
+            .dialog
+            .as_ref()
+            .and_then(|dialog| dialog.overwrite.clone())
+        {
+            let mut prompt_open = true;
+            let mut choice = None;
+            egui::Window::new("Overwrite File?")
+                .id(egui::Id::unique("perseid.project.overwrite"))
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut prompt_open)
+                .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.set_min_width(400.0);
+                    ui.label("A file already exists at:");
+                    ui.label(
+                        RichText::new(path.display().to_string())
+                            .small()
+                            .color(theme::TEXT_MUTED),
+                    );
+                    ui.add_space(4.0);
+                    ui.label("Replacing it cannot be undone.");
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Overwrite").clicked() {
+                            choice = Some(true);
+                        }
+                        if ui.button("Keep Existing").clicked() {
+                            choice = Some(false);
+                        }
+                    });
+                });
+            if !prompt_open && choice.is_none() {
+                choice = Some(false);
+            }
+            match choice {
+                Some(true) => {
+                    self.dialog = None;
+                    return Some(ProjectDialogAction::Submit {
+                        kind,
+                        path,
+                        overwrite: true,
+                    });
+                }
+                Some(false) => {
+                    if let Some(dialog) = self.dialog.as_mut() {
+                        dialog.overwrite = None;
+                    }
+                }
+                None => {}
+            }
+        }
+
+        if !open {
             self.close_dialog();
         }
         None
+    }
+
+    fn prepare_submission(&mut self, kind: ProjectDialogKind) -> Result<PathBuf, String> {
+        let Some(dialog) = self.dialog.as_mut() else {
+            return Err("The project dialog is no longer open.".to_string());
+        };
+        let input = dialog.browser.file_name().trim().to_string();
+        if input.is_empty() {
+            return Err(match kind {
+                ProjectDialogKind::Open => "Choose a project file to open.".to_string(),
+                ProjectDialogKind::SaveAs | ProjectDialogKind::SaveCopy => {
+                    "Enter a project file name.".to_string()
+                }
+            });
+        }
+        let path = project_path_in(dialog.browser.directory(), &input);
+        if path.is_dir() {
+            return Err("The destination is a folder. Choose a file name.".to_string());
+        }
+        match kind {
+            ProjectDialogKind::Open => {
+                if !path.is_file() {
+                    return Err(format!("{} does not exist.", path.display()));
+                }
+            }
+            ProjectDialogKind::SaveAs | ProjectDialogKind::SaveCopy => {
+                if let Some(parent) = path.parent()
+                    && !parent.is_dir()
+                {
+                    return Err(format!("The folder {} does not exist.", parent.display()));
+                }
+            }
+        }
+        dialog.error = None;
+        Ok(path)
     }
 
     /// Ask whether to save the current temporary project before replacing it.
@@ -544,8 +683,12 @@ impl ProjectUi {
     }
 }
 
+#[cfg(test)]
 fn normalize_project_path(input: &str) -> PathBuf {
-    let path = PathBuf::from(input);
+    normalize_project_path_buf(PathBuf::from(input))
+}
+
+fn normalize_project_path_buf(path: PathBuf) -> PathBuf {
     if path.extension().is_none() {
         path.with_extension(PROJECT_EXTENSION)
     } else {
@@ -553,28 +696,39 @@ fn normalize_project_path(input: &str) -> PathBuf {
     }
 }
 
-fn default_project_path(current: Option<&Path>, copy: bool) -> String {
-    if let Some(current) = current.filter(|_| !copy) {
-        return current.display().to_string();
+/// Resolve a file name typed into the dialog against the folder it lists.
+fn project_path_in(directory: &Path, input: &str) -> PathBuf {
+    let mut path = PathBuf::from(input.trim());
+    if path.is_relative() {
+        path = directory.join(path);
     }
-    let fallback = if copy {
-        "perseid-project-copy.perseid"
-    } else {
-        "perseid-project.perseid"
-    };
-    if let Some(current) = current
-        && let Some(stem) = current.file_stem().and_then(|stem| stem.to_str())
-    {
-        let name = format!("{stem}-copy.perseid");
-        if let Some(parent) = current.parent() {
-            return parent.join(name).display().to_string();
+    normalize_project_path_buf(path)
+}
+
+fn default_project_location(kind: ProjectDialogKind, current: Option<&Path>) -> (PathBuf, String) {
+    let cwd = || std::env::current_dir().unwrap_or_default();
+    let current_directory = current
+        .and_then(Path::parent)
+        .filter(|parent| parent.is_dir())
+        .map(Path::to_path_buf);
+    match kind {
+        ProjectDialogKind::Open => (current_directory.unwrap_or_else(cwd), String::new()),
+        ProjectDialogKind::SaveAs => {
+            let name = current
+                .and_then(Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "perseid-project.perseid".to_string());
+            (current_directory.unwrap_or_else(cwd), name)
+        }
+        ProjectDialogKind::SaveCopy => {
+            let name = current
+                .and_then(Path::file_stem)
+                .and_then(|stem| stem.to_str())
+                .map(|stem| format!("{stem}-copy.perseid"))
+                .unwrap_or_else(|| "perseid-project-copy.perseid".to_string());
+            (current_directory.unwrap_or_else(cwd), name)
         }
     }
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join(fallback)
-        .display()
-        .to_string()
 }
 
 fn rule_workspace(rule: &MatchReplaceRule) -> RuleWorkspace {
@@ -761,7 +915,7 @@ impl PerseidApp {
         }
     }
 
-    fn begin_save_project(&mut self, path: PathBuf, copy: bool) {
+    fn begin_save_project(&mut self, path: PathBuf, copy: bool, overwrite: bool) {
         if self.project.is_busy() {
             self.notify_project_busy();
             return;
@@ -775,9 +929,9 @@ impl PerseidApp {
             return;
         };
         let receiver = if copy {
-            handle.save_copy(path.clone())
+            handle.save_copy(path.clone(), overwrite)
         } else {
-            handle.save_as(path.clone())
+            handle.save_as(path.clone(), overwrite)
         };
         self.project.pending.push(PendingProject::Save {
             copy,
@@ -857,9 +1011,24 @@ impl PerseidApp {
                         }
                     }
                     Err(err) => {
-                        self.project.clear_switch_after_save();
-                        self.project
-                            .notify_error(format!("Could not save the project: {err}"));
+                        if let ProjectError::DestinationExists(existing) = &err {
+                            // The destination appeared after the dialog checked
+                            // it. Keep the save available and ask explicitly.
+                            let kind = if copy {
+                                ProjectDialogKind::SaveCopy
+                            } else {
+                                ProjectDialogKind::SaveAs
+                            };
+                            self.project.reopen_save_dialog(kind, existing);
+                            self.project.notify_error(format!(
+                                "A file already exists at {}.",
+                                existing.display()
+                            ));
+                        } else {
+                            self.project.clear_switch_after_save();
+                            self.project
+                                .notify_error(format!("Could not save the project: {err}"));
+                        }
                     }
                 },
                 ProjectCompletion::Opened {
@@ -1085,14 +1254,26 @@ impl PerseidApp {
         }
         if let Some(action) = self.project.dialog(ctx) {
             match action {
-                ProjectDialogAction::Submit(ProjectDialogKind::Open, path) => {
+                ProjectDialogAction::Submit {
+                    kind: ProjectDialogKind::Open,
+                    path,
+                    ..
+                } => {
                     self.request_project_switch(ProjectSwitch::Open(path));
                 }
-                ProjectDialogAction::Submit(ProjectDialogKind::SaveAs, path) => {
-                    self.begin_save_project(path, false);
+                ProjectDialogAction::Submit {
+                    kind: ProjectDialogKind::SaveAs,
+                    path,
+                    overwrite,
+                } => {
+                    self.begin_save_project(path, false, overwrite);
                 }
-                ProjectDialogAction::Submit(ProjectDialogKind::SaveCopy, path) => {
-                    self.begin_save_project(path, true);
+                ProjectDialogAction::Submit {
+                    kind: ProjectDialogKind::SaveCopy,
+                    path,
+                    overwrite,
+                } => {
+                    self.begin_save_project(path, true, overwrite);
                 }
             }
         }
@@ -1423,12 +1604,9 @@ mod tests {
     #[test]
     fn copy_default_uses_the_source_name() {
         let source = Path::new("/tmp/session.perseid");
-        let path = default_project_path(Some(source), true);
-        // Compare paths, not strings: Windows renders the separator differently.
-        assert_eq!(
-            PathBuf::from(path),
-            source.with_file_name("session-copy.perseid")
-        );
+        let (directory, name) = default_project_location(ProjectDialogKind::SaveCopy, Some(source));
+        assert_eq!(directory, Path::new("/tmp"));
+        assert_eq!(name, "session-copy.perseid");
     }
 
     use crate::history::{HistoryItem, Phase};
@@ -1695,7 +1873,12 @@ mod tests {
         let mut app = PerseidApp::test_app();
         app.scope_enabled = true;
         let file = temp_path("ui-persistent");
-        wait_for(app.project.handle().expect("handle").save_as(file.clone()));
+        wait_for(
+            app.project
+                .handle()
+                .expect("handle")
+                .save_as(file.clone(), false),
+        );
         assert!(!app.has_unsaved_temporary_work());
         let _ = std::fs::remove_file(&file);
     }
@@ -1774,32 +1957,68 @@ mod tests {
     fn open_dialog_submits_a_normalized_path_and_queues_the_switch() {
         let ctx = egui::Context::default();
         let mut app = PerseidApp::test_app();
-        app.project.open_dialog(ProjectDialogKind::Open, None);
-        app.project.dialog.as_mut().expect("dialog").path = "/tmp/perseid-ui-open".to_string();
+        let source = temp_path("ui-open");
+        std::fs::write(&source, b"project").expect("write project placeholder");
 
+        app.project.open_dialog(ProjectDialogKind::Open, None);
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_path(&source);
         assert!(click_window_text(&ctx, "Open", |ctx| app.project_windows(ctx)));
 
         assert!(app.project.dialog.is_none());
         match app.project.pending.first() {
             Some(PendingProject::Open { path, .. }) => {
-                assert_eq!(path, &PathBuf::from("/tmp/perseid-ui-open.perseid"));
+                assert_eq!(path, &source);
             }
             _ => panic!("expected a pending open"),
         }
+        let _ = std::fs::remove_file(&source);
         app.shutdown_project();
     }
 
     #[test]
-    fn a_dialog_with_an_empty_path_reports_an_error_and_stays_open() {
+    fn a_dialog_with_an_empty_file_name_reports_an_error_and_stays_open() {
         let ctx = egui::Context::default();
         let mut app = PerseidApp::test_app();
         app.project.open_dialog(ProjectDialogKind::Open, None);
-        app.project.dialog.as_mut().expect("dialog").path = "   ".to_string();
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_file_name("   ");
 
         assert!(click_window_text(&ctx, "Open", |ctx| app.project_windows(ctx)));
 
         let dialog = app.project.dialog.as_ref().expect("dialog stays open");
-        assert_eq!(dialog.error.as_deref(), Some("Enter a project file path."));
+        assert_eq!(
+            dialog.error.as_deref(),
+            Some("Choose a project file to open.")
+        );
+        assert!(app.project.pending.is_empty());
+    }
+
+    #[test]
+    fn open_dialog_rejects_a_missing_file() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.project.open_dialog(ProjectDialogKind::Open, None);
+        let dialog = app.project.dialog.as_mut().expect("dialog");
+        dialog.browser.set_path(&temp_path("ui-missing"));
+
+        assert!(click_window_text(&ctx, "Open", |ctx| app.project_windows(ctx)));
+
+        let dialog = app.project.dialog.as_ref().expect("dialog stays open");
+        assert!(
+            dialog
+                .error
+                .as_deref()
+                .is_some_and(|text| text.contains("does not exist"))
+        );
         assert!(app.project.pending.is_empty());
     }
 
@@ -1811,7 +2030,12 @@ mod tests {
         let copy_path = temp_path("ui-copy");
 
         app.project.open_dialog(ProjectDialogKind::SaveAs, None);
-        app.project.dialog.as_mut().expect("dialog").path = save_path.display().to_string();
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_path(&save_path);
         assert!(click_window_text(&ctx, "Save", |ctx| app.project_windows(ctx)));
         assert!(app.project.dialog.is_none());
         match app.project.pending.first() {
@@ -1832,7 +2056,12 @@ mod tests {
         assert!(save_path.exists());
 
         app.project.open_dialog(ProjectDialogKind::SaveCopy, None);
-        app.project.dialog.as_mut().expect("dialog").path = copy_path.display().to_string();
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_path(&copy_path);
         assert!(click_window_text(&ctx, "Save Copy", |ctx| app.project_windows(ctx)));
         match app.project.pending.first() {
             Some(PendingProject::Save { copy: true, .. }) => {}
@@ -1850,6 +2079,143 @@ mod tests {
 
         let _ = std::fs::remove_file(&save_path);
         let _ = std::fs::remove_file(&copy_path);
+    }
+
+    #[test]
+    fn saving_over_an_existing_file_asks_before_overwriting() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        let save_path = temp_path("ui-overwrite");
+        std::fs::write(&save_path, b"old contents").expect("write existing file");
+
+        app.project.open_dialog(ProjectDialogKind::SaveAs, None);
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_path(&save_path);
+        assert!(click_window_text(&ctx, "Save", |ctx| app.project_windows(ctx)));
+
+        assert!(app.project.pending.is_empty(), "save must wait for consent");
+        assert_eq!(
+            app.project
+                .dialog
+                .as_ref()
+                .expect("dialog stays open")
+                .overwrite
+                .as_deref(),
+            Some(save_path.as_path())
+        );
+        assert_eq!(
+            std::fs::read(&save_path).expect("unmodified file"),
+            b"old contents"
+        );
+
+        assert!(click_window_text(&ctx, "Overwrite", |ctx| app.project_windows(ctx)));
+        assert!(app.project.dialog.is_none());
+        assert!(matches!(
+            app.project.pending.first(),
+            Some(PendingProject::Save { copy: false, path, .. }) if path == &save_path
+        ));
+        poll_until_idle(&mut app);
+        assert!(
+            std::fs::metadata(&save_path).expect("saved file").len() > b"old contents".len() as u64,
+            "the overwrite must replace the old file with a project"
+        );
+
+        let _ = std::fs::remove_file(&save_path);
+    }
+
+    #[test]
+    fn keeping_an_existing_file_leaves_the_save_dialog_open() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        let save_path = temp_path("ui-keep-existing");
+        std::fs::write(&save_path, b"old contents").expect("write existing file");
+
+        app.project.open_dialog(ProjectDialogKind::SaveAs, None);
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_path(&save_path);
+        assert!(click_window_text(&ctx, "Save", |ctx| app.project_windows(ctx)));
+        assert!(click_window_text(&ctx, "Keep Existing", |ctx| {
+            app.project_windows(ctx)
+        }));
+
+        let dialog = app.project.dialog.as_ref().expect("dialog stays open");
+        assert!(dialog.overwrite.is_none());
+        assert!(app.project.pending.is_empty());
+        assert_eq!(
+            std::fs::read(&save_path).expect("unmodified file"),
+            b"old contents"
+        );
+
+        let _ = std::fs::remove_file(&save_path);
+    }
+
+    #[test]
+    fn clicking_a_folder_in_the_dialog_navigates_into_it() {
+        let ctx = egui::Context::default();
+        let root = std::env::temp_dir().join(format!("perseid-ui-folder-{}", uuid::Uuid::new_v4()));
+        let child = root.join("assessment");
+        std::fs::create_dir_all(&child).expect("create folders");
+
+        let mut app = PerseidApp::test_app();
+        app.project.open_dialog(ProjectDialogKind::Open, None);
+        app.project
+            .dialog
+            .as_mut()
+            .expect("dialog")
+            .browser
+            .set_path(&root);
+
+        assert!(click_window_text(&ctx, "assessment/", |ctx| {
+            app.project_windows(ctx)
+        }));
+        assert_eq!(
+            app.project
+                .dialog
+                .as_ref()
+                .expect("dialog")
+                .browser
+                .directory(),
+            child
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_destination_that_appears_during_a_save_reopens_with_the_overwrite_prompt() {
+        let mut app = PerseidApp::test_app();
+        let path = temp_path("ui-save-race");
+        std::fs::write(&path, b"appeared later").expect("write existing file");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(Err(ProjectError::DestinationExists(path.clone())))
+            .expect("queue save result");
+        app.project.pending.push(PendingProject::Save {
+            copy: false,
+            path: path.clone(),
+            receiver,
+        });
+
+        app.poll_project();
+
+        let dialog = app.project.dialog.as_ref().expect("save dialog reopened");
+        assert_eq!(dialog.kind, ProjectDialogKind::SaveAs);
+        assert_eq!(dialog.overwrite.as_deref(), Some(path.as_path()));
+        assert_eq!(
+            dialog.browser.file_name(),
+            path.file_name().expect("file name").to_string_lossy()
+        );
+        assert!(app.project.notice().expect("notice").1);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1878,7 +2244,7 @@ mod tests {
             app.project
                 .handle()
                 .expect("handle")
-                .save_copy(copy.clone()),
+                .save_copy(copy.clone(), false),
         );
         let reopened = ProjectHandle::temporary().expect("temporary project");
         let opened = wait_for(reopened.open(copy.clone(), 10, 1024));
@@ -1985,7 +2351,12 @@ mod tests {
     fn shutdown_project_flushes_the_writer() {
         let mut app = PerseidApp::test_app();
         let file = temp_path("ui-shutdown");
-        wait_for(app.project.handle().expect("handle").save_as(file.clone()));
+        wait_for(
+            app.project
+                .handle()
+                .expect("handle")
+                .save_as(file.clone(), false),
+        );
 
         // A workbench change made just before shutdown must reach the file,
         // not only the in-memory project that is about to be dropped.

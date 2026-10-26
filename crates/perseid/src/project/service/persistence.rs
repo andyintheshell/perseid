@@ -638,11 +638,26 @@ pub(super) fn save_as(
     shared: &Shared,
     meta: &mut ProjectMeta,
     path: &Path,
+    overwrite: bool,
 ) -> Result<()> {
+    // Saving over the project that is already open is a durability barrier
+    // rather than a transfer. This also avoids replacing the file under the
+    // live database handle, which Windows does not permit.
+    if overwrite && shared.status().mode.path() == Some(path) {
+        commit_counters(db, meta)?;
+        shared.install_saved_meta(
+            meta,
+            ProjectMode::Persistent {
+                path: path.to_path_buf(),
+            },
+        );
+        return Ok(());
+    }
+
     let read = db.begin_read()?;
     let source_meta = schema::read_meta(&read)?;
     drop(read);
-    let destination = super::super::transfer::copy_to_new_file(db, path, &source_meta)?;
+    let destination = super::super::transfer::copy_to_file(db, path, &source_meta, overwrite)?;
     let destination = Arc::new(destination);
     *db = destination.clone();
     shared.set_database(destination);

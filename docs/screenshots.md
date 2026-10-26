@@ -35,10 +35,11 @@ commit automatically, and the status bar shows the open project.
 
 ![File menu with project commands over the HTTP history](images/perseid-project.png)
 
-The path is entered directly in the save dialog; the destination is created
-exclusively and only becomes the open project once the copy is complete.
+The save dialog lists folders and `.perseid` files, lets you navigate by
+clicking a folder, and asks before replacing an existing file. The destination
+only becomes the open project once the complete copy is ready.
 
-![Save Project As dialog with a destination path](images/perseid-project-dialog.png)
+![Save Project As dialog with a folder browser and destination file name](images/perseid-project-dialog.png)
 
 ## Search
 

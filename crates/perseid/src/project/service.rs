@@ -152,10 +152,12 @@ enum Command {
     },
     SaveAs {
         path: PathBuf,
+        overwrite: bool,
         reply: Sender<Result<()>>,
     },
     SaveCopy {
         path: PathBuf,
+        overwrite: bool,
         reply: Sender<Result<()>>,
     },
     Open {
@@ -351,15 +353,35 @@ impl ProjectHandle {
         });
     }
 
-    pub fn save_as(&self, path: PathBuf) -> Receiver<Result<()>> {
+    /// Save the current project as `path` and make that file active.
+    ///
+    /// When `overwrite` is false an existing destination is refused. When it
+    /// is true the complete replacement is written alongside the destination
+    /// first, so a failed save leaves the previous file intact.
+    pub fn save_as(&self, path: PathBuf, overwrite: bool) -> Receiver<Result<()>> {
         let (tx, rx) = mpsc::channel();
-        self.send_control(Command::SaveAs { path, reply: tx }, &rx);
+        self.send_control(
+            Command::SaveAs {
+                path,
+                overwrite,
+                reply: tx,
+            },
+            &rx,
+        );
         rx
     }
 
-    pub fn save_copy(&self, path: PathBuf) -> Receiver<Result<()>> {
+    /// Write a copy of the current project to `path` without switching to it.
+    pub fn save_copy(&self, path: PathBuf, overwrite: bool) -> Receiver<Result<()>> {
         let (tx, rx) = mpsc::channel();
-        self.send_control(Command::SaveCopy { path, reply: tx }, &rx);
+        self.send_control(
+            Command::SaveCopy {
+                path,
+                overwrite,
+                reply: tx,
+            },
+            &rx,
+        );
         rx
     }
 
