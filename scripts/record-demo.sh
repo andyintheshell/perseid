@@ -87,12 +87,17 @@ sleep 2
 cursor_x=150
 cursor_y=50
 move_cursor() {
-    local target_x=$1 target_y=$2 steps=20 i x y
+    local target_x=$1 target_y=$2 steps=20 i x y last_x=$cursor_x last_y=$cursor_y
     for ((i = 1; i <= steps; i++)); do
         x=$((cursor_x + (target_x - cursor_x) * i / steps))
         y=$((cursor_y + (target_y - cursor_y) * i / steps))
-        xdotool mousemove --sync "$x" "$y"
-        sleep 0.02
+        # --sync can wait forever if asked to move to its current coordinates.
+        if ((x != last_x || y != last_y)); then
+            xdotool mousemove --sync "$x" "$y"
+            sleep 0.02
+            last_x=$x
+            last_y=$y
+        fi
     done
     cursor_x=$target_x
     cursor_y=$target_y
