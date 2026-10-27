@@ -286,6 +286,19 @@ fn message_frame(
             ui.ctx().copy_text(selected.to_owned());
             ui.close();
         }
+        if let Some(selected) = selected {
+            ui.menu_button("Send selection to Decoder", |ui| {
+                decoder_send_menu(
+                    ui,
+                    selected.as_bytes(),
+                    if mode == MessageView::Pretty {
+                        "Pretty view selection (formatted/decoded)"
+                    } else {
+                        "Displayed text selection"
+                    },
+                );
+            });
+        }
         if ui.button(context.copy_label).clicked() {
             ui.ctx().copy_text(text.as_str().to_owned());
             ui.close();
@@ -1048,5 +1061,34 @@ mod tests {
                 _ => None,
             });
         assert_eq!(copied, Some("short"), "gutter text must not be copied");
+    }
+}
+
+/// A pending transfer is consumed after the current view has finished drawing.
+#[derive(Clone)]
+pub(super) struct DecoderTransfer {
+    pub bytes: Vec<u8>,
+    pub source: String,
+    pub replace: bool,
+}
+
+pub(super) fn decoder_send_menu(ui: &mut egui::Ui, bytes: &[u8], source: &str) {
+    for (label, replace) in [
+        ("Append panel", false),
+        ("Start new chain (replace current)", true),
+    ] {
+        if ui.button(label).clicked() {
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    egui::Id::unique("perseid.decoder.transfer"),
+                    DecoderTransfer {
+                        bytes: bytes.to_vec(),
+                        source: source.to_owned(),
+                        replace,
+                    },
+                )
+            });
+            ui.close();
+        }
     }
 }

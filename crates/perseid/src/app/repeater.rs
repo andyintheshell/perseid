@@ -578,11 +578,13 @@ fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
             let min_height = ui.available_height().max(180.0);
-            ui.add(
-                TextEdit::multiline(&mut tab.request)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .min_size(egui::vec2(0.0, min_height)),
+            ui.set_min_height(min_height);
+            super::message_view::message_editor(
+                ui,
+                tab.id,
+                MessagePane::Request,
+                MessageView::Raw,
+                &mut tab.request,
             );
         });
 }

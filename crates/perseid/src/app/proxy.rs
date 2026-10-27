@@ -778,6 +778,20 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::Intruder);
                                 ui.close();
                             }
+                            if can_send {
+                                ui.menu_button("Send request to Decoder", |ui| {
+                                    if let Some(bytes) = view::captured_message_bytes(item, false) {
+                                        super::message_view::decoder_send_menu(ui, &bytes, "Captured request (reconstructed head)");
+                                    }
+                                });
+                            }
+                            if has_response {
+                                ui.menu_button("Send response to Decoder", |ui| {
+                                    if let Some(bytes) = view::captured_message_bytes(item, true) {
+                                        super::message_view::decoder_send_menu(ui, &bytes, "Captured response (reconstructed head)");
+                                    }
+                                });
+                            }
                             ui.separator();
                             if ui
                                 .add_enabled(
