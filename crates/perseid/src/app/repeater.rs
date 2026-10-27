@@ -803,6 +803,44 @@ mod tests {
     }
 
     #[test]
+    fn request_editor_remains_editable_with_shared_message_view() {
+        let ctx = egui::Context::default();
+        let mut tab = RepeaterTab::new(1);
+        tab.request = "hello".into();
+        let run = |tab: &mut RepeaterTab, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| request_editor(ui, tab))
+                .drop_without_applying_deltas();
+        };
+        run(&mut tab, vec![]);
+        let pos = egui::pos2(55.0, 48.0);
+        run(&mut tab, vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            run(
+                &mut tab,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        run(&mut tab, vec![egui::Event::Text("!".into())]);
+        assert!(
+            tab.request.contains('!'),
+            "request editor must accept edits"
+        );
+    }
+
+    #[test]
     fn splits_lf_and_crlf_request_bodies() {
         assert_eq!(
             split_raw_request("POST / HTTP/1.1\r\n\r\nhello"),
