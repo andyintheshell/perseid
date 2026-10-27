@@ -42,15 +42,35 @@ for _ in {1..100}; do
 done
 window=''
 for _ in {1..100}; do
-    window="$(xdotool search --name '^Perseid$' 2>/dev/null | head -n 1 || true)"
+    # A window can have its title before X11 has mapped it. Focusing it in
+    # that gap raises BadMatch (X_SetInputFocus), so wait for a viewable one.
+    window="$(xdotool search --onlyvisible --name '^Perseid$' 2>/dev/null | head -n 1 || true)"
     [[ -n "$window" ]] && break
     sleep 0.2
 done
-[[ -n "$window" ]] || { echo 'Perseid window did not appear.' >&2; exit 1; }
+[[ -n "$window" ]] || { echo 'Perseid window did not become visible.' >&2; exit 1; }
 xdotool windowmove --sync "$window" 0 0
 xdotool windowsize --sync "$window" 1280 820
-xdotool windowfocus --sync "$window"
+focused=''
+for _ in {1..20}; do
+    if xdotool windowfocus --sync "$window" >"$out/x11-focus.log" 2>&1; then
+        focused="$(xdotool getwindowfocus 2>/dev/null || true)"
+        [[ "$focused" == "$window" ]] && break
+    fi
+    sleep 0.2
+done
+if [[ "$focused" != "$window" ]]; then
+    echo "Could not focus visible Perseid window $window (focused window: ${focused:-unknown})." >&2
+    cat "$out/x11-focus.log" >&2 || true
+    exit 1
+fi
 sleep 2
+
+# Check that FFmpeg can read the X11 display and retain the frame as a useful
+# failure artifact if the runner produces a blank or inaccessible capture.
+ffmpeg -hide_banner -loglevel error -y -f x11grab -framerate 1 \
+    -video_size 1280x820 -i "${DISPLAY}+0,0" -frames:v 1 "$out/x11-startup.png"
+[[ -s "$out/x11-startup.png" ]] || { echo 'X11 startup capture is empty.' >&2; exit 1; }
 
 ffmpeg -hide_banner -loglevel error -y -f x11grab -framerate 12 -video_size 1280x820 \
     -draw_mouse 1 -i "${DISPLAY}+0,0" -c:v libx264 -preset ultrafast -crf 18 \

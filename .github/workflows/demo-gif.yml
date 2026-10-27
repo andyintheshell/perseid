@@ -19,6 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@37062fbf7149fc5578d6c57e08aed62458b375d6 # v3.1
+        with:
+          ffmpeg-version: release
+          linking-type: static
+
       - name: Install desktop and recording dependencies
         run: |
           sudo apt-get update
@@ -27,7 +33,15 @@ jobs:
             libxkbcommon-dev libwayland-dev libssl-dev \
             xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1 \
             libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 \
-            xdotool ffmpeg curl
+            xdotool
+
+      - name: Verify FFmpeg features needed by the recorder
+        run: |
+          ffmpeg -version
+          ffmpeg -hide_banner -devices 2>&1 | grep -F 'x11grab'
+          ffmpeg -hide_banner -encoders 2>&1 | grep -F 'libx264'
+          ffmpeg -hide_banner -filters 2>&1 | grep -F 'palettegen'
+          ffmpeg -hide_banner -filters 2>&1 | grep -F 'paletteuse'
 
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
