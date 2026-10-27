@@ -10,8 +10,10 @@ definition of done, and deliberate deviations.
 **Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
 milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
-project-persistence workflow are available. The remaining M3 work is
-paging/search over all saved history, recent-project and quit prompts, and
+project-persistence workflow are available. Search scans all stored HTTP and
+WebSocket history as well as current Repeater and Intruder results. The remaining
+M3 work is paging the history and site-map tables through all saved history,
+recent-project and quit prompts, and
 persistent disk-retention controls. Temporary capture retention is bounded by
 configurable aggregate count and retained-body limits; saved files still have
 no automatic disk cap. HTTP/2,
@@ -60,19 +62,22 @@ promise.
 
   *Status: projects start in temporary memory by default. Save As, Open, and Save
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
-  project-scoped workbench state are written automatically. On open, the UI loads
-  only a bounded newest-first history snapshot; older records remain on disk but
-  are not yet pageable or searchable. Temporary storage evicts the oldest
+  project-scoped workbench state are written automatically. On open, the history
+  and site-map tables load only a bounded newest-first history snapshot; older
+  records remain on disk and are found by Search but are not yet pageable.
+  Temporary storage evicts the oldest
   captures when it exceeds the configurable aggregate count or retained-body
   limits. New Project and Open Project ask Save/Discard/Cancel when the current
   temporary project has unsaved work; a recent-project list and quit prompt are
   not implemented, and schema migrations are not implemented.
-  Search covers the loaded HTTP-history heads and decoded bodies with case,
-  regex, negative-match, in-scope, and live-update filters. Project-scoped
-  workbench state persists: UI selections/views, Inspector notes and sections,
-  Repeater tabs and their last responses, Intruder configuration and result
-  rows, Decoder panels, Comparer items and result-window state, Search state,
-  Sequencer samples/settings, and TLS interception/pass-through hosts. The
+  Search scans every stored HTTP exchange and WebSocket message in the
+  background with case, regex, negative-match, in-scope, and live-update filters,
+  and also matches current Repeater tabs and retained Intruder results.
+  Project-scoped workbench state persists: UI selections/views, Inspector notes
+  and sections, Repeater tabs and their last responses, Intruder configuration
+  and result rows, Decoder panels, Comparer items and result-window state,
+  Search state and structured result rows, Sequencer samples/settings, and TLS
+  interception/pass-through hosts. The
   Comparer diff and Sequencer analysis are recomputed on open. Live capture,
   running attacks or sends, held interception messages, and CA material do not
   persist. WebSocket message interception/replay remains unimplemented. Decoder

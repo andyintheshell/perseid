@@ -186,6 +186,41 @@ pub struct ProjectHandle {
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
+/// A read-only handle to the current project database.
+///
+/// It keeps the redb database alive independently of the writer thread, so a
+/// background search can read stored rows while captures continue to commit.
+/// Each query and scan batch uses its own short-lived read transaction rather
+/// than pinning one snapshot for the whole search.
+#[derive(Clone)]
+pub(crate) struct ProjectSnapshot {
+    db: Arc<Database>,
+}
+
+impl ProjectSnapshot {
+    pub(crate) fn get_http(&self, id: u64) -> Result<Option<HistoryItem>> {
+        queries::get_http(&self.db, id)
+    }
+
+    pub(crate) fn get_ws(&self, id: u64) -> Result<Option<WebSocketMessageItem>> {
+        queries::get_ws(&self.db, id)
+    }
+
+    pub(crate) fn scan_http(
+        &self,
+        visit: impl FnMut(HistoryItem, usize, usize) -> bool,
+    ) -> Result<()> {
+        queries::scan_http(&self.db, visit)
+    }
+
+    pub(crate) fn scan_ws(
+        &self,
+        visit: impl FnMut(WebSocketMessageItem, usize, usize) -> bool,
+    ) -> Result<()> {
+        queries::scan_ws(&self.db, visit)
+    }
+}
+
 impl ProjectHandle {
     /// Start a new temporary, in-memory project with the default retention caps.
     #[allow(dead_code)] // Used by unit tests; the app supplies explicit CLI limits.
@@ -238,6 +273,11 @@ impl ProjectHandle {
 
     pub fn status(&self) -> ProjectStatus {
         self.shared.status()
+    }
+
+    /// Capture the current database for read-only background work.
+    pub(crate) fn database_snapshot(&self) -> Option<ProjectSnapshot> {
+        self.shared.database().map(|db| ProjectSnapshot { db })
     }
 
     /// Assign stable project IDs and enqueue the event for durable storage.

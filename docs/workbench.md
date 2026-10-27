@@ -54,8 +54,9 @@ Saved projects persist HTTP and WebSocket captures plus the workbench state:
 scope and match/replace rules, the selected tab/section, filters, message views,
 Inspector notes and expanded sections, Repeater tabs and their last responses,
 Intruder configuration and result rows, Decoder panels, Comparer items and
-result-window state, Search state, Sequencer samples/analysis/settings, and TLS
-interception and pass-through settings. Active network work is not restored:
+result-window state, Search state and structured result rows, Sequencer
+samples/analysis/settings, and TLS interception and pass-through settings.
+Active network work is not restored:
 running attacks or sends, held interception messages, pending operations, and
 proxy lifecycle state stay in the current session. The local TLS CA certificate
 and private key stay outside the project file.
@@ -65,10 +66,11 @@ it can contain cookies, tokens, credentials, personal data, and binary bodies.
 See [Safety and privacy](safety.md#data-handling) before saving or
 sharing one.
 
-**History is stored on disk in a saved project, but the current UI is still
-bounded:** opening a project loads only the newest snapshot allowed by
-`--history-limit` and `--history-bytes`. Older rows remain in the file but are
-not yet pageable or searchable from the UI. In a temporary project, those same
+**History is stored on disk in a saved project, but the history tables are
+still bounded:** opening a project loads only the newest snapshot allowed by
+`--history-limit` and `--history-bytes`. Older rows remain in the file and are
+found by **Search**, but the history and site-map tables do not page through
+them yet. In a temporary project, those same
 flags define the default aggregate retention limits, but the limits can be set
 independently with `--temporary-retention-limit` and
 `--temporary-retention-bytes`: when the temporary store exceeds the configured
@@ -276,17 +278,30 @@ limits and do not make the whole editor or process a fixed-size allocation.
 
 Click the magnifying glass at the right side of the top toolbar, or press
 `Ctrl`/`Cmd`+`Shift`+`F`, to open the floating **Search** window. Type a term
-and press **Go** or `Enter`. Search covers retained **Proxy history**, including
-decrypted HTTPS exchanges.
+and press **Go** or `Enter`. Search covers every HTTP exchange and WebSocket
+message stored in the active project, including rows older than the loaded
+history snapshot, plus the Repeater tabs and retained Intruder results in the
+current workspace.
 
-Choose which parts of each exchange to examine:
+Choose which tools to search:
+
+- **Proxy history** searches stored HTTP exchanges, including decrypted HTTPS
+  traffic and rows that are not in the loaded history view.
+- **WebSockets** searches stored WebSocket messages and their connection URL.
+- **Repeater** searches each tab's current request editor and retained response.
+- **Intruder** searches each retained Intruder result's rendered request and
+  response.
+
+Choose which parts of each message to examine:
 
 - **Request headers** searches the request line and displayed headers.
 - **Request body** searches the decoded request body.
 - **Response headers** searches the status line and displayed headers.
 - **Response body** searches the decoded response body.
 
-The request and response body locations are on by default, and the headers are
+For WebSocket messages, the connection URL and metadata are treated as headers,
+and the payload is treated as a body, so either body option finds it. The
+request and response body locations are on by default, and the headers are
 included too. Supported gzip, deflate, and Brotli bodies are decoded before
 matching, so searching for readable response text works even when the captured
 wire body was compressed. Unsupported or malformed encodings fall back to the
@@ -297,25 +312,30 @@ The options follow Burp's search model:
 - **Case sensitive** makes literal and regex matching case-sensitive.
 - **Regex** treats the query as a regular expression. Invalid expressions show
   an error instead of running.
-- **Negative match** returns exchanges that do **not** match in any selected
+- **Negative match** returns messages that do **not** match in any selected
   location.
 - **In-scope only** restricts results to the host rules in **Target > Scope**.
   An empty scope includes every host.
-- **Dynamic update** reruns the search as the query, options, or captured
-  history change. Leave it off to run only when you press Go or Enter.
+- **Dynamic update** reruns the search as the query, options, or captured HTTP
+  and WebSocket history change. Leave it off to run only when you press Go or
+  Enter; Repeater and Intruder edits are picked up on the next run.
 
-The results table shows the source, host, URL, status code, response length, and
-request time. Select a row to inspect its request or response below. The detail
-pane has **Pretty**, **Raw**, and **Hex** views and the same Inspector/Notes rail
-as the history detail. Matches in the selected view are highlighted, and the
-detail header reports the match count.
+Stored HTTP and WebSocket history is scanned in a background worker, so the
+window stays responsive and reports progress while older rows are read. Up to
+10,000 results are kept; the status line says when the cap was reached. Results
+from the loaded history cache are shown first and deduplicated against the
+stored scan. Select a row to inspect its request or response below. The detail
+pane has **Pretty**, **Raw**, and **Hex** views and, for HTTP exchanges, the same
+Inspector/Notes rail as the history detail. Matches in the selected view are
+highlighted, and the detail header reports the match count. WebSocket rows show
+one **Message** view.
 
-Search is limited to the currently loaded HTTP history snapshot. In a saved
-project, older rows remain on disk but are not searched yet. WebSocket messages,
-Repeater traffic, and their responses are not included. A persistent project
-saves the query, options, result IDs, selection, and views; on open, stored
-result IDs are checked against the loaded history snapshot and unknown rows are
-dropped.
+A persistent project saves the query, options, structured result rows,
+selection, and views. Rows from Repeater or Intruder are restored even when
+those tools no longer hold the original message; selecting such a row shows
+that its request or response is no longer available. Workspaces saved by older
+versions contained only HTTP result IDs, so unknown IDs are dropped on open as
+before.
 Matching uses the decoded body representation; uncompressed retained bodies
 are searched in full, while decoded compressed previews are bounded by the
 same decoder limits as the message editor.
@@ -651,7 +671,7 @@ separate Space, matching the system green-button behavior.
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
 | Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
 | Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, are never pruned automatically, and are not encrypted. |
-| Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
+| Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Search scans all stored HTTP/WebSocket records in the background, but the history and site-map tables still do not page through older stored rows. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
