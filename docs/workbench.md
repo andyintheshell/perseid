@@ -252,7 +252,7 @@ project. Clearing history also clears them.
 | --- | --- |
 | **Pretty** | JSON indentation, HTML/XML layout, and one field per URL-encoded form entry; otherwise readable text. |
 | **Raw** | Reconstructed message text with line numbers and syntax highlighting. Binary/control bytes may be displayed lossily. |
-| **Hex** | A bounded byte-offset dump. In history and Repeater, this uses the same decoded body representation as the text views. |
+| **Hex** | A bounded byte-offset dump. In history and Repeater, this uses the same decoded body representation as the text views. Drag across the hex or ASCII columns to select bytes; **Copy selection** copies them as space-separated hexadecimal. |
 
 History and Repeater views decode gzip, deflate, and Brotli bodies for
 inspection. Displayed `Content-Encoding` is removed after successful decoding;
