@@ -1,0 +1,71 @@
+name: Record demo GIF
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 4
+
+jobs:
+  record:
+    name: Record the demo
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install desktop and recording dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libssl-dev \
+            xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl1 \
+            libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 \
+            xdotool ffmpeg curl
+
+      - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Build Perseid
+        run: cargo build -p perseid --locked
+
+      - name: Record and verify the live workflow
+        run: |
+          mkdir -p artifacts/demo
+          xvfb-run -a -s '-screen 0 1280x820x24' \
+            timeout 180 scripts/record-demo.sh artifacts/demo
+
+      - name: Upload demo GIF
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perseid-demo-gif
+          path: artifacts/demo/perseid-demo.gif
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostic recording and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perseid-demo-diagnostics
+          path: artifacts/demo/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Add artifact link to summary
+        run: |
+          {
+            echo '## Perseid demo GIF'
+            echo
+            echo 'Recorded a synthetic local capture and Repeater workflow.'
+            echo
+            echo "[Download the GIF](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#artifacts)"
+            echo
+            echo 'Artifacts expire after 30 days; copy the reviewed GIF into the repository for a permanent README link.'
+          } >> "$GITHUB_STEP_SUMMARY"

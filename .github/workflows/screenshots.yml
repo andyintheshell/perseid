@@ -207,3 +207,7 @@ jobs:
             echo
             echo "[Download the PNG artifacts](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#artifacts)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  demo_validation:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/demo-gif.yml
