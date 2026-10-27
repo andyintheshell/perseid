@@ -646,8 +646,8 @@ mod tests {
 
     use crate::history::Phase;
     use crate::proxy::{
-        CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
-        WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
+        CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RepeaterResult, RequestInfo,
+        ResponseHead, WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
     };
 
     use super::*;
@@ -752,6 +752,100 @@ mod tests {
 
     fn matcher(query: &str) -> SearchMatcher {
         SearchMatcher::new(query, false, false).expect("valid matcher")
+    }
+
+    #[test]
+    fn source_labels_ranks_and_cache_ids_are_distinct() {
+        assert_eq!(SearchSource::ProxyHttp.label(), "Proxy");
+        assert_eq!(SearchSource::ProxyWebSocket.label(), "WebSockets");
+        assert_eq!(SearchSource::Repeater.label(), "Repeater");
+        assert_eq!(SearchSource::Intruder.label(), "Intruder");
+        assert_eq!(
+            [
+                SearchSource::ProxyHttp,
+                SearchSource::ProxyWebSocket,
+                SearchSource::Repeater,
+                SearchSource::Intruder,
+            ]
+            .map(SearchSource::rank),
+            [0, 1, 2, 3]
+        );
+
+        let ids = [
+            SearchSource::ProxyHttp,
+            SearchSource::ProxyWebSocket,
+            SearchSource::Repeater,
+            SearchSource::Intruder,
+        ]
+        .map(|source| {
+            SearchKey {
+                source,
+                id: u64::MAX,
+            }
+            .cache_id()
+        });
+        assert_eq!(ids.map(|id| id >> 56), [1, 2, 3, 4]);
+        assert_eq!(
+            ids.map(|id| id & 0x00FF_FFFF_FFFF_FFFF),
+            [0x00FF_FFFF_FFFF_FFFF; 4]
+        );
+    }
+
+    #[test]
+    fn document_helpers_handle_bare_messages_and_request_targets() {
+        let request = "POST /login?q=1 HTTP/1.1\r\nHost: example.com\r\n\r\nuser=admin";
+        assert_eq!(request_target(request), "/login?q=1");
+        assert_eq!(request_target("GET"), "/");
+        assert_eq!(request_target(""), "/");
+
+        let views = request_views_from_raw(request);
+        assert!(views.raw.contains("user=admin"));
+        let (head, body) = split_message("GET / HTTP/1.1");
+        assert_eq!(head, "GET / HTTP/1.1");
+        assert!(body.is_empty());
+        let (head, body) = split_message("POST / HTTP/1.1\n\nbody");
+        assert_eq!(head, "POST / HTTP/1.1");
+        assert_eq!(body, b"body");
+    }
+
+    #[test]
+    fn repeater_result_helpers_cover_success_and_failure() {
+        let response = RepeaterResult::Response {
+            version: "HTTP/1.1".to_owned(),
+            status: 201,
+            reason: "Created".to_owned(),
+            headers: vec![("Content-Type".to_owned(), "text/plain".to_owned())],
+            body: CapturedBody::from_bytes(b"done".to_vec()),
+            body_error: None,
+        };
+        let raw = repeater_response_raw(&response).expect("response raw");
+        assert!(raw.contains("201 Created"));
+        assert!(raw.contains("done"));
+        assert_eq!(repeater_response_status(&response), Some(201));
+        assert_eq!(repeater_response_length(&response), 4);
+
+        let failed = RepeaterResult::Failed {
+            error: "connection refused".to_owned(),
+        };
+        assert!(repeater_response_raw(&failed).is_none());
+        assert_eq!(repeater_response_status(&failed), None);
+        assert_eq!(repeater_response_length(&failed), 0);
+    }
+
+    #[test]
+    fn http_header_locations_match_request_and_response_heads() {
+        let mut history = History::new(10, 1024 * 1024);
+        seed_exchange(&mut history, 1, "example.com", b"", b"", None);
+        let item = history.get(1).expect("seeded item");
+        let headers_only = SearchOptions {
+            request_body: false,
+            response_body: false,
+            ..Default::default()
+        };
+
+        assert!(matches_http(&matcher("POST"), headers_only, item));
+        assert!(matches_http(&matcher("text/plain"), headers_only, item));
+        assert!(!matches_http(&matcher("missing"), headers_only, item));
     }
 
     #[test]

@@ -1103,6 +1103,159 @@ mod tests {
     }
 
     #[test]
+    fn source_records_round_trip_every_tool() {
+        for source in [
+            SearchSource::ProxyHttp,
+            SearchSource::ProxyWebSocket,
+            SearchSource::Repeater,
+            SearchSource::Intruder,
+        ] {
+            let record: SearchSourceRecord = source.into();
+            assert_eq!(SearchSource::from(record), source);
+        }
+    }
+
+    #[test]
+    fn sorting_groups_sources_and_orders_timed_and_untimed_rows() {
+        let hit = |source, id, timestamp| {
+            SearchHit::text(SearchKey { source, id }, None, timestamp, "h", "u", None, 0)
+        };
+        let at = |seconds| Some(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
+        let mut state = SearchState {
+            results: vec![
+                hit(SearchSource::Intruder, 1, None),
+                hit(SearchSource::Repeater, 2, None),
+                hit(SearchSource::Repeater, 1, None),
+                hit(SearchSource::ProxyWebSocket, 1, at(5)),
+                hit(SearchSource::ProxyHttp, 2, at(20)),
+                hit(SearchSource::ProxyHttp, 1, at(10)),
+            ],
+            ..Default::default()
+        };
+
+        state.sort_results();
+
+        assert_eq!(
+            state
+                .results
+                .iter()
+                .map(|hit| (hit.key.source, hit.key.id))
+                .collect::<Vec<_>>(),
+            vec![
+                (SearchSource::ProxyHttp, 1),
+                (SearchSource::ProxyHttp, 2),
+                (SearchSource::ProxyWebSocket, 1),
+                (SearchSource::Repeater, 1),
+                (SearchSource::Repeater, 2),
+                (SearchSource::Intruder, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn clear_source_wrappers_only_drop_their_own_tool() {
+        let key = |source, id| SearchKey { source, id };
+        let hit = |key| SearchHit::text(key, None, None, "h", "u", None, 0);
+        let http = key(SearchSource::ProxyHttp, 1);
+        let ws = key(SearchSource::ProxyWebSocket, 1);
+        let repeater = key(SearchSource::Repeater, 1);
+        let mut state = SearchState {
+            results: vec![hit(http), hit(ws), hit(repeater)],
+            keys: HashSet::from([http, ws, repeater]),
+            selected: Some(http),
+            ..Default::default()
+        };
+
+        state.clear_http_source();
+        assert_eq!(state.selected, Some(ws));
+        state.clear_websocket_source();
+        assert_eq!(state.selected, Some(repeater));
+        assert_eq!(state.results.len(), 1);
+        assert!(state.keys.contains(&repeater));
+    }
+
+    #[test]
+    fn run_rejects_invalid_regex_and_empty_queries_without_results() {
+        let history = empty_history();
+        let websocket_history = WebSocketHistory::new(10, 1024);
+        let intruder = IntruderState::new();
+        let sources = sources(&history, &websocket_history, &[], &intruder);
+
+        let mut state = search_state("(");
+        state.options.regex = true;
+        state.run(&sources, &BTreeSet::new());
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|error| error.starts_with("Invalid regex:"))
+        );
+        assert!(!state.ran);
+
+        let mut state = search_state("");
+        state.run(&sources, &BTreeSet::new());
+        assert!(state.error.is_none());
+        assert!(!state.ran);
+        assert!(state.results.is_empty());
+    }
+
+    #[test]
+    fn workspace_application_caps_oversized_result_lists() {
+        let history = empty_history();
+        let websocket_history = WebSocketHistory::new(10, 1024);
+        let workspace = SearchWorkspace {
+            ran: true,
+            result_items: (0..=SEARCH_RESULT_LIMIT as u64)
+                .map(|id| SearchResultWorkspace {
+                    id,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+
+        let mut state = SearchState::default();
+        state.apply_workspace(&workspace, &history, &websocket_history);
+
+        assert_eq!(state.results.len(), SEARCH_RESULT_LIMIT);
+        assert_eq!(state.keys.len(), SEARCH_RESULT_LIMIT);
+        assert!(state.limit_reached);
+    }
+
+    #[test]
+    fn repeater_and_missing_details_are_reported_from_the_workspace() {
+        let history = empty_history();
+        let websocket_history = WebSocketHistory::new(10, 1024);
+        let tab = RepeaterTab::from_history(3, &history_item(3, "repeater.example"));
+        let tabs = [tab];
+        let intruder = IntruderState::new();
+        let sources = sources(&history, &websocket_history, &tabs, &intruder);
+
+        let mut state = SearchState::default();
+        let key = SearchKey {
+            source: SearchSource::Repeater,
+            id: 3,
+        };
+        state.selected = Some(key);
+        state.keys.insert(key);
+        state.ensure_detail(&sources);
+        let detail = state.detail.as_ref().expect("Repeater detail");
+        assert!(detail.has_request);
+        assert!(!detail.has_response);
+        assert!(!detail.single_message);
+
+        let missing = SearchKey {
+            source: SearchSource::Repeater,
+            id: 99,
+        };
+        state.selected = Some(missing);
+        state.keys.insert(missing);
+        state.detail = None;
+        state.ensure_detail(&sources);
+        assert!(state.detail.is_none());
+    }
+
+    #[test]
     fn workspace_round_trips_structured_results_and_legacy_ids() {
         let http_key = SearchKey {
             source: SearchSource::ProxyHttp,
@@ -1220,6 +1373,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stored_websocket_scan_loads_message_detail() {
+        let project = ProjectHandle::temporary().expect("temporary project");
+        let id = seed_project_ws(
+            &project,
+            "wss://socket.example/chat",
+            b"hello from the socket",
+        );
+        let history = empty_history();
+        let websocket_history = WebSocketHistory::new(10, 1024);
+        let intruder = IntruderState::new();
+        let snapshot = project.database_snapshot();
+        let sources = SearchSources {
+            history: &history,
+            websocket_history: &websocket_history,
+            repeater_tabs: &[],
+            intruder: &intruder,
+            snapshot,
+        };
+
+        let mut state = search_state("socket");
+        state.options.proxy_history = false;
+        state.options.repeater = false;
+        state.options.intruder = false;
+        state.run(&sources, &BTreeSet::new());
+        assert!(state.running);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while state.running && std::time::Instant::now() < deadline {
+            state.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(!state.running, "stored WebSocket scan should finish");
+        assert_eq!(state.results.len(), 1);
+        assert_eq!(state.results[0].key.source, SearchSource::ProxyWebSocket);
+        assert_eq!(state.results[0].key.id, id);
+        state.ensure_detail(&sources);
+        let detail = state.detail.as_ref().expect("WebSocket detail");
+        assert!(detail.single_message);
+        assert!(detail.has_response);
+        assert!(!detail.has_request);
+        assert!(detail.response.raw.contains("hello from the socket"));
+    }
+
     fn seed_project_exchange(project: &ProjectHandle, id: u64, host: &str, response_body: &[u8]) {
         let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(id);
         project.capture(&ProxyEvent::Started {
@@ -1259,6 +1457,42 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("flush reply")
             .expect("flush project");
+    }
+
+    fn seed_project_ws(project: &ProjectHandle, url: &str, payload: &[u8]) -> u64 {
+        let host = url
+            .split_once("://")
+            .map_or(url, |(_, rest)| rest)
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let event = ProxyEvent::WebSocketMessage {
+            id: 1,
+            timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+            connection: WebSocketConnectionInfo {
+                id: 1,
+                url: url.to_owned(),
+                host,
+                tls: true,
+                listener_port: 8080,
+                protocol: None,
+            },
+            direction: WebSocketDirection::ToClient,
+            opcode: WebSocketOpcode::Text,
+            payload: CapturedBody::from_bytes(payload.to_vec()),
+        };
+        let id = project
+            .capture(&event)
+            .event
+            .expect("captured WebSocket message")
+            .id();
+        let receipt = project.flush();
+        receipt
+            .recv_timeout(Duration::from_secs(5))
+            .expect("flush reply")
+            .expect("flush project");
+        id
     }
 
     #[test]
