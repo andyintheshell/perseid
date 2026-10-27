@@ -578,11 +578,13 @@ fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
             let min_height = ui.available_height().max(180.0);
-            ui.add(
-                TextEdit::multiline(&mut tab.request)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .min_size(egui::vec2(0.0, min_height)),
+            ui.set_min_height(min_height);
+            super::message_view::message_editor(
+                ui,
+                tab.id,
+                MessagePane::Request,
+                MessageView::Raw,
+                &mut tab.request,
             );
         });
 }
@@ -798,6 +800,44 @@ mod tests {
             response: None,
             phase: Phase::InFlight,
         }
+    }
+
+    #[test]
+    fn request_editor_remains_editable_with_shared_message_view() {
+        let ctx = egui::Context::default();
+        let mut tab = RepeaterTab::new(1);
+        tab.request = "hello".into();
+        let run = |tab: &mut RepeaterTab, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| request_editor(ui, tab))
+                .drop_without_applying_deltas();
+        };
+        run(&mut tab, vec![]);
+        let pos = egui::pos2(55.0, 48.0);
+        run(&mut tab, vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            run(
+                &mut tab,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        run(&mut tab, vec![egui::Event::Text("!".into())]);
+        assert!(
+            tab.request.contains('!'),
+            "request editor must accept edits"
+        );
     }
 
     #[test]

@@ -513,15 +513,23 @@ and provider-specific OID aliases are not implemented.
 
 </details>
 
+Right-click a text selection in a message pane and choose **Send selection to
+Decoder**, then append a panel or start a new chain. Pretty selections contain
+the displayed formatted or decoded text; Raw selections also reflect the text
+preview, which can normalize or replace binary bytes. Hex previews do not yet
+support selection. From HTTP history, right-click an exchange to send the full
+captured request or response, including its original captured body bytes and a
+reconstructed HTTP head. Captures may themselves be truncated. Starting a new
+chain replaces the current panels; appending preserves them.
+
 Text panels are editable; Hex panels are read-only and preview at most 64 KiB.
 Binary results open in Hex. Switching to Text gives a lossy preview, and editing
 it replaces the bytes with UTF-8 text. **Copy** and **Copy output** export all
 retained data as text or hex, not just the visible hex preview.
 
 Manual encode/decode/hash transforms accept at most 8 MiB of input and produce
-at most 16 MiB of output, including preserved selection prefixes/suffixes. There
-is no **Send to Decoder** action from message editors yet. Persistent projects
-restore Decoder panel contents, operation annotations, the last applied
+at most 16 MiB of output, including preserved selection prefixes/suffixes.
+Persistent projects restore Decoder panel contents, operation annotations, the last applied
 operation, Text/Hex view, and selection.
 
 ## Comparer

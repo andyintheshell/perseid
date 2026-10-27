@@ -53,6 +53,17 @@ impl DecoderState {
         self.scroll_to_end = false;
     }
 
+    pub(in crate::app) fn receive(&mut self, bytes: Vec<u8>, source: String, replace: bool) {
+        if replace || (self.panels.len() == 1 && self.panels[0].data.is_empty()) {
+            self.panels.clear();
+        }
+        let id = self.allocate_id();
+        let mut panel = Panel::new(id, bytes, Vec::new(), None);
+        panel.notice = Some(source);
+        self.panels.push(panel);
+        self.scroll_to_end = true;
+    }
+
     fn allocate_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -306,6 +317,22 @@ mod tests {
         panel.text_valid = std::str::from_utf8(bytes).is_ok();
         panel.spans.clear();
         panel.view = ViewMode::Text;
+    }
+
+    #[test]
+    fn receive_preserves_chains_or_replaces_them_explicitly() {
+        let mut state = DecoderState::new();
+        state.receive(vec![0, 255], "binary".into(), false);
+        assert_eq!(state.panels.len(), 1);
+        assert_eq!(state.panels[0].data, [0, 255]);
+        assert_eq!(state.panels[0].view, ViewMode::Hex);
+        state.receive(b"second".to_vec(), "selection".into(), false);
+        assert_eq!(state.panels.len(), 2);
+        assert_eq!(state.panels[0].data, [0, 255]);
+        assert_eq!(state.panels[1].notice.as_deref(), Some("selection"));
+        state.receive(b"new".to_vec(), "request".into(), true);
+        assert_eq!(state.panels.len(), 1);
+        assert_eq!(state.panels[0].data, b"new");
     }
 
     #[test]

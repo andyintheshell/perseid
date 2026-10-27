@@ -590,6 +590,17 @@ impl PerseidApp {
             MainTab::Decoder => self.decoder_view(ui),
             MainTab::Comparer => self.comparer_view(ui),
         }
+        let transfer = ui.ctx().data_mut(|data| {
+            let id = egui::Id::unique("perseid.decoder.transfer");
+            let transfer = data.get_temp::<message_view::DecoderTransfer>(id);
+            data.remove::<message_view::DecoderTransfer>(id);
+            transfer
+        });
+        if let Some(transfer) = transfer {
+            self.decoder
+                .receive(transfer.bytes, transfer.source, transfer.replace);
+            self.main_tab = MainTab::Decoder;
+        }
     }
 }
 

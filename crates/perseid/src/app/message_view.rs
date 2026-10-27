@@ -295,6 +295,19 @@ fn message_frame(
             ui.ctx().copy_text(selected.to_owned());
             ui.close();
         }
+        if let Some(selected) = selected {
+            ui.menu_button("Send selection to Decoder", |ui| {
+                decoder_send_menu(
+                    ui,
+                    selected.as_bytes(),
+                    if mode == MessageView::Pretty {
+                        "Pretty view selection (formatted/decoded)"
+                    } else {
+                        "Displayed text selection"
+                    },
+                );
+            });
+        }
         if ui.button(context.copy_label).clicked() {
             ui.ctx().copy_text(text.as_str().to_owned());
             ui.close();
@@ -1204,6 +1217,70 @@ mod tests {
         );
     }
 
+    fn text_position(output: &egui::FullOutput, label: &str) -> Option<Pos2> {
+        fn find(shape: &egui::Shape, label: &str) -> Option<Pos2> {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find(shape, label)),
+                _ => None,
+            }
+        }
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| find(&shape.shape, label))
+    }
+
+    fn click_message_label(ctx: &Context, text: &str, label: &str) {
+        let output = run_message_text_frame(ctx, vec![], text);
+        let pos = text_position(&output, label).unwrap_or_else(|| panic!("missing {label}"));
+        output.drop_without_applying_deltas();
+        run_message_text_frame(ctx, vec![Event::PointerMoved(pos)], text)
+            .drop_without_applying_deltas();
+        run_message_text_frame(ctx, vec![button(pos, true)], text).drop_without_applying_deltas();
+        run_message_text_frame(ctx, vec![button(pos, false)], text).drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn selection_context_menu_sends_only_selected_text_to_decoder() {
+        for (label, replace) in [
+            ("Append panel", false),
+            ("Start new chain (replace current)", true),
+        ] {
+            let text = "alpha\nbeta";
+            let ctx = Context::default();
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let start = egui::pos2(20.0, 5.0);
+            let end = egui::pos2(70.0, 5.0);
+            let right = egui::pos2(40.0, 10.0);
+            for events in [
+                vec![],
+                vec![Event::PointerMoved(start)],
+                vec![button(start, true)],
+                vec![Event::PointerMoved(end)],
+                vec![button(end, false)],
+                vec![Event::PointerMoved(right)],
+                vec![secondary_button(right, true)],
+                vec![secondary_button(right, false)],
+                vec![],
+            ] {
+                run_message_text_frame(&ctx, events, text).drop_without_applying_deltas();
+            }
+            click_message_label(&ctx, text, "Send selection to Decoder");
+            click_message_label(&ctx, text, label);
+            let transfer = ctx
+                .data(|data| {
+                    data.get_temp::<DecoderTransfer>(egui::Id::unique("perseid.decoder.transfer"))
+                })
+                .expect("transfer queued");
+            assert_eq!(transfer.bytes, b"alpha");
+            assert_eq!(transfer.source, "Displayed text selection");
+            assert_eq!(transfer.replace, replace);
+        }
+    }
+
     #[test]
     fn context_menu_copies_the_selection() {
         let text = "alpha\nbeta";
@@ -1339,5 +1416,34 @@ mod tests {
             Some(text),
             "the context menu should copy the message"
         );
+    }
+}
+
+/// A pending transfer is consumed after the current view has finished drawing.
+#[derive(Clone)]
+pub(super) struct DecoderTransfer {
+    pub bytes: Vec<u8>,
+    pub source: String,
+    pub replace: bool,
+}
+
+pub(super) fn decoder_send_menu(ui: &mut egui::Ui, bytes: &[u8], source: &str) {
+    for (label, replace) in [
+        ("Append panel", false),
+        ("Start new chain (replace current)", true),
+    ] {
+        if ui.button(label).clicked() {
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    egui::Id::unique("perseid.decoder.transfer"),
+                    DecoderTransfer {
+                        bytes: bytes.to_vec(),
+                        source: source.to_owned(),
+                        replace,
+                    },
+                )
+            });
+            ui.close();
+        }
     }
 }
