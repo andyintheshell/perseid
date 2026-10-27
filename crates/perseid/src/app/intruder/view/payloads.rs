@@ -8,6 +8,8 @@ use crate::proxy::marker_ranges;
 use crate::theme;
 
 use super::super::super::PerseidApp;
+use super::super::super::file_dialog::{self, FileDialog, FileDialogAction};
+use super::super::state::PayloadFileDialog;
 use super::super::state::payloads;
 use super::INTRUDER_PAYLOADS_ID;
 
@@ -138,6 +140,13 @@ impl PerseidApp {
                                 .desired_rows(8)
                                 .hint_text("admin\nguest\ntest"),
                         );
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Load from file").on_hover_text("Append payloads from a UTF-8 text file").clicked() {
+                                let directory = std::env::current_dir().unwrap_or_default();
+                                state.payload_file_dialog = Some(PayloadFileDialog { browser: FileDialog::open_any_file(directory), error: None });
+                            }
+                        });
+                        let set = state.active_set_mut();
                         ui.horizontal(|ui| {
                             if ui
                                 .button("Clear list")
@@ -174,6 +183,48 @@ impl PerseidApp {
                     });
             });
     }
+
+    pub(super) fn intruder_payload_file_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.intruder.payload_file_dialog.take() else {
+            return;
+        };
+        let mut action = FileDialogAction::None;
+        egui::Modal::new(egui::Id::unique("perseid.intruder.payload_file"))
+            .backdrop_color(egui::Color32::from_black_alpha(42))
+            .frame(file_dialog::modal_frame())
+            .show(ctx, |ui| {
+                ui.set_width(file_dialog::MODAL_WIDTH);
+                if file_dialog::title_bar(ui, "Load payloads from file", None) {
+                    action = FileDialogAction::Cancel;
+                } else {
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::symmetric(16, 12))
+                        .show(ui, |ui| {
+                            ui.set_width(file_dialog::MODAL_WIDTH - 32.0);
+                            action = dialog.browser.ui(ui, "Load", &mut dialog.error);
+                        });
+                }
+            });
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            || matches!(action, FileDialogAction::Cancel)
+        {
+            return;
+        }
+        if matches!(action, FileDialogAction::Submit) {
+            let result = dialog
+                .browser
+                .chosen_path()
+                .and_then(|path| self.intruder.append_payload_file(&path));
+            match result {
+                Ok(count) => {
+                    self.intruder.notice = Some(format!("Loaded {count} payload(s) from file."));
+                    return;
+                }
+                Err(error) => dialog.error = Some(error),
+            }
+        }
+        self.intruder.payload_file_dialog = Some(dialog);
+    }
 }
 
 /// Remove duplicate payloads while keeping the first occurrence and the
@@ -190,6 +241,144 @@ fn deduplicated_payloads(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut PerseidApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.intruder_view(ui),
+        )
+    }
+
+    fn text_pos(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_pos(shape, label)),
+            _ => None,
+        }
+    }
+
+    fn click(ctx: &egui::Context, app: &mut PerseidApp, label: &str) {
+        frame(ctx, app, vec![]).drop_without_applying_deltas();
+        let output = frame(ctx, app, vec![]);
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| text_pos(&shape.shape, label))
+            .unwrap_or_else(|| panic!("missing {label}"));
+        output.drop_without_applying_deltas();
+        for event in [
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ] {
+            frame(ctx, app, vec![event]).drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn payload_file_dialog_loads_and_appends_selected_file() {
+        let root =
+            std::env::temp_dir().join(format!("perseid-payload-ui-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("words.txt"), b"new\nsecond\n").unwrap();
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut app = PerseidApp::test_app();
+        app.intruder.payload_sets[0].text = "old".into();
+        click(&ctx, &mut app, "Load from file");
+        let dialog = app
+            .intruder
+            .payload_file_dialog
+            .as_mut()
+            .expect("dialog opened");
+        dialog.browser = FileDialog::open_any_file(root.clone());
+        click(&ctx, &mut app, "words.txt");
+        click(&ctx, &mut app, "Load");
+        assert!(app.intruder.payload_file_dialog.is_none());
+        assert_eq!(
+            payloads(&app.intruder.payload_sets[0].text),
+            ["old", "new", "second"]
+        );
+        assert_eq!(
+            app.intruder.notice.as_deref(),
+            Some("Loaded 2 payload(s) from file.")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn payload_file_dialog_keeps_errors_and_cancel_preserves_payloads() {
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut app = PerseidApp::test_app();
+        app.intruder.payload_sets[0].text = "old".into();
+        click(&ctx, &mut app, "Load from file");
+        click(&ctx, &mut app, "Load");
+        assert_eq!(
+            app.intruder
+                .payload_file_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .as_deref(),
+            Some("Enter a file name.")
+        );
+        assert_eq!(app.intruder.payload_sets[0].text, "old");
+        app.intruder
+            .payload_file_dialog
+            .as_mut()
+            .unwrap()
+            .browser
+            .set_path(&std::env::temp_dir().join(format!("missing-{}", uuid::Uuid::new_v4())));
+        click(&ctx, &mut app, "Load");
+        assert!(
+            app.intruder
+                .payload_file_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("Could not inspect")
+        );
+        assert_eq!(app.intruder.payload_sets[0].text, "old");
+        click(&ctx, &mut app, "Cancel");
+        assert!(app.intruder.payload_file_dialog.is_none());
+        assert_eq!(app.intruder.payload_sets[0].text, "old");
+        click(&ctx, &mut app, "Load from file");
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&ctx, &mut app, vec![escape]).drop_without_applying_deltas();
+        assert!(app.intruder.payload_file_dialog.is_none());
+    }
 
     #[test]
     fn deduplicate_keeps_first_occurrence_and_ignores_blank_lines() {
