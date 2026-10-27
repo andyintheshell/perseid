@@ -4,7 +4,9 @@
 //! Only the result detail pane builds message views here; everything else is
 //! kept independent of egui so the attack bookkeeping can be tested on its own.
 
+use std::io::Read;
 use std::ops::Range;
+use std::path::Path;
 use std::time::Instant;
 
 use crate::proxy::{
@@ -12,11 +14,13 @@ use crate::proxy::{
 };
 use crate::view::{self, MessageViews};
 
+use super::super::file_dialog::FileDialog;
 use super::super::{MessagePane, MessageView};
 
 /// Results retained by the workspace. The engine bounds its own queue; the UI
 /// keeps enough history for review without allowing a long attack to consume
 /// memory without limit.
+const MAX_PAYLOAD_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_RESULT_ROWS: usize = 1_000;
 const MAX_RESULT_BYTES: usize = 64 * 1024 * 1024;
 
@@ -52,12 +56,18 @@ impl IntruderDetail {
     }
 }
 
+pub(super) struct PayloadFileDialog {
+    pub(super) browser: FileDialog,
+    pub(super) error: Option<String>,
+}
+
 pub(in crate::app) struct IntruderState {
     pub(super) scheme: String,
     pub(super) host: String,
     pub(super) request: String,
     pub(super) attack: AttackType,
     pub(super) payload_sets: Vec<PayloadSet>,
+    pub(super) payload_file_dialog: Option<PayloadFileDialog>,
     pub(super) active_set: usize,
     pub(super) concurrency: usize,
     pub(super) update_host: bool,
@@ -93,6 +103,7 @@ impl IntruderState {
             request: "GET / HTTP/1.1\nHost: \n\n".to_string(),
             attack: AttackType::Sniper,
             payload_sets: vec![PayloadSet::default()],
+            payload_file_dialog: None,
             active_set: 0,
             concurrency: 5,
             update_host: true,
@@ -144,6 +155,7 @@ impl IntruderState {
         self.scheme = scheme;
         self.host = host;
         self.request = request;
+        self.payload_file_dialog = None;
         self.payload_sets.clear();
         self.payload_sets.push(PayloadSet::default());
         self.active_set = 0;
@@ -202,6 +214,21 @@ impl IntruderState {
                 .min(self.payload_sets.len().saturating_sub(1))
         };
         &mut self.payload_sets[index]
+    }
+
+    /// Append the file only after it has been read and validated completely.
+    pub(super) fn append_payload_file(&mut self, path: &Path) -> Result<usize, String> {
+        let text = read_payload_file(path)?;
+        let count = payload_line_count(&text) as usize;
+        if count == 0 {
+            return Err("The file contains no non-blank payloads.".to_string());
+        }
+        let set = self.active_set_mut();
+        if !set.text.is_empty() && !set.text.ends_with('\n') {
+            set.text.push('\n');
+        }
+        set.text.push_str(&text);
+        Ok(count)
     }
 
     fn set_count(&self) -> usize {
@@ -541,6 +568,38 @@ Connection: keep-alive\r\n\
     }
 }
 
+fn read_payload_file(path: &Path) -> Result<String, String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err("Choose a regular file.".to_string());
+    }
+    if metadata.len() > MAX_PAYLOAD_FILE_BYTES {
+        return Err("Payload files are limited to 16 MiB.".to_string());
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err("Choose a regular file.".to_string());
+    }
+    if metadata.len() > MAX_PAYLOAD_FILE_BYTES {
+        return Err("Payload files are limited to 16 MiB.".to_string());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_PAYLOAD_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > MAX_PAYLOAD_FILE_BYTES {
+        return Err("Payload files are limited to 16 MiB.".to_string());
+    }
+    let text =
+        String::from_utf8(bytes).map_err(|_| "Payload files must be UTF-8 text.".to_string())?;
+    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+}
+
 /// One payload per line. `str::lines` also accepts CRLF input, which makes
 /// pasted Windows payload files work without preprocessing.
 pub(super) fn payloads(text: &str) -> Vec<String> {
@@ -590,6 +649,82 @@ pub(super) fn result_size(result: &IntruderResult) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payload_file_appends_to_active_set_and_preserves_line_content() {
+        let path = std::env::temp_dir().join(format!("perseid-payload-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"\xef\xbb\xbfalpha\r\n\r\n spaced \r\nomega").unwrap();
+        let mut state = IntruderState::new();
+        state.attack = AttackType::ClusterBomb;
+        state.request = "GET /$$a$$/$$b$$ HTTP/1.1\n\n".into();
+        state.sync_payload_sets(2);
+        state.payload_sets[0].text = "untouched".into();
+        state.payload_sets[1].text = "existing".into();
+        state.active_set = 1;
+        assert_eq!(state.append_payload_file(&path).unwrap(), 3);
+        assert_eq!(state.payload_sets[0].text, "untouched");
+        assert_eq!(
+            payloads(&state.payload_sets[1].text),
+            ["existing", "alpha", " spaced ", "omega"]
+        );
+        assert_eq!(state.payload_count(), 4);
+        assert_eq!(
+            state.build_plan().payload_sets[1],
+            ["existing", "alpha", " spaced ", "omega"]
+        );
+        state.payload_sets[1].text = "existing\n".into();
+        assert_eq!(state.append_payload_file(&path).unwrap(), 3);
+        assert!(state.payload_sets[1].text.starts_with("existing\nalpha"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn payload_file_errors_leave_existing_list_unchanged() {
+        let root =
+            std::env::temp_dir().join(format!("perseid-payload-errors-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("words");
+        let mut state = IntruderState::new();
+        state.payload_sets[0].text = "keep".into();
+        assert!(
+            state
+                .append_payload_file(&path)
+                .unwrap_err()
+                .contains("Could not inspect")
+        );
+        assert!(
+            state
+                .append_payload_file(&root)
+                .unwrap_err()
+                .contains("regular file")
+        );
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(
+            state
+                .append_payload_file(&path)
+                .unwrap_err()
+                .contains("UTF-8")
+        );
+        std::fs::write(&path, b"\n  \r\n").unwrap();
+        assert!(
+            state
+                .append_payload_file(&path)
+                .unwrap_err()
+                .contains("no non-blank")
+        );
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_PAYLOAD_FILE_BYTES + 1)
+            .unwrap();
+        assert!(
+            state
+                .append_payload_file(&path)
+                .unwrap_err()
+                .contains("16 MiB")
+        );
+        assert_eq!(state.payload_sets[0].text, "keep");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn payloads_ignore_blank_lines_and_accept_crlf() {

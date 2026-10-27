@@ -379,9 +379,10 @@ Proxy history.
    or place the cursor and use **Add $$** for an empty position (`$$$$`).
    **Clear $$** removes every marker. **Auto $$** marks query values,
    `application/x-www-form-urlencoded` body values, and cookie values.
-3. Edit the payload list on the right, one value per line. Blank lines are
-   ignored. **Deduplicate** keeps the first occurrence. Sniper and Battering ram
-   use one shared set; Pitchfork and Cluster bomb use one set per position.
+3. Edit the payload list on the right, one value per line. **Load from file**
+   appends a UTF-8 text file (up to 16 MiB) to the selected set. Blank lines are
+   ignored, and **Deduplicate** keeps the first occurrence. Sniper and Battering
+   ram use one shared set; Pitchfork and Cluster bomb use one set per position.
 4. Choose an attack and click **Start attack** or press `Ctrl`+`Enter`:
 
    | Attack | Positions per request | Request count |
