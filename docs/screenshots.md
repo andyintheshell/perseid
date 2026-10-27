@@ -49,9 +49,10 @@ once the complete copy is ready.
 
 ## Search
 
-The top-toolbar magnifier opens a floating search window over the HTTP
-history. Search request or response heads and decoded bodies, then inspect the
-selected result in Pretty, Raw, or Hex with matches highlighted.
+The top-toolbar magnifier opens a floating search window over stored HTTP and
+WebSocket history plus current Repeater and Intruder traffic. Search request or
+response heads and decoded bodies, then inspect the selected result in Pretty,
+Raw, or Hex with matches highlighted.
 
 ![Search window with a decoded JSON response and highlighted matches](images/perseid-search.png)
 

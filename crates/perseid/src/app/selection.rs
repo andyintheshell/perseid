@@ -9,7 +9,7 @@ impl PerseidApp {
         self.selected = None;
         self.detail = None;
         self.inspector.clear_notes();
-        self.search.clear_history();
+        self.search.clear_http_source();
         self.invalidate_views();
         self.project.clear_http_history();
     }
@@ -18,6 +18,7 @@ impl PerseidApp {
         self.websocket_history.clear();
         self.websocket_selected = None;
         self.websocket_detail = None;
+        self.search.clear_websocket_source();
         self.invalidate_views();
         self.project.clear_ws_history();
     }

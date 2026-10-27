@@ -137,12 +137,14 @@ operation truncates the panels after its source and appends the result, so the
 chain cannot describe transformations that no longer produced the visible
 bytes.
 
-Project persistence is implemented, but the first UI integration loads a bounded
-newest-first snapshot rather than paging through all saved history. Search still
-queries the loaded in-memory history. The temporary redb project bounds capture
-retention with configurable aggregate count and retained-body limits
-(`--temporary-retention-*`, defaulting to the `--history-*` values), evicting
-the oldest records first. New and Open ask Save/Discard/Cancel when the temporary
+Project persistence is implemented, but the history and site-map tables load a
+bounded newest-first snapshot rather than paging through all saved history.
+Search scans all stored HTTP and WebSocket records on a background worker while
+also matching the current Repeater tabs and retained Intruder results. The
+temporary redb project bounds capture retention with configurable aggregate count
+and retained-body limits (`--temporary-retention-*`, defaulting to the
+`--history-*` values), evicting the oldest records first. New and Open ask
+Save/Discard/Cancel when the temporary
 project has unsaved work. Persistent project files have no automatic disk cap,
 and recent-project/quit prompts and schema migrations remain planned; WebSocket
 message interception/replay and a native extension point are also not

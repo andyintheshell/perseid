@@ -117,6 +117,7 @@ pub fn status_class_color(status: u16) -> Color32 {
 
 /// Formatted representations of one side of an exchange, for the
 /// Request/Response tabs and their Pretty/Raw/Hex views.
+#[derive(Clone, Default)]
 pub struct MessageViews {
     pub pretty: String,
     pub raw: String,

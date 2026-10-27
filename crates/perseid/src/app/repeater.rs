@@ -56,6 +56,46 @@ impl RepeaterTab {
         self.pending.is_some()
     }
 
+    pub(super) fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(super) fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub(super) fn scheme(&self) -> &str {
+        &self.scheme
+    }
+
+    pub(super) fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub(super) fn request(&self) -> &str {
+        &self.request
+    }
+
+    pub(super) fn response_raw(&self) -> Option<&str> {
+        self.response.as_ref().map(|reply| reply.views.raw.as_str())
+    }
+
+    pub(super) fn response_status(&self) -> Option<u16> {
+        self.response.as_ref().map(|reply| reply.status)
+    }
+
+    pub(super) fn response_size(&self) -> u64 {
+        self.response.as_ref().map_or(0, |reply| reply.size)
+    }
+
+    pub(super) fn response_duration(&self) -> Option<Duration> {
+        self.response.as_ref().map(|reply| reply.duration)
+    }
+
+    pub(super) fn response_views(&self) -> Option<&MessageViews> {
+        self.response.as_ref().map(|reply| &reply.views)
+    }
+
     fn new(id: u64) -> Self {
         Self {
             id,
