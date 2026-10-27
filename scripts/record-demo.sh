@@ -111,7 +111,7 @@ click_at() {
 
 # Give first-time viewers a beat to orient on Proxy > HTTP history, then show
 # real requests appearing in the table as they pass through the local proxy.
-move_cursor 440 240
+move_cursor 438 185
 sleep 0.5
 for path in '/api/catalog' '/api/products?id=1' '/api/products?id=2'; do
     curl -fsS --max-time 10 --noproxy '' --proxy http://127.0.0.1:18080 \
@@ -122,21 +122,23 @@ sleep 1
 
 # Select the third exchange (the product with id=2) and hold on its request and
 # response details before opening the context menu and sending it to Repeater.
-click_at 438 244 1
+click_at 438 273 1
 sleep 1.5
 xdotool click --clearmodifiers 3
 sleep 0.6
-click_at 512 263 1
+click_at 512 292 1
 sleep 2.5
 
-# Make the edited parameter change explicit, then send it to the local target.
+# Change only the product id in the captured request, then replay it.
 click_at 225 256 1
-sleep 0.4
-xdotool key --clearmodifiers ctrl+a
-xdotool type --clearmodifiers --delay 15 'GET /api/products?id=42 HTTP/1.1'
-xdotool key Return
-xdotool type --clearmodifiers --delay 15 'Host: 127.0.0.1:18090'
-xdotool key Return Return
+sleep 1
+xdotool key --clearmodifiers Home
+for _ in {1..21}; do
+    xdotool key --clearmodifiers Right
+    sleep 0.02
+done
+xdotool key --clearmodifiers Delete
+xdotool type --clearmodifiers --delay 80 '42'
 sleep 0.5
 click_at 60 140 1
 sleep 4
