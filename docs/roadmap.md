@@ -80,8 +80,10 @@ promise.
   interception/pass-through hosts. The
   Comparer diff and Sequencer analysis are recomputed on open. Live capture,
   running attacks or sends, held interception messages, and CA material do not
-  persist. WebSocket message interception/replay remains unimplemented. Decoder
-  still lacks SKEIN/TupleHash/OID aliases and Send to Decoder.*
+  persist. WebSocket message interception/replay remains unimplemented. History
+  and message selections can be sent to Decoder; Hex selections currently send
+  their displayed hexadecimal text rather than binary bytes. SKEIN, TupleHash,
+  and OID aliases remain unimplemented.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
@@ -92,8 +94,8 @@ promise.
   decrypted `wss://`, complete text/binary message reassembly, masking removal,
   a bounded UI history snapshot, and Pretty/Raw/Hex inspection. WebSocket
   message interception, editing, and replay remain. Intruder supports `$$`
-  positions, editable payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb
-  attacks, up to 32 concurrent requests, live result inspection, and
+  positions, editable and file-loaded payload sets, all four attack modes, up
+  to 32 concurrent requests, live result inspection, and
   enforced-scope checks for every generated request. Payload processing rules
   and saved attacks remain. Sequencer supports manual and live regex sampling,
   character- and bit-level tests, effective-entropy results, and per-analysis

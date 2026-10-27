@@ -5,8 +5,8 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version status:** `v0.2.0` is the latest published crate and GitHub
-release, including the first project-persistence implementation. The workspace
+**Current version status:** `v0.2.1` is the latest published crate and GitHub
+release; project persistence was introduced in `v0.2.0`. The workspace
 on `main` is `0.3.0-dev` for ongoing development.
 
 ## Current release formats

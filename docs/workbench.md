@@ -152,9 +152,11 @@ is a quick way to verify the path without a browser or CA trust.
   project. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
 - The in-memory history view is bounded by exchange count and retained-body
-  bytes. These limits evict rows from the UI cache; they do not cap the temporary
-  redb project's total RAM storage or prune saved-project files. Older saved
-  records remain on disk even when evicted from the UI cache.
+  bytes. These limits evict rows from the UI cache and do not prune saved-project
+  files. Temporary redb storage has separate aggregate count and body-byte
+  retention limits, which default to the history limits and can be configured
+  independently; older records are evicted when those limits are exceeded.
+  Older saved records remain on disk even when evicted from the UI cache.
 - The status bar shows in-flight requests, held messages, dropped capture events,
   rejected connections, and UI-cache evictions. A dropped-event warning means
   the history may be incomplete even if the client received its response.
@@ -537,9 +539,11 @@ and provider-specific OID aliases are not implemented.
 Right-click a text selection in a message pane and choose **Send selection to
 Decoder**, then append a panel or start a new chain. Pretty selections contain
 the displayed formatted or decoded text; Raw selections also reflect the text
-preview, which can normalize or replace binary bytes. Hex previews do not yet
-support selection. From HTTP history, right-click an exchange to send the full
-captured request or response, including its original captured body bytes and a
+preview, which can normalize or replace binary bytes. Hex preview selections
+can be copied as hexadecimal; sending one to Decoder currently sends the
+space-separated hexadecimal text, not the selected byte values. From HTTP
+history, right-click an exchange to send the full captured request or response,
+including its original captured body bytes and a
 reconstructed HTTP head. Captures may themselves be truncated. Starting a new
 chain replaces the current panels; appending preserves them.
 

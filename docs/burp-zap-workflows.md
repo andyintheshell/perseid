@@ -3,8 +3,8 @@
 [Documentation](README.md) · [Roadmap](roadmap.md) · [Capability matrix](burp-parity.md) · [Workbench guide](workbench.md)
 
 > **Reading this page:** the implementation snapshot and roadmap implications
-> are dated **24 October 2026**. The Burp and ZAP research is qualitative, not
-> a representative usage survey; vendor sources were checked **20 October
+> were last updated **27 October 2026**. The Burp and ZAP research is
+> qualitative, not a representative usage survey; vendor sources were checked **20 October
 > 2026**. For current status, use the [capability matrix](burp-parity.md) and
 > [roadmap](roadmap.md).
 
@@ -31,11 +31,13 @@ flowchart LR
     E --> G[Inspect and compare results]
     F --> G
     B --> H[Scope and site map]
-    I[Decoder: transform data separately]
+    B --> I[Decoder: transform selected data]
 ```
 
-Interception is optional and occurs as traffic passes through the proxy. Decoder
-is a separate utility; a direct Send to Decoder action is still missing.
+Interception is optional and occurs as traffic passes through the proxy. HTTP
+history and message panes can send data to Decoder; see the
+[Workbench guide](workbench.md#decoder) for how text previews, Hex selections,
+and captured body bytes differ.
 
 ### At a glance
 
@@ -51,7 +53,7 @@ is a separate utility; a direct Send to Decoder action is still missing.
 
 **Working** = usable end to end; **Partial** = a foundation with an important
 missing part; **Missing** = no usable workflow. The detail and priorities
-below are the October 2026 research snapshot, not a live release checklist.
+below reflect the current development branch, not a release checklist.
 Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-research).
 
 ### The manual testing loop
@@ -62,8 +64,8 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 | Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, and binary bodies are limited; WebSocket messages are captured in history but cannot be held or edited. | Maintain |
 | Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map has a Burp-style host/folder tree, display filters, and Contents table but is derived from the bounded history snapshot. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve with full-history queries |
 | Repeater / manual request editor | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. Persistent projects save request tabs and their last responses. WebSocket replay is absent; direct sends bypass proxy scope and rewriting. | Maintain; WebSocket in M4 |
-| Intruder / fuzzer | **Working** for HTTP/HTTPS: editable `$$` positions, shared or per-position payload sets, four attack modes, up to 32 concurrent requests, and Pretty/Raw/Hex results. Persistent projects save the request and payload configuration and result rows. No payload processing; enforced scope is checked before and during attacks. | Maintain; add payload processing |
-| Decoder / encoder | **Partial**: local transforms work with stacked Text/Hex panels; nine codecs, 31 common hashes, Smart decode, and selection-aware transforms. Persistent projects save panel contents, operation annotations, view, and selection. No Send to Decoder or SKEIN/TupleHash/OID aliases; 8 MiB input / 16 MiB output caps. | Maintain; fill hash gaps in M3 |
+| Intruder / fuzzer | **Working** for HTTP/HTTPS: editable `$$` positions, shared or per-position payload sets with file loading, four attack modes, up to 32 concurrent requests, and Pretty/Raw/Hex results. Persistent projects save the request and payload configuration and result rows. No payload processing; enforced scope is checked before and during attacks. | Maintain; add payload processing |
+| Decoder / encoder | **Partial**: local transforms work with stacked Text/Hex panels; eight codecs, 31 common hashes, Smart decode, and selection-aware transforms. HTTP history sends full captured messages and message panes send selections. Hex selections currently send displayed hexadecimal text, not binary bytes. Persistent projects save panel contents, operation annotations, view, and selection. SKEIN/TupleHash/OID aliases are absent; 8 MiB input / 16 MiB output caps. | Maintain; fill hash gaps in M3 |
 | Comparer / diff | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. Persistent projects save inputs, selections, and result-window state; the diff is recomputed on open. | Maintain |
 | Match/replace rewriting | **Working**: request/response head and buffered UTF-8 body rules, literal or regex, applied after interception. Rules persist in saved projects. | Maintain |
 
@@ -108,8 +110,8 @@ product stopped after capture or forced payload edits into an external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
 paging the history and site-map tables through the full saved history, a
-recent-project list and quit prompt, and a Send to Decoder action. Comparer now
-closes the "change one thing and compare" loop with a shared item list and paired
+recent-project list and quit prompt, and byte-preserving Hex transfers to
+Decoder. Comparer now closes the "change one thing and compare" loop with a shared item list and paired
 diff views. WebSocket message replay remains in M4; project files already
 preserve Repeater request tabs and responses, Intruder results, and the other
 project-scoped workspace state.
