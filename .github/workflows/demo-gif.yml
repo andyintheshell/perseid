@@ -51,7 +51,7 @@ jobs:
       - name: Record and verify the live workflow
         run: |
           mkdir -p artifacts/demo
-          xvfb-run -a -s '-screen 0 1280x820x24' \
+          xvfb-run -a -s '-screen 0 1600x1024x24' \
             timeout 180 scripts/record-demo.sh artifacts/demo
 
       - name: Upload demo GIF

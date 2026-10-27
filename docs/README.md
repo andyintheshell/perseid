@@ -32,6 +32,7 @@ use a local lab or another target you are explicitly authorized to test.
 | [Troubleshooting](troubleshooting.md) | Why is traffic missing, held, rejected, or failing TLS? What should go in a bug report? |
 | [Safety and privacy](safety.md) | What is retained? What does scope enforce? What happens to credentials and CA keys? |
 | [Screenshots](screenshots.md) | What does each tool look like? |
+| [Demo GIF storyboard](demo-gif-script.md) | What does the first-time-user demo show, and in what order? |
 | [Releasing](releasing.md) | How are platform packages built, reviewed, and published? |
 
 ## Project and technical references
