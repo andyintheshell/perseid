@@ -64,6 +64,9 @@ if [[ "$focused" != "$window" ]]; then
     cat "$out/x11-focus.log" >&2 || true
     exit 1
 fi
+# Xvfb starts with a large black cross-shaped cursor at the screen center.
+# Move into the app before recording so its normal pointer is shown instead.
+xdotool mousemove --sync 120 40
 sleep 2
 
 # Check that FFmpeg can read the X11 display and retain the frame as a useful
