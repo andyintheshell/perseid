@@ -562,18 +562,6 @@ impl PerseidApp {
             // Lay the row out from the right so the width-hungry summary bar
             // can shrink without colliding with the search field or switch.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} shown / {} captured",
-                        self.visible.len(),
-                        self.history.len()
-                    ))
-                    .small()
-                    .color(theme::TEXT_MUTED),
-                );
-                ui.add_space(4.0);
-                filter_help_badge(ui);
-
                 let switch = filter_switch(ui, &mut self.history_filter.enabled);
                 if switch.changed() {
                     self.visible_key = None;
@@ -1026,25 +1014,6 @@ fn filter_switch(ui: &mut egui::Ui, enabled: &mut bool) -> Response {
     response
         .on_hover_text("Apply the HTTP history display filter")
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-fn filter_help_badge(ui: &mut egui::Ui) {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(FILTER_BAR_HEIGHT), Sense::hover());
-    if ui.is_rect_visible(rect) {
-        let center = rect.center();
-        ui.painter()
-            .circle_stroke(center, 8.0, Stroke::new(1.2, theme::TEXT_MUTED));
-        ui.painter().text(
-            center,
-            Align2::CENTER_CENTER,
-            "?",
-            FontId::proportional(11.0),
-            theme::TEXT_MUTED,
-        );
-    }
-    response.on_hover_text(
-        "Filter settings hide table rows. The search field is a quick text filter; the filter dialog also supports regular expressions, negative searches, MIME classes, status classes, and file extensions.",
-    );
 }
 
 fn fieldset(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
@@ -1747,9 +1716,10 @@ mod tests {
         let text = rendered_text(|ui| app.history_toolbar(ui));
         assert!(text.iter().any(|line| line == "Showing all items"));
         assert!(
-            text.iter().any(|line| line == "2 shown / 2 captured"),
+            !text.iter().any(|line| line.contains("shown /")),
             "{text:?}"
         );
+        assert!(!text.iter().any(|line| line == "?"), "{text:?}");
 
         assert!(click_ui_text(&ctx, "Showing all items", |ui| {
             app.history_toolbar(ui)
