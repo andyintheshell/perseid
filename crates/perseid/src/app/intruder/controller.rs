@@ -378,6 +378,7 @@ impl PerseidApp {
             return;
         }
         let state = &mut self.intruder;
+        state.payload_file_dialog = None;
         state.scheme = workspace.scheme.clone();
         state.host = workspace.host.clone();
         state.request = workspace.request.clone();
