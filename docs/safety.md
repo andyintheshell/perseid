@@ -91,15 +91,15 @@ Perseid has two project modes:
 Saved workbench state includes scope, match/replace rules, the selected
 tab/section, filters, message views, Inspector notes and sections, Repeater tabs
 and their last responses, Intruder configuration and results, Decoder panels,
-Comparer items and result-window state, Search state, Sequencer
-samples/settings/analysis, and TLS interception and pass-through hosts. It does
-not include running attacks or sends, held interception messages, pending
+Comparer items and result-window state, Search state and structured result rows,
+Sequencer samples/settings/analysis, and TLS interception and pass-through hosts.
+It does not include running attacks or sends, held interception messages, pending
 network operations, or proxy lifecycle state. Opening a project loads only a
-bounded newest-first history snapshot today; older records remain in the file
-but are not yet pageable or searchable from the UI. If a stored HTTP, WebSocket,
-or workspace snapshot cannot be decoded, the open fails visibly and the
-previously open project stays active. The project does not include
-the local TLS CA certificate or private key.
+bounded newest-first history snapshot; older records remain in the file and can
+be found by Search, but the history and site-map tables are not yet pageable. If
+a stored HTTP, WebSocket, or workspace snapshot cannot be decoded, the open fails
+visibly and the previously open project stays active. The project does not
+include the local TLS CA certificate or private key.
 
 New project files are created owner-only (`0600`) on Unix; Windows uses the
 user's normal filesystem ACLs. This is access control, not encryption. Project

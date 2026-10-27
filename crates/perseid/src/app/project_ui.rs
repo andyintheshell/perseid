@@ -1244,7 +1244,7 @@ impl PerseidApp {
         self.apply_comparer_ui_workspace(&workspace.comparer_ui);
         self.inspector.apply_workspace(&workspace.inspector);
         self.search
-            .apply_workspace(&workspace.search, &self.history);
+            .apply_workspace(&workspace.search, &self.history, &self.websocket_history);
         self.sequencer.apply_workspace(&workspace.sequencer);
         self.invalidate_views();
         self.site_map = None;
@@ -1566,6 +1566,9 @@ mod tests {
                 dirty: false,
                 results: Vec::new(),
                 selected: None,
+                result_items: Vec::new(),
+                selected_item: None,
+                limit_reached: false,
                 pane: MessagePaneRecord::Request,
                 request_view: MessageViewRecord::Hex,
                 response_view: MessageViewRecord::Raw,

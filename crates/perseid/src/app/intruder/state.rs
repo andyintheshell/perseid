@@ -5,7 +5,7 @@
 //! kept independent of egui so the attack bookkeeping can be tested on its own.
 
 use std::ops::Range;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::proxy::{
     AttackType, IntruderPlan, IntruderResult, RepeaterResult, marker_ranges, split_raw_request,
@@ -34,6 +34,16 @@ pub(super) struct IntruderDetail {
     pub(super) response_error: Option<String>,
     pub(super) truncated: bool,
     pub(super) complete: bool,
+}
+
+/// Search-facing detail for one retained Intruder result.
+pub(in crate::app) struct IntruderSearchDetail {
+    pub(in crate::app) sequence: u64,
+    pub(in crate::app) request: Option<MessageViews>,
+    pub(in crate::app) response: Option<MessageViews>,
+    pub(in crate::app) status: Option<u16>,
+    pub(in crate::app) length: u64,
+    pub(in crate::app) duration: Option<Duration>,
 }
 
 impl IntruderDetail {
@@ -387,46 +397,85 @@ impl IntruderState {
         {
             return;
         }
-        let Some(result) = self
-            .results
-            .iter()
-            .find(|result| result.sequence == sequence)
-        else {
+        let Some(detail) = self.search_detail(sequence) else {
             self.detail = None;
             return;
         };
+        let result = self
+            .results
+            .iter()
+            .find(|result| result.sequence == sequence);
+        let (response_error, truncated, complete) =
+            result.map_or((None, false, true), |result| match &result.result {
+                RepeaterResult::Response {
+                    body, body_error, ..
+                } => (body_error.clone(), body.is_truncated(), body.is_complete()),
+                RepeaterResult::Failed { error } => (Some(error.clone()), false, true),
+            });
+        self.detail = Some(IntruderDetail {
+            sequence,
+            request: detail.request,
+            response: detail.response,
+            response_error,
+            truncated,
+            complete,
+        });
+    }
 
+    /// Build the same request/response views as [`Self::ensure_detail`]
+    /// without mutating the workspace. Search uses this for its own detail
+    /// pane and result metadata.
+    pub(in crate::app) fn search_detail(&self, sequence: u64) -> Option<IntruderSearchDetail> {
+        let result = self
+            .results
+            .iter()
+            .find(|result| result.sequence == sequence)?;
         let request = self.last_plan.as_ref().and_then(|plan| {
             let rendered = plan.render_sequence(sequence).ok()?;
             let (head, body) = split_raw_request(&rendered.raw);
             Some(view::editor_views(head, body.as_bytes()))
         });
-        let (response, response_error, truncated, complete) = match &result.result {
+        let (response, status, length) = match &result.result {
             RepeaterResult::Response {
                 version,
                 status,
                 reason,
                 headers,
                 body,
-                body_error,
+                ..
             } => (
                 Some(view::response_views_from_parts(
                     version, *status, reason, headers, body,
                 )),
-                body_error.clone(),
-                body.is_truncated(),
-                body.is_complete(),
+                Some(*status),
+                body.total_len(),
             ),
-            RepeaterResult::Failed { error } => (None, Some(error.clone()), false, true),
+            RepeaterResult::Failed { .. } => (None, None, 0),
         };
-        self.detail = Some(IntruderDetail {
+        Some(IntruderSearchDetail {
             sequence,
             request,
             response,
-            response_error,
-            truncated,
-            complete,
-        });
+            status,
+            length,
+            duration: Some(result.duration),
+        })
+    }
+
+    pub(in crate::app) fn search_results(&self) -> &[IntruderResult] {
+        &self.results
+    }
+
+    pub(in crate::app) fn search_plan(&self) -> Option<&IntruderPlan> {
+        self.last_plan.as_ref()
+    }
+
+    pub(in crate::app) fn search_scheme(&self) -> &str {
+        &self.scheme
+    }
+
+    pub(in crate::app) fn search_host(&self) -> &str {
+        &self.host
     }
 
     pub(super) fn target_range(&self) -> Range<usize> {
@@ -723,6 +772,42 @@ mod tests {
 
         state.selection = Some(2..6);
         assert_eq!(state.target_range(), 2..6);
+    }
+
+    #[test]
+    fn search_detail_exposes_the_rendered_request_and_retained_response() {
+        let mut state = IntruderState::new();
+        state.scheme = "https".to_string();
+        state.host = "example.test".to_string();
+        state.request = "GET /?q=$$1$$ HTTP/1.1\nHost: example.test\n\n".to_string();
+        state.payload_sets[0].text = "needle".to_string();
+        let plan = state.build_plan();
+        state.begin_attack(3, 1, plan);
+        state.record_result(IntruderResult {
+            attack_id: 3,
+            sequence: 1,
+            payloads: vec!["needle".to_string()],
+            duration: std::time::Duration::from_millis(5),
+            result: RepeaterResult::Response {
+                version: "HTTP/1.1".to_string(),
+                status: 200,
+                reason: "OK".to_string(),
+                headers: vec![("Content-Type".to_string(), "text/plain".to_string())],
+                body: crate::proxy::CapturedBody::from_bytes(b"found needle".to_vec()),
+                body_error: None,
+            },
+        });
+
+        let detail = state.search_detail(1).expect("retained result");
+        assert_eq!(detail.sequence, 1);
+        assert_eq!(detail.status, Some(200));
+        assert_eq!(detail.length, 12);
+        assert_eq!(detail.duration, Some(std::time::Duration::from_millis(5)));
+        let request = detail.request.expect("rendered request");
+        assert!(request.raw.contains("q=needle"), "request uses the payload");
+        let response = detail.response.expect("retained response");
+        assert!(response.raw.contains("found needle"));
+        assert!(state.search_detail(99).is_none());
     }
 
     #[test]

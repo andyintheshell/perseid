@@ -41,7 +41,7 @@ is a separate utility; a direct Send to Decoder action is still missing.
 
 | Area | Snapshot | Next step |
 | --- | --- | --- |
-| **Core HTTP loop** | Capture, interception, replay, payload testing, comparison, and local transforms are available. | Maintain the loop; finish full-history paging and search. |
+| **Core HTTP loop** | Capture, interception, replay, payload testing, comparison, local transforms, and search across stored history are available. | Maintain the loop; finish full-history paging. |
 | **Projects and evidence** | Captures and workspace state persist in local project files; HTTP history supports Copy as curl. | Add recent projects, a quit prompt, and useful export formats. |
 | **Sessions** | A browser keeps its own cookies; replay can reuse captured headers. | Add a small cookie and session-handling slice. |
 | **WebSockets** | Message capture and inspection work. | Add message interception and replay. |
@@ -58,7 +58,7 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
-| Proxy capture and HTTP history | **Working**: persistent projects store captured records; the temporary redb store evicts the oldest captures at configurable aggregate count and retained-body limits. The UI shows a bounded newest-first snapshot and Search covers that loaded snapshot; older saved rows are not pageable yet. | Maintain; finish paging/search |
+| Proxy capture and HTTP history | **Working**: persistent projects store captured records; the temporary redb store evicts the oldest captures at configurable aggregate count and retained-body limits. The history tables show a bounded newest-first snapshot, while Search scans all stored HTTP and WebSocket records in the background; older saved rows are not yet pageable. | Maintain; finish history paging |
 | Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, and binary bodies are limited; WebSocket messages are captured in history but cannot be held or edited. | Maintain |
 | Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map has a Burp-style host/folder tree, display filters, and Contents table but is derived from the bounded history snapshot. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve with full-history queries |
 | Repeater / manual request editor | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. Persistent projects save request tabs and their last responses. WebSocket replay is absent; direct sends bypass proxy scope and rewriting. | Maintain; WebSocket in M4 |
@@ -71,7 +71,7 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
-| Persistence and search | **Partial**: temporary projects are RAM-only with configurable aggregate count/body retention and Save/Discard/Cancel prompts before New/Open; saved projects use a local redb `.perseid` file with automatic writes for captures and project-scoped workbench state, and no disk-retention cap. No encryption or migrations. Search is limited to loaded HTTP history; older stored rows are not pageable/searchable yet. | **M3 — in progress** |
+| Persistence and search | **Partial**: temporary projects are RAM-only with configurable aggregate count/body retention and Save/Discard/Cancel prompts before New/Open; saved projects use a local redb `.perseid` file with automatic writes for captures and project-scoped workbench state, and no disk-retention cap. No encryption or migrations. Search covers all stored HTTP/WebSocket history plus current Repeater tabs and retained Intruder results; the history tables still do not page older stored rows. | **M3 — in progress** |
 | Authentication and session handling | **Partial**: an external browser keeps its own cookies while proxying; Perseid has no cookie jar, login macro, token refresh, per-user context, or session rules. | **P1 — add to M3/M4** |
 | WebSocket testing | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. Saved projects retain messages, but the UI loads a bounded snapshot. No interception, editing, replay, or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | **Partial**: saved projects retain captured exchanges and project-scoped workbench state; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
@@ -92,9 +92,10 @@ For current feature details, see the [README](../README.md), [Burp parity matrix
 ### 1. Intruder, Repeater, and Decoder have landed; finish the loop around them
 
 Milestone 3 now includes redb-backed project history/workspace state as well as
-search, Repeater, Decoder, and Comparer. The storage foundation has landed, but
-the UI still loads a bounded history snapshot rather than paging through all
-saved records; Search is currently limited to that snapshot.
+search, Repeater, Decoder, and Comparer. The storage foundation has landed, and
+Search scans all stored HTTP/WebSocket history plus current Repeater and
+Intruder results, but the history and site-map tables still load a bounded
+snapshot rather than paging through all saved records.
 The rankings put Repeater first, and editable HTTP/HTTPS replay now exists: a
 request can be seeded from history, edited in its own tab, sent directly to the
 target, and inspected in Pretty/Raw/Hex. Intruder extends that
@@ -106,12 +107,12 @@ transforms and a replaceable downstream chain. That closes the gaps where the
 product stopped after capture or forced payload edits into an external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
-paging and searching the full saved history, a recent-project list and quit
-prompt, and a Send to Decoder action. Comparer now closes the "change one thing
-and compare" loop with a shared item list and paired diff views. WebSocket
-message replay remains in M4; project files already preserve Repeater request
-tabs and responses, Intruder results, and the other project-scoped workspace
-state.
+paging the history and site-map tables through the full saved history, a
+recent-project list and quit prompt, and a Send to Decoder action. Comparer now
+closes the "change one thing and compare" loop with a shared item list and paired
+diff views. WebSocket message replay remains in M4; project files already
+preserve Repeater request tabs and responses, Intruder results, and the other
+project-scoped workspace state.
 
 ### 2. Add a small session-handling slice
 
@@ -196,11 +197,12 @@ The following comparison explains the evidence behind the implementation priorit
   point; Repeater (or ZAP's manual request editor) is where most hypotheses are
   actually tested.
 - Perseid covers the entry point, editable replay, payload testing, comparison,
-  and local transformation: proxy capture, interception, scope, message
-  inspection, Repeater, Intruder, Decoder, Comparer, and local project files.
-  The remaining daily-workflow gaps include paging/searching all saved history,
-  richer session convenience, WebSocket message interception/replay, and project
-  workflow polish—not scanner coverage.
+  local transformation, and search across stored history: proxy capture,
+  interception, scope, message inspection, Repeater, Intruder, Decoder, Comparer,
+  Search, and local project files. The remaining daily-workflow gaps include
+  paging the history and site-map tables through all saved history, richer session
+  convenience, WebSocket message interception/replay, and project workflow
+  polish—not scanner coverage.
 - Burp CE is explicitly a manual toolkit.[1] PortSwigger calls Repeater and
   Intruder "the center of the Burp Suite manual testing workflow" and says they
   have been "among Burp Suite's most popular tools" since 2003.[11] Burp's

@@ -86,9 +86,9 @@ exchanges are also separate from Proxy history by design.
   or unsupported schema versions are rejected rather than silently rewritten.
 - **History limits do not delete old saved records.** Opening a project loads a
   bounded newest-first snapshot controlled by `--history-limit` and
-  `--history-bytes`. Older records remain in the file but are not pageable or
-  searchable in the current UI. **Clear history** is destructive and removes
-  stored captures from the active project.
+  `--history-bytes`. Older records remain in the file and are scanned by Search,
+  but the history and site-map tables cannot page through them yet. **Clear
+  history** is destructive and removes stored captures from the active project.
 - **Check the project status widget** for the last persistence error or capture
   loss. If a saved write failed, do not assume the newest changes reached disk;
   address the reported path/permission/disk-space issue before closing.
