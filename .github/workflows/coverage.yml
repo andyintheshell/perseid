@@ -19,6 +19,8 @@ env:
 jobs:
   coverage:
     name: Rust coverage
+    # Release promotions are already covered on their source branch.
+    if: github.event_name != 'pull_request' || github.base_ref != 'release'
     strategy:
       fail-fast: false
       matrix:
