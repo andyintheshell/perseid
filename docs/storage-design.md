@@ -35,7 +35,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 | Proposal | Implemented | Why |
 | --- | --- | --- |
 | §9.2 ordered delta replay during Save As | The single writer copies a consistent read snapshot to a new `initializing` file, marks it ready, then switches to it. Capture events queued during the copy are processed by that writer after the switch; queue overflow is reported as capture loss. | No separate delta log is used. Single-writer ordering handles normal handover while retaining the proposed file format and service boundary. |
-| Paged UI over `list_http`/`list_ws` (§7.1) | Paged queries and cursors exist and are tested; the first UI wiring hydrates a bounded newest-first snapshot (count and byte budget) into the existing `History`/`WebSocketHistory` caches | Keeps the existing UI behavior in this change; the query API is the migration path. |
+| Paged UI over `list_http`/`list_ws` (§7.1) | Paged queries and cursors exist and are tested; the history and site-map tables hydrate a bounded newest-first snapshot (count and byte budget) into the existing `History`/`WebSocketHistory` caches. Search scans all stored HTTP/WebSocket records through the paged queries on a background worker. | Keeps the existing history UI behavior in this change while making all stored traffic searchable; the query API remains the migration path for paged tables. |
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
 | §7.2 separately versioned workspace component keys | One `workspace/v1` JSON document holds all project-scoped workbench state, stored inline up to 32 MiB or split into 8 MiB chunks in the same `workspace` table with a manifest. Reads are capped at 512 MiB. | A single atomic snapshot keeps cross-tool state consistent; chunking handles result bodies without a schema change. |
 | §7.2 persist logical inputs and regenerate derived results | Intruder results store response heads/bodies and rebuild their detail views; Comparer diffs and Sequencer analysis are recomputed on open. Repeater's last response is stored as its Pretty/Raw/Hex views because the tab does not retain the raw body. | Intruder and Repeater responses are already bounded by the UI; storing views preserves the visible result without adding a second body store. |
@@ -45,7 +45,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 ### 0.3 Test and follow-up notes
 
 - Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal without explicit consent, staged overwrite of an existing file, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
-- Follow-up work, in priority order: (1) wire history views and Search to the paged persistent queries so users can reach older saved records; (2) add a recent-project list and a quit prompt; (3) add schema migration/integrity handling and more crash, scale, and sidecar tests; (4) define persistent disk-capacity/retention controls.
+- Follow-up work, in priority order: (1) wire history and site-map views to the paged persistent queries so users can reach older saved records in the tables (Search already scans all stored HTTP/WebSocket records); (2) add a recent-project list and a quit prompt; (3) add schema migration/integrity handling and more crash, scale, and sidecar tests; (4) define persistent disk-capacity/retention controls.
 
 ## 1. Original proposal decision
 
@@ -115,7 +115,7 @@ Relevant source modules to adapt:
 | `crates/perseid/src/history.rs` | `History` holds `HashMap<u64, HistoryItem>`, `VecDeque` order, byte/count limits and in-flight state. Migrate its responsibilities into project storage and a bounded presentation cache. |
 | `crates/perseid/src/websocket_history.rs` | Analogous bounded WebSocket records; persist messages and compact connection metadata. |
 | `crates/perseid/src/app.rs` | `PerseidApp` holds history, WebSocket history, workbench settings, tab states, selection and filters; replace direct ownership of the *complete* history with project handles/queries. |
-| `crates/perseid/src/app/search.rs` | Refactor cross-history search to stream/cancel project queries; preserve current filter semantics. |
+| `crates/perseid/src/app/search/` | Implemented cross-history search that scans stored project queries on a cancellable background worker and matches in-memory Repeater/Intruder state; preserves the existing filter semantics. |
 | `crates/perseid/src/app/{repeater,intruder,decoder,comparer,rules,inspector}.rs` | Add explicit snapshot/restore DTOs; decide which parts are persistent vs transient. |
 | `crates/perseid/src/site_map.rs` | The site map is derived from HTTP history. Rebuild from project records or later maintain a rebuildable internal index. |
 | `crates/perseid/src/ca_store.rs` | **Leave outside project storage**: local CA and private key remain per-user, machine-specific application data. |
@@ -438,6 +438,8 @@ Persistent projects must not hydrate every history item on open. `History`'s exi
 
 The v0.1.0 UI supports text/case/regex/negative/in-scope and history-wide searching. redb does **not** provide SQL or a built-in full-text search index.
 
+Implemented in the current 0.3 development line: HTTP and WebSocket scans page through stored records in short-lived batches on a background worker, report progress, enforce a 10,000-row result cap, and cancel when the search is replaced or its source is cleared. Loaded history/WebSocket caches are checked first so a just-captured row is visible before the writer commits it; the stored scan deduplicates by source and ID. Repeater and Intruder are matched from their bounded in-memory state, whose results are not in the project history tables.
+
 Initial implementation:
 
 1. Apply cheap **indexed** filters first: host, status, time, scope.
@@ -669,7 +671,7 @@ Implement in narrowly scoped PRs; make the smallest vertical slice functional be
 
 ### Phase E — Search, resilience and release hardening
 
-- [ ] Move history search off the frame thread; implement cancellation, pagination, bounded decode and progress.
+- [x] Move history search off the frame thread with cancellation, bounded result/decode limits, progress, and short-lived batched read transactions. (Paged history tables remain follow-up work.)
 - [ ] Implement reopen-time in-flight repair, schema migrations, integrity errors, graceful disk-full behavior and interruption diagnostics.
 - [ ] Implement Save Copy through a consistent read snapshot; verify the copy opens independently.
 - [ ] Add crash injection at every transaction/transfer state and keep persistent format fixtures in the test suite.
@@ -730,8 +732,8 @@ The links above point to current `main` (workspace `0.3.0-dev`) for readable sou
 ## 15. Original final acceptance definition
 
 This was the target for the first persistence implementation. It is not fully
-met: in particular, the current UI does not page or search all saved history.
-See §0 for the shipped subset and deviations.
+met: the history and site-map tables still do not page through all saved history,
+although Search now scans it. See §0 for the shipped subset and deviations.
 
 The initial project-storage implementation is ready to release when a user can:
 

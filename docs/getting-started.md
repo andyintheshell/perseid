@@ -232,9 +232,10 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-Perseid `0.2.0` introduced saved projects. The current UI opens only a bounded
-newest-first snapshot of stored history; older records stay in the project file
-but cannot yet be paged or searched from the app. Temporary projects evict the
+Perseid `0.2.0` introduced saved projects. The history and site-map tables open
+only a bounded newest-first snapshot of stored history; older records stay in the
+project file and can be found by Search, but cannot yet be paged in those tables.
+Temporary projects evict the
 oldest captured records and released body bytes when they exceed the configurable
 aggregate retention limits, which default to the history flags. New and Open ask
 Save/Discard/Cancel before replacing a temporary project with unsaved work; a

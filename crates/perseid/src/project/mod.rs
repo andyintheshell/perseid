@@ -23,12 +23,14 @@ pub use records::{
     IntruderResultOutcomeWorkspace, IntruderResultWorkspace, IntruderWorkspace, MainTabRecord,
     MessagePaneRecord, MessageViewRecord, MessageViewsWorkspace, ProxySectionRecord,
     RepeaterResponseWorkspace, RepeaterWorkspace, ResultViewRecord, RuleDirectionRecord,
-    RulePartRecord, RuleWorkspace, ScopeWorkspace, SearchOptionsWorkspace, SearchWorkspace,
-    SequencerAnalysisSettingsWorkspace, SequencerCharacterAnalysisRecord, SequencerResultTabRecord,
-    SequencerSectionRecord, SequencerSettingsWorkspace, SequencerSignificanceRecord,
-    SequencerTokenFormatRecord, SequencerWorkspace, SideTabRecord, TargetSectionRecord,
-    TextSelectionWorkspace, TlsWorkspace, UiWorkspace, WorkspaceState,
+    RulePartRecord, RuleWorkspace, ScopeWorkspace, SearchOptionsWorkspace, SearchResultWorkspace,
+    SearchSourceRecord, SearchWorkspace, SequencerAnalysisSettingsWorkspace,
+    SequencerCharacterAnalysisRecord, SequencerResultTabRecord, SequencerSectionRecord,
+    SequencerSettingsWorkspace, SequencerSignificanceRecord, SequencerTokenFormatRecord,
+    SequencerWorkspace, SideTabRecord, TargetSectionRecord, TextSelectionWorkspace, TlsWorkspace,
+    UiWorkspace, WorkspaceState,
 };
+pub(crate) use service::ProjectSnapshot;
 pub use service::{
     CommitReceipt, OpenedProject, ProjectHandle, ProjectMode, ProjectStatus, RetentionLimits,
 };
