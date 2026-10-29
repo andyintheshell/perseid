@@ -89,8 +89,10 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
 
-  # Rust analysis is the slow part. It still runs on main and on the weekly
-  # schedule, and on pull requests that touch Rust code or its build inputs.
+  # Pull requests run a lighter suite over the whole Rust codebase. The full
+  # default suite runs after every push to main, weekly, and on manual dispatch.
+  # The PR suite excludes path-problem queries (including injection and sensitive
+  # data-flow checks); those findings will only be reported by the full scans.
   analyze-rust:
     name: Analyze (rust)
     needs: changes
@@ -108,7 +110,19 @@ jobs:
       # CodeQL's Rust extractor requires rustup and cargo on the runner.
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
-      - name: Initialize CodeQL
+      - name: Initialize CodeQL (pull request, reduced)
+        if: github.event_name == 'pull_request'
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: rust
+          build-mode: none
+          config: |
+            query-filters:
+              - exclude:
+                  kind: path-problem
+
+      - name: Initialize CodeQL (full)
+        if: github.event_name != 'pull_request'
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: rust
