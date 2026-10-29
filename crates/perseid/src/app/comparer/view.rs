@@ -121,6 +121,11 @@ impl ComparerState {
     }
 
     fn item_table(&mut self, ui: &mut egui::Ui, which: usize, height: f32) {
+        // The preview labels are inside a clickable row. Without this, egui
+        // treats a click on the preview text as text selection and the row
+        // never reports the click (the same reason the history tables disable
+        // selectable labels).
+        ui.style_mut().interaction.selectable_labels = false;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!("Select item {}:", which + 1))
@@ -816,6 +821,73 @@ mod tests {
 
         // An empty line still gets one space so the row keeps its height.
         assert_eq!(text_line_job("", &[], &font).text, " ");
+    }
+
+    fn find_text_center(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + egui::vec2(text.galley.size().x / 2.0, text.galley.size().y / 2.0))
+            }
+            egui::Shape::Vec(shapes) => shapes
+                .iter()
+                .find_map(|shape| find_text_center(shape, label)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn clicking_a_row_preview_selects_it() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        // Keep the table layout stable between the frames used to synthesize
+        // the pointer click.
+        ctx.all_styles_mut(|style| {
+            style.animation_time = 0.0;
+            style.scroll_animation = egui::style::ScrollAnimation::none();
+        });
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+        let mut state = ComparerState::new();
+        state
+            .insert_item(b"first item".to_vec(), 0)
+            .expect("insert first item");
+        state
+            .insert_item(b"second item".to_vec(), 1)
+            .expect("insert second item");
+        state.selected = [None, None];
+
+        let mut input = egui::RawInput {
+            screen_rect: Some(screen),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.clone(), |ui| state.ui(ui));
+        output.textures_delta.clear();
+        output = ctx.run_ui(input.clone(), |ui| state.ui(ui));
+        output.textures_delta.clear();
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_text_center(&clipped.shape, "first item"))
+            .expect("first item preview is rendered");
+
+        input.events = vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        let mut output = ctx.run_ui(input, |ui| state.ui(ui));
+        output.textures_delta.clear();
+
+        assert_eq!(state.selected[0], Some(0));
     }
 
     #[test]

@@ -246,9 +246,10 @@ sleep 0.8
 click_at "$comparer_tab_x" "$tab_y" 1
 sleep 1.2
 # Both responses are already selected in table 2; select the first in table 1.
-# The first row sits just below the table header (y=182 in the 1600x1024
-# capture), not in the empty space below the second row.
-click_at 200 182 1
+# The first row sits just below the table header (y=241 in the 1600x1024
+# capture). Clicking its preview text also selects the row now that the
+# Comparer tables disable selectable labels.
+click_at 200 241 1
 sleep 0.8
 click_at 1530 888 1
 sleep 1.5
@@ -300,12 +301,12 @@ ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" \
 img2webp -loop 0 -mixed -d 83 -q 65 -m 6 -sharp_yuv \
     -o "$out/perseid-demo.webp" "$work/frames"/frame-*.jpg
 [[ -s "$out/perseid-demo.webp" ]] || { echo 'WebP is empty.' >&2; exit 1; }
-dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$out/perseid-demo.webp")"
-if [[ "$dimensions" != '1280,820' ]]; then
+dimensions="$(webpinfo -summary "$out/perseid-demo.webp" | awk '/Canvas size/ { print $3 "x" $5; exit }')"
+if [[ "$dimensions" != '1280x820' ]]; then
     echo "Demo WebP must be 1280x820 (got ${dimensions:-unknown})." >&2
     exit 1
 fi
-echo "Demo WebP resolution: ${dimensions/,/x}"
+echo "Demo WebP resolution: $dimensions"
 duration_ms="$(webpinfo -summary "$out/perseid-demo.webp" | awk '/Duration:/ { total += $2 } END { print total + 0 }')"
 if ! awk -v duration_ms="$duration_ms" 'BEGIN { exit !(duration_ms > 0 && duration_ms < 120000) }'; then
     duration="$(awk -v ms="$duration_ms" 'BEGIN { printf "%.3f", ms / 1000 }')"
