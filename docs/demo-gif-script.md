@@ -39,9 +39,10 @@ Comparer instead of showing unrelated isolated screens.
   not capture personal data or traffic from the runner.
 
 The executable version of this sequence lives in
-[`scripts/record-demo.sh`](../scripts/record-demo.sh). The recording workflow
-checks the exact set of target requests, resizes the capture to 1280×820 at
-12 fps, and encodes an animated WebP with `img2webp`. It enforces the duration
-and size limits before publishing the artifact. The approved recording is
-checked in as [`images/perseid-demo.webp`](images/perseid-demo.webp) and
-embedded in the [project README](../README.md).
+[`scripts/record-demo.sh`](../scripts/record-demo.sh). Run the recording
+workflow manually from Actions; it does not run on pull requests. It checks the
+exact set of target requests, resizes the capture to 1280×820 at 12 fps, and
+encodes an animated WebP with `img2webp`. It enforces the duration and size
+limits before publishing the artifact. The approved recording is checked in as
+[`images/perseid-demo.webp`](images/perseid-demo.webp) and used as the
+[project README](../README.md) hero image.

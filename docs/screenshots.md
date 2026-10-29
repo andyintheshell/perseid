@@ -148,8 +148,9 @@ Allocator heap in use and peak, not total process RSS. See the
 ## Recording the demo animation
 
 Run **Actions > Record demo animation > Run workflow**, selecting the branch to
-record. The workflow builds Perseid on a Linux runner, starts a loopback-only
-synthetic target, and records a real desktop session under Xvfb. The
+record. The workflow is manual-only and does not run on pull requests. It
+builds Perseid on a Linux runner, starts a loopback-only synthetic target, and
+records a real desktop session under Xvfb. The
 [storyboard](demo-gif-script.md) is aimed at first-time users: it follows one
 captured export through Repeater, Intruder, Decoder, and Comparer, using the
 synthetic target's base64 responses. The pointer travels between controls
@@ -161,10 +162,10 @@ target.
 
 The current approved recording is checked in as
 [`images/perseid-demo.webp`](images/perseid-demo.webp) (1280×820, about 87
-seconds, 1.6 MB) and embedded in the [project README](../README.md). To update
-it, download `perseid-demo-webp` from the workflow run, review it, and replace
-that file. The artifact expires after 30 days. Failed runs upload diagnostic
-logs and the partial recording for seven days. All traffic and values in this
-workflow are synthetic; the workflow does not use local files or data from your
-machine. Animated WebP is supported by current Chrome, Firefox, Safari, and
-Edge, and renders in GitHub Markdown.
+seconds, 1.6 MB) and used as the [project README](../README.md) hero image. To
+update it, run the workflow manually, download `perseid-demo-webp` from the
+run, review it, and replace that file. The artifact expires after 30 days.
+Failed runs upload diagnostic logs and the partial recording for seven days.
+All traffic and values in this workflow are synthetic; the workflow does not
+use local files or data from your machine. Animated WebP is supported by
+current Chrome, Firefox, Safari, and Edge, and renders in GitHub Markdown.

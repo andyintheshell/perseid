@@ -1,9 +1,6 @@
 name: Record demo animation
 
 on:
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -83,5 +80,5 @@ jobs:
             echo
             echo "[Download the WebP](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#artifacts)"
             echo
-            echo 'Artifacts expire after 30 days; copy the reviewed WebP into the repository for a permanent README link.'
+            echo 'Artifacts expire after 30 days; replace docs/images/perseid-demo.webp with the reviewed WebP to update the README hero image.'
           } >> "$GITHUB_STEP_SUMMARY"
