@@ -66,6 +66,9 @@ const SCENE_FILES: &[&str] = &[
     "perseid-sequencer-result.png",
     "perseid-proxy-websockets.png",
     "perseid-search.png",
+    "perseid-repeater-websockets.png",
+    "perseid-settings.png",
+    "perseid-cookie-jar.png",
 ];
 
 const CURL_UA: &str = "curl/8.22.0";
@@ -326,6 +329,7 @@ impl PerseidApp {
         self.comparer = ComparerState::new();
         self.sequencer = SequencerState::new();
         self.search = SearchState::default();
+        self.settings = Default::default();
         self.project.reset_for_screenshot();
 
         match index {
@@ -458,6 +462,32 @@ impl PerseidApp {
                 self.proxy_section = ProxySection::HttpHistory;
                 self.selected = Some(2);
                 self.search.seed_screenshot(&self.history, &self.scope);
+            }
+            // Repeater seeded from synthetic WebSocket history. There is no
+            // live connection in the offline screenshot environment.
+            17 => {
+                let item = self
+                    .websocket_history
+                    .get(23)
+                    .cloned()
+                    .ok_or_else(|| "screenshot WebSocket message 23 is missing".to_string())?;
+                self.send_websocket_to_repeater(&item);
+            }
+            18 | 19 => {
+                self.settings.open = index == 18;
+                self.settings.jar_open = index == 19;
+                let mut jar = self
+                    .cookie_jar
+                    .lock()
+                    .map_err(|_| "cookie jar unavailable")?;
+                jar.clear();
+                jar.insert(
+                    "https://shop.example.com/",
+                    "session=demo-session; Path=/; Secure; HttpOnly",
+                )
+                .map_err(str::to_owned)?;
+                jar.insert("https://shop.example.com/", "theme=dark; Path=/")
+                    .map_err(str::to_owned)?;
             }
             _ => return Err(format!("unknown screenshot scene {index}")),
         }
@@ -1055,4 +1085,19 @@ fn write_png(path: &Path, image: &image::RgbaImage) -> Result<(), String> {
         image::ColorType::Rgba8,
     )
     .map_err(|err| format!("could not save {}: {err}", path.display()))
+}
+
+#[cfg(test)]
+mod scene_tests {
+    use super::*;
+
+    #[test]
+    fn websocket_repeater_scene_uses_seeded_history() {
+        let mut app = PerseidApp::test_app();
+        app.prepare_screenshot_base().unwrap();
+        app.prepare_screenshot_scene(17).unwrap();
+        assert_eq!(app.main_tab, MainTab::Repeater);
+        assert!(!app.repeater_tabs.is_empty());
+        assert!(app.repeater_workspace().is_empty());
+    }
 }

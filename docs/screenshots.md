@@ -5,16 +5,17 @@
 
 These full-window scenes are generated deterministically by
 `scripts/screenshots.sh`. CI uploads the images as an artifact. Same-repository
-pull requests get one comment linking to a generated Markdown gallery page on
-the preview branch; the images are not embedded in the PR thread. Forks can use
-workflow artifacts. Traffic and credentials in these scenes are synthetic.
+pull requests get one comment linking to the gallery's exact preview commit;
+later runs do not change that gallery. The images are not embedded in the PR
+thread. Forks can use workflow artifacts. Traffic and credentials in these
+scenes are synthetic.
 The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
-[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) ·
+[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) · [Settings](#settings) ·
 [WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
-[Intruder](#intruder) · [Repeater](#repeater) · [Sequencer](#sequencer) ·
+[Intruder](#intruder) · [Repeater](#repeater) · [WebSocket Repeater](#repeater--websockets) · [Sequencer](#sequencer) ·
 [Sequencer result](#sequencer-result) · [Decoder](#decoder) · [Comparer](#comparer) ·
 [Comparer result](#comparer-result) · [Memory](#memory-usage)
 
@@ -49,11 +50,23 @@ once the complete copy is ready.
 
 ## Search
 
-The top-toolbar magnifier opens a floating search window over the HTTP
-history. Search request or response heads and decoded bodies, then inspect the
-selected result in Pretty, Raw, or Hex with matches highlighted.
+The top-toolbar magnifier opens a floating search window over stored HTTP and
+WebSocket history plus current Repeater and Intruder traffic. Search request or
+response heads and decoded bodies, then inspect the selected result in Pretty,
+Raw, or Hex with matches highlighted.
 
 ![Search window with a decoded JSON response and highlighted matches](images/perseid-search.png)
+
+## Settings
+
+Manage the in-memory cookie jar and configure which traffic updates or uses it.
+
+![Session and cookie jar settings](images/perseid-settings.png)
+
+The separate viewer shows cookie scope, values, security flags, and expiration.
+All entries below are synthetic.
+
+![Cookie jar viewer with synthetic entries](images/perseid-cookie-jar.png)
 
 ## Proxy > WebSockets history
 
@@ -100,6 +113,13 @@ Replay edited requests directly to a target, independently of the proxy listener
 
 ![Repeater request and response](images/perseid-repeater.png)
 
+## Repeater > WebSockets
+
+Edit a message and inspect the connection history alongside it. Replay uses the
+original live connection; this offline synthetic scene shows it as closed.
+
+![WebSocket Repeater with a message editor and connection history](images/perseid-repeater-websockets.png)
+
 ## Sequencer
 
 Load an existing token sample or capture tokens from new proxy responses. The
@@ -142,3 +162,28 @@ Allocator heap in use and peak, not total process RSS. See the
 [measurement guide](performance.md) for the distinction.
 
 ![Memory window with current, peak, and rolling history](images/perseid-memory.png)
+
+## Recording the demo animation
+
+Run **Actions > Record demo animation > Run workflow**, selecting the branch to
+record. The workflow is manual-only and does not run on pull requests. It
+builds Perseid on a Linux runner, starts a loopback-only synthetic target, and
+records a real desktop session under Xvfb. The
+[storyboard](demo-gif-script.md) is aimed at first-time users: it follows one
+captured export through Repeater, Intruder, Decoder, and Comparer, using the
+synthetic target's base64 responses. The pointer travels between controls
+instead of jumping. The capture is downscaled to 1280×820 at 12 fps and encoded
+as an animated WebP with `img2webp`; the workflow keeps it under two minutes and
+2.5 MB so it stays practical for the README. Before publishing, the workflow
+verifies that the edited Repeater and Intruder requests reached the local
+target.
+
+The current approved recording is checked in as
+[`images/perseid-demo.webp`](images/perseid-demo.webp) (1280×820, about 87
+seconds, 1.6 MB) and used as the [project README](../README.md) hero image. To
+update it, run the workflow manually, download `perseid-demo-webp` from the
+run, review it, and replace that file. The artifact expires after 30 days.
+Failed runs upload diagnostic logs and the partial recording for seven days.
+All traffic and values in this workflow are synthetic; the workflow does not
+use local files or data from your machine. Animated WebP is supported by
+current Chrome, Firefox, Safari, and Edge, and renders in GitHub Markdown.

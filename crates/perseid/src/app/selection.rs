@@ -3,21 +3,30 @@
 use super::*;
 
 impl PerseidApp {
+    pub(super) fn selected_http_item(&self, id: u64) -> Option<&crate::history::HistoryItem> {
+        self.history
+            .get(id)
+            .or_else(|| self.site_map_ui.stored.item(id))
+    }
+
     pub(super) fn clear_history(&mut self) {
+        self.site_map_ui.stored = Default::default();
         self.history.clear();
         self.title_cache.borrow_mut().clear();
         self.selected = None;
         self.detail = None;
         self.inspector.clear_notes();
-        self.search.clear_history();
+        self.search.clear_http_source();
         self.invalidate_views();
         self.project.clear_http_history();
     }
 
     pub(super) fn clear_websocket_history(&mut self) {
         self.websocket_history.clear();
+        self.websocket_live_ids.clear();
         self.websocket_selected = None;
         self.websocket_detail = None;
+        self.search.clear_websocket_source();
         self.invalidate_views();
         self.project.clear_ws_history();
     }

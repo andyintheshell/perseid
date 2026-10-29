@@ -7,14 +7,21 @@ The north star is feature parity with Burp Suite Community Edition's manual
 toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
-**Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
+**Current focus: Milestone 4, protocols and testing tools.** Milestone 3 is
+complete in the `0.3.0` release; its remaining issues have moved
+to M4, not been implemented or dropped. Proxy core and HTTPS
 milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
-project-persistence workflow are available. The remaining M3 work is
-paging/search over all saved history, recent-project and quit prompts, and
-persistent disk-retention controls. Temporary capture retention is bounded by
-configurable aggregate count and retained-body limits; saved files still have
-no automatic disk cap. HTTP/2,
+project-persistence workflow are available. Search scans all stored HTTP and
+WebSocket history as well as current Repeater and Intruder results. The remaining
+M4 follow-ups include a full-store WebSocket table view and
+recent-project workflow polish. Normal quit now protects unsaved work and
+acknowledges saved workspace commits; crash recovery remains M5 work.
+Stored HTTP paging, lazy details/notes,
+saved-project logical retention, atomic v1→v2 migration, and a full-store site map
+with background indexing, bounded tree/Contents pages, and lazy details are available.
+Temporary and opt-in saved retention use combined count/body limits; physical
+file size is not capped. HTTP/2,
 WebSocket history, Intruder, and Sequencer arrived ahead of the protocol
 milestone. This is a sequence of capabilities, not a schedule or release
 promise.
@@ -55,28 +62,40 @@ promise.
   match/replace, and bounded-capture pipeline as plain HTTP. See
   [HTTPS interception](tls.md).*
 
-- [ ] **Milestone 3 — Daily workbench:** redb-backed persistent project history
+- [x] **Milestone 3 — Daily workbench:** redb-backed persistent project history
   and supported workspace state, Search, Repeater, Decoder, and Comparer.
 
-  *Status: projects start in temporary memory by default. Save As, Open, and Save
+  *Complete for the release scope: projects start in temporary memory by default. Save As, Open, and Save
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
-  project-scoped workbench state are written automatically. On open, the UI loads
-  only a bounded newest-first history snapshot; older records remain on disk but
-  are not yet pageable or searchable. Temporary storage evicts the oldest
+  project-scoped workbench state are written automatically. On open, the live
+  history tables load only a bounded newest-first history snapshot; older
+   records are reachable through the paged **Browse stored history…** HTTP
+   browser with lazy details and notes, full-store Search, and the paged Target
+   site map. The site map derives endpoints from all retained HTTP exchanges,
+   using a disposable disk index rather than hydrating the complete store.
+  Temporary storage evicts the oldest
   captures when it exceeds the configurable aggregate count or retained-body
   limits. New Project and Open Project ask Save/Discard/Cancel when the current
-  temporary project has unsaved work; a recent-project list and quit prompt are
-  not implemented, and schema migrations are not implemented.
-  Search covers the loaded HTTP-history heads and decoded bodies with case,
-  regex, negative-match, in-scope, and live-update filters. Project-scoped
-  workbench state persists: UI selections/views, Inspector notes and sections,
-  Repeater tabs and their last responses, Intruder configuration and result
-  rows, Decoder panels, Comparer items and result-window state, Search state,
-  Sequencer samples/settings, and TLS interception/pass-through hosts. The
+  temporary project has unsaved work; ordinary quit also prompts and waits for
+  acknowledged saved-project writes. A recent-project list is not implemented.
+  Saved projects now support opt-in combined record/body
+   retention, defaulting to unlimited, and atomic v1→v2 schema migration.
+   Retention is logical: it does not cap or compact physical files. Whole-project
+   deletion uses the filesystem after switching away or quitting; files are
+   unencrypted and deletion is not secure erasure.
+  Search scans every stored HTTP exchange and WebSocket message in the
+  background with case, regex, negative-match, in-scope, and live-update filters,
+  and also matches current Repeater tabs and retained Intruder results.
+  Project-scoped workbench state persists: UI selections/views, Inspector notes
+  and sections, Repeater tabs and their last responses, Intruder configuration
+  and result rows, Decoder panels, Comparer items and result-window state,
+  Search state and structured result rows, Sequencer samples/settings, and TLS
+  interception/pass-through hosts. The
   Comparer diff and Sequencer analysis are recomputed on open. Live capture,
   running attacks or sends, held interception messages, and CA material do not
-  persist. WebSocket message interception/replay remains unimplemented. Decoder
-  still lacks SKEIN/TupleHash/OID aliases and Send to Decoder.*
+  persist. Live WebSocket Repeater tabs are also session-only. History
+  and message selections can be sent to Decoder; Hex selections currently send
+  their displayed hexadecimal text rather than binary bytes.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
@@ -86,13 +105,22 @@ promise.
   Sequencer landed ahead of this milestone. WebSockets support plain `ws://`,
   decrypted `wss://`, complete text/binary message reassembly, masking removal,
   a bounded UI history snapshot, and Pretty/Raw/Hex inspection. WebSocket
-  message interception, editing, and replay remain. Intruder supports `$$`
-  positions, editable payload sets, Sniper/Battering ram/Pitchfork/Cluster bomb
-  attacks, up to 32 concurrent requests, live result inspection, and
+  message interception, editing, and live-connection replay are available. Intruder supports `$$`
+  positions, editable and file-loaded payload sets, all four attack modes, up
+  to 32 concurrent requests, live result inspection, and
   enforced-scope checks for every generated request. Payload processing rules
   and saved attacks remain. Sequencer supports manual and live regex sampling,
   character- and bit-level tests, effective-entropy results, and per-analysis
   settings, with bounded in-memory samples.*
+
+  **Carried over from M3:** structured HTTP history filters
+  ([#57](https://github.com/andyintheshell/perseid/issues/57)), application settings
+  and opt-in tool-state persistence ([#58](https://github.com/andyintheshell/perseid/issues/58)),
+  site map annotations ([#59](https://github.com/andyintheshell/perseid/issues/59)),
+  remaining Send to Decoder behavior ([#60](https://github.com/andyintheshell/perseid/issues/60)),
+  full-store WebSocket paging/lazy details ([#150](https://github.com/andyintheshell/perseid/issues/150)),
+  and a recent-project list without automatic reopening
+  ([#152](https://github.com/andyintheshell/perseid/issues/152)).
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a

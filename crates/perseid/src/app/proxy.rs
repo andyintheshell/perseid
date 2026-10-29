@@ -263,6 +263,7 @@ impl PerseidApp {
         }
 
         let mut clicked = None;
+        let mut send_to_repeater = None;
         table_frame(ui, |ui| {
             let mut table = TableBuilder::new(ui)
                 .striped(true)
@@ -389,12 +390,24 @@ impl PerseidApp {
                         if response.clicked() {
                             clicked = Some(id);
                         }
+                        response.context_menu(|ui| {
+                            if ui.button("Send to Repeater").clicked() {
+                                send_to_repeater = Some(id);
+                                ui.close();
+                            }
+                        });
                     });
                 });
         });
 
         if let Some(id) = clicked {
             self.select_websocket_id(id);
+        }
+        if let Some(item) = send_to_repeater
+            .and_then(|id| self.websocket_history.get(id))
+            .cloned()
+        {
+            self.send_websocket_to_repeater(&item);
         }
     }
 
@@ -778,6 +791,20 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::Intruder);
                                 ui.close();
                             }
+                            if can_send {
+                                ui.menu_button("Send request to Decoder", |ui| {
+                                    if let Some(bytes) = view::captured_message_bytes(item, false) {
+                                        super::message_view::decoder_send_menu(ui, &bytes, "Captured request (reconstructed head)");
+                                    }
+                                });
+                            }
+                            if has_response {
+                                ui.menu_button("Send response to Decoder", |ui| {
+                                    if let Some(bytes) = view::captured_message_bytes(item, true) {
+                                        super::message_view::decoder_send_menu(ui, &bytes, "Captured response (reconstructed head)");
+                                    }
+                                });
+                            }
                             ui.separator();
                             if ui
                                 .add_enabled(
@@ -857,11 +884,11 @@ impl PerseidApp {
 
     pub(super) fn ensure_detail(&mut self, id: u64) {
         if self.detail.as_ref().is_some_and(|cache| cache.id == id)
-            && self.history.get(id).is_some()
+            && self.selected_http_item(id).is_some()
         {
             return;
         }
-        self.detail = self.history.get(id).map(|item| DetailCache {
+        self.detail = self.selected_http_item(id).map(|item| DetailCache {
             id,
             request: view::request_views(item),
             response: view::response_views(item),
@@ -880,7 +907,16 @@ impl PerseidApp {
         };
         self.ensure_detail(id);
 
-        let Some(item) = self.history.get(id) else {
+        let Some(item) = self
+            .history
+            .get(id)
+            .or_else(|| self.site_map_ui.stored.item(id))
+        else {
+            if self.site_map_ui.stored.loading(id) {
+                ui.spinner();
+                ui.label("Loading retained exchange…");
+                return;
+            }
             empty_state(
                 ui,
                 "Exchange no longer in history",
@@ -947,5 +983,163 @@ impl PerseidApp {
 
         self.request_view = request_view;
         self.response_view = response_view;
+    }
+}
+
+#[cfg(test)]
+mod decoder_transfer_tests {
+    use super::*;
+    use crate::proxy::{
+        CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
+    };
+    use std::time::{Duration, SystemTime};
+
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut PerseidApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| app.main_content(ui))
+    }
+
+    fn label_pos(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+        fn find(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find(shape, label)),
+                _ => None,
+            }
+        }
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| find(&shape.shape, label))
+    }
+
+    fn click(ctx: &egui::Context, app: &mut PerseidApp, label: &str, button: egui::PointerButton) {
+        let output = frame(ctx, app, vec![]);
+        let pos = label_pos(&output, label).unwrap_or_else(|| panic!("missing label {label}"));
+        output.drop_without_applying_deltas();
+        for event in [
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos,
+                button,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ] {
+            frame(ctx, app, vec![event]).drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn websocket_history_context_menu_opens_repeater() {
+        let mut app = PerseidApp::test_app();
+        app.main_tab = MainTab::Proxy;
+        app.proxy_section = ProxySection::WebSocketsHistory;
+        app.websocket_history.apply(ProxyEvent::WebSocketMessage {
+            id: 42,
+            timestamp: SystemTime::UNIX_EPOCH,
+            connection: crate::proxy::WebSocketConnectionInfo {
+                id: 7,
+                url: "ws://example.test/socket".into(),
+                host: "example.test".into(),
+                tls: false,
+                listener_port: 8080,
+                protocol: None,
+            },
+            direction: crate::proxy::WebSocketDirection::ToServer,
+            opcode: crate::proxy::WebSocketOpcode::Text,
+            payload: CapturedBody::from_bytes(b"hello".to_vec()),
+        });
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+        click(
+            &ctx,
+            &mut app,
+            "ws://example.test/socket",
+            egui::PointerButton::Secondary,
+        );
+        click(
+            &ctx,
+            &mut app,
+            "Send to Repeater",
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(app.main_tab, MainTab::Repeater);
+        assert!(app.repeater_workspace().is_empty());
+    }
+
+    #[test]
+    fn history_menus_send_captured_request_and_response_to_decoder() {
+        for (menu, expected) in [
+            ("Send request to Decoder", &[0, 255][..]),
+            ("Send response to Decoder", &[254, 0][..]),
+        ] {
+            let mut app = PerseidApp::test_app();
+            app.main_tab = MainTab::Proxy;
+            app.proxy_section = ProxySection::HttpHistory;
+            app.history.apply(ProxyEvent::Started {
+                id: 1,
+                timestamp: SystemTime::UNIX_EPOCH,
+                request: RequestInfo {
+                    method: "POST".into(),
+                    uri: "http://example.test/path".into(),
+                    scheme: "http".into(),
+                    host: "example.test".into(),
+                    path: "/path".into(),
+                    version: "HTTP/1.1".into(),
+                    headers: vec![],
+                },
+            });
+            app.history.apply(ProxyEvent::ResponseHead {
+                id: 1,
+                head: ResponseHead {
+                    version: "HTTP/1.1".into(),
+                    status: 200,
+                    reason: "OK".into(),
+                    headers: vec![],
+                },
+            });
+            app.history.apply(ProxyEvent::Finished {
+                id: 1,
+                end: ExchangeEnd {
+                    duration: Duration::ZERO,
+                    request_body: CapturedBody::from_bytes(vec![0, 255]),
+                    result: ExchangeResult::Response {
+                        body: CapturedBody::from_bytes(vec![254, 0]),
+                    },
+                },
+            });
+            let ctx = egui::Context::default();
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+            click(&ctx, &mut app, "/path", egui::PointerButton::Secondary);
+            click(&ctx, &mut app, menu, egui::PointerButton::Primary);
+            click(&ctx, &mut app, "Append panel", egui::PointerButton::Primary);
+            assert_eq!(app.main_tab, MainTab::Decoder);
+            let panels = app.decoder_workspace();
+            assert_eq!(panels.len(), 1);
+            assert!(panels[0].data.ends_with(expected));
+            assert!(panels[0].data.windows(4).any(|bytes| bytes == b"\r\n\r\n"));
+        }
     }
 }

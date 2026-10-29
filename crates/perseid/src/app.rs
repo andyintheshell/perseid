@@ -23,6 +23,7 @@ mod curl;
 mod decoder;
 mod events;
 mod file_dialog;
+mod history_browser;
 mod history_filter;
 mod input;
 mod inspector;
@@ -41,6 +42,7 @@ mod screenshots;
 mod search;
 mod selection;
 mod sequencer;
+mod settings;
 mod target;
 mod tls;
 mod util;
@@ -289,6 +291,7 @@ pub struct PerseidApp {
     /// interception off by default and exposes it as a separate rule set.
     intercept_responses: bool,
     intercept_queue: VecDeque<InterceptEntry>,
+    websocket_intercept_queue: VecDeque<intercept::WebSocketInterceptEntry>,
     intercept_selected: BTreeSet<InterceptKey>,
     intercept_active: Option<InterceptKey>,
     intercept_anchor: Option<InterceptKey>,
@@ -307,6 +310,7 @@ pub struct PerseidApp {
     scroll_to_selected: bool,
     detail: Option<DetailCache>,
     websocket_history: WebSocketHistory,
+    websocket_live_ids: std::collections::HashMap<u64, u64>,
     websocket_filter: String,
     websocket_visible: Vec<u64>,
     websocket_visible_key: Option<(String, u64)>,
@@ -321,6 +325,8 @@ pub struct PerseidApp {
     response_view: MessageView,
     inspector: inspector::InspectorState,
     search: search::SearchState,
+    cookie_jar: crate::proxy::cookies::SharedCookieJar,
+    settings: settings::SettingsState,
     /// Direct replay engine, started on the first Send so a proxy-off run can
     /// still use Repeater.
     repeater: Option<Repeater>,
@@ -480,6 +486,7 @@ impl PerseidApp {
             intercept_enabled: false,
             intercept_responses: false,
             intercept_queue: VecDeque::new(),
+            websocket_intercept_queue: VecDeque::new(),
             intercept_selected: BTreeSet::new(),
             intercept_active: None,
             intercept_anchor: None,
@@ -497,6 +504,7 @@ impl PerseidApp {
             scroll_to_selected: false,
             detail: None,
             websocket_history: WebSocketHistory::new(args.history_limit, args.history_bytes),
+            websocket_live_ids: std::collections::HashMap::new(),
             websocket_filter: String::new(),
             websocket_visible: Vec::new(),
             websocket_visible_key: None,
@@ -511,6 +519,8 @@ impl PerseidApp {
             response_view: MessageView::default(),
             inspector: inspector::InspectorState::default(),
             search: search::SearchState::default(),
+            cookie_jar: Default::default(),
+            settings: Default::default(),
             repeater: None,
             repeater_tabs: Vec::new(),
             repeater_active: 0,
@@ -590,6 +600,17 @@ impl PerseidApp {
             MainTab::Decoder => self.decoder_view(ui),
             MainTab::Comparer => self.comparer_view(ui),
         }
+        let transfer = ui.ctx().data_mut(|data| {
+            let id = egui::Id::unique("perseid.decoder.transfer");
+            let transfer = data.get_temp::<message_view::DecoderTransfer>(id);
+            data.remove::<message_view::DecoderTransfer>(id);
+            transfer
+        });
+        if let Some(transfer) = transfer {
+            self.decoder
+                .receive(transfer.bytes, transfer.source, transfer.replace);
+            self.main_tab = MainTab::Decoder;
+        }
     }
 }
 
@@ -611,6 +632,7 @@ impl PerseidApp {
             intercept_enabled: false,
             intercept_responses: false,
             intercept_queue: VecDeque::new(),
+            websocket_intercept_queue: VecDeque::new(),
             intercept_selected: BTreeSet::new(),
             intercept_active: None,
             intercept_anchor: None,
@@ -628,6 +650,7 @@ impl PerseidApp {
             scroll_to_selected: false,
             detail: None,
             websocket_history: WebSocketHistory::new(10, 1024),
+            websocket_live_ids: std::collections::HashMap::new(),
             websocket_filter: String::new(),
             websocket_visible: Vec::new(),
             websocket_visible_key: None,
@@ -642,6 +665,8 @@ impl PerseidApp {
             response_view: MessageView::default(),
             inspector: inspector::InspectorState::default(),
             search: search::SearchState::default(),
+            cookie_jar: Default::default(),
+            settings: Default::default(),
             repeater: None,
             repeater_tabs: Vec::new(),
             repeater_active: 0,
@@ -694,6 +719,7 @@ impl eframe::App for PerseidApp {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
         self.poll_project();
+        self.handle_close_request(&ctx);
         self.drain_events(&ctx);
         self.comparer.handle_input(&ctx);
         self.poll_sequencer(&ctx);
@@ -745,6 +771,7 @@ impl eframe::App for PerseidApp {
         self.comparer_windows(&ctx);
         self.sequencer_windows(&ctx);
         self.search_window(&ctx);
+        self.settings_window(&ctx);
         #[cfg(not(target_os = "macos"))]
         self.resize_handles(ui);
 

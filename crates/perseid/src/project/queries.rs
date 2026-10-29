@@ -3,12 +3,14 @@
 //! Every function opens a short-lived redb read transaction. Callers must not
 //! retain a transaction for the lifetime of a UI panel or search window.
 //!
-//! The paged row/cursor queries are the storage side of history paging. The
-//! current UI loads a bounded newest-first snapshot and fetches by ID for
-//! tests; wiring the table to these accessors is the next step, so keep them
-//! even while the initial UI only uses the snapshot helpers.
+//! The stored HTTP browser pages metadata and fetches selected details by ID.
+//! Live history tables use a bounded newest-first snapshot; Search and Target's
+//! derived site-map index use [`scan_http`] (and Search uses [`scan_ws`]) to read
+//! every stored capture in short-lived batches.
 
 #![allow(dead_code)]
+
+use std::ops::Bound;
 
 use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata};
 
@@ -20,6 +22,32 @@ use super::codec;
 use super::records::{HttpExchangeRecord, WsConnectionRecord, WsMessageRecord};
 use super::schema;
 use super::{ProjectError, Result};
+
+/// Check only the bounded UI cache, never hydrate bodies or scan the store.
+/// IDs not yet committed are excluded so queued captures stay visible.
+pub(crate) fn pruned_ids(
+    db: &Database,
+    http: Vec<u64>,
+    ws: Vec<u64>,
+) -> Result<(Vec<u64>, Vec<u64>)> {
+    let tx = db.begin_read()?;
+    let meta = schema::read_meta(&tx)?;
+    let http_table = tx.open_table(schema::HTTP_EXCHANGES)?;
+    let ws_table = tx.open_table(schema::WS_MESSAGES)?;
+    let mut removed_http = Vec::new();
+    let mut removed_ws = Vec::new();
+    for id in http {
+        if id < meta.next_http_id && http_table.get(id)?.is_none() {
+            removed_http.push(id);
+        }
+    }
+    for id in ws {
+        if id < meta.next_ws_id && ws_table.get(id)?.is_none() {
+            removed_ws.push(id);
+        }
+    }
+    Ok((removed_http, removed_ws))
+}
 
 /// Lightweight row returned by paged history queries.
 #[derive(Clone, Debug)]
@@ -132,6 +160,107 @@ pub fn get_http(db: &Database, id: u64) -> Result<Option<HistoryItem>> {
     };
     let (request_body, response_body) = read_http_bodies(&tx, id)?;
     Ok(Some(record.to_history_item(request_body, response_body)))
+}
+
+/// Number of index keys read per short-lived transaction during a stored scan.
+const SCAN_BATCH: usize = 256;
+
+/// Visit every stored HTTP exchange oldest-first.
+///
+/// The visitor receives the decoded record and its one-based position plus the
+/// total row count, which lets a background search report progress. Returning
+/// `false` stops the scan, for example after a cancellation or result cap.
+/// Keys and records are read in bounded batches so a long search does not pin
+/// one read transaction or database snapshot for its entire lifetime.
+pub fn scan_http(
+    db: &Database,
+    mut visit: impl FnMut(HistoryItem, usize, usize) -> bool,
+) -> Result<()> {
+    let total = {
+        let tx = db.begin_read()?;
+        let table = tx.open_table(schema::HTTP_BY_TIME)?;
+        table.len()? as usize
+    };
+    let mut after = None;
+    let mut scanned = 0usize;
+    loop {
+        let tx = db.begin_read()?;
+        let table = tx.open_table(schema::HTTP_BY_TIME)?;
+        let start = after.map_or(Bound::Unbounded, Bound::Excluded);
+        let mut keys = Vec::with_capacity(SCAN_BATCH);
+        for entry in table.range((start, Bound::Unbounded))?.take(SCAN_BATCH) {
+            let (key, _) = entry?;
+            keys.push(key.value());
+        }
+        if keys.is_empty() {
+            break;
+        }
+        let batch_len = keys.len();
+        for (_, id) in &keys {
+            scanned += 1;
+            let Some(record) = read_http_record(&tx, *id)? else {
+                continue;
+            };
+            let (request_body, response_body) = read_http_bodies(&tx, *id)?;
+            let item = record.to_history_item(request_body, response_body);
+            if !visit(item, scanned, total) {
+                return Ok(());
+            }
+        }
+        after = keys.last().copied();
+        if batch_len < SCAN_BATCH {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Visit every stored WebSocket message oldest-first. See [`scan_http`] for
+/// the progress, cancellation, and batching contract.
+pub fn scan_ws(
+    db: &Database,
+    mut visit: impl FnMut(WebSocketMessageItem, usize, usize) -> bool,
+) -> Result<()> {
+    let total = {
+        let tx = db.begin_read()?;
+        let table = tx.open_table(schema::WS_BY_TIME)?;
+        table.len()? as usize
+    };
+    let mut after = None;
+    let mut scanned = 0usize;
+    loop {
+        let tx = db.begin_read()?;
+        let table = tx.open_table(schema::WS_BY_TIME)?;
+        let start = after.map_or(Bound::Unbounded, Bound::Excluded);
+        let mut keys = Vec::with_capacity(SCAN_BATCH);
+        for entry in table.range((start, Bound::Unbounded))?.take(SCAN_BATCH) {
+            let (key, _) = entry?;
+            keys.push(key.value());
+        }
+        if keys.is_empty() {
+            break;
+        }
+        let batch_len = keys.len();
+        let connections = tx.open_table(schema::WS_CONNECTIONS)?;
+        for (_, id) in &keys {
+            scanned += 1;
+            let Some(record) = read_ws_message(&tx, *id)? else {
+                continue;
+            };
+            let payload = read_ws_payload(&tx, *id)?;
+            let connection = read_ws_connection_from(&connections, record.connection_id)?
+                .unwrap_or_else(|| placeholder_connection(record.connection_id));
+            let item = record.to_history_item(connection, payload);
+            if !visit(item, scanned, total) {
+                return Ok(());
+            }
+        }
+        after = keys.last().copied();
+        if batch_len < SCAN_BATCH {
+            break;
+        }
+    }
+    Ok(())
 }
 
 pub fn get_ws(db: &Database, id: u64) -> Result<Option<WebSocketMessageItem>> {
@@ -993,6 +1122,108 @@ mod tests {
             list_http(&db, None, 10),
             Err(ProjectError::Encoding(_))
         ));
+    }
+
+    #[test]
+    fn scans_visit_stored_http_rows_oldest_first_and_can_stop() {
+        let db = memory_db();
+        for (id, timestamp_ms) in [(1u64, 1_000u64), (2, 2_000), (3, 3_000)] {
+            let record = completed_http(id, id, timestamp_ms, "GET", "example.com", "/", 200);
+            insert_http(
+                &db,
+                &record,
+                timestamp_ms,
+                b"",
+                format!("body-{id}").as_bytes(),
+            );
+        }
+
+        let mut seen = Vec::new();
+        scan_http(&db, |item, index, total| {
+            seen.push((item.id, index, total));
+            true
+        })
+        .expect("scan");
+        assert_eq!(seen, vec![(1, 1, 3), (2, 2, 3), (3, 3, 3)]);
+
+        let mut first_only = Vec::new();
+        scan_http(&db, |item, _, _| {
+            first_only.push(item.id);
+            false
+        })
+        .expect("cancelled scan");
+        assert_eq!(first_only, vec![1], "a false visitor return stops the scan");
+    }
+
+    #[test]
+    fn scans_cross_batch_boundaries_without_repeating_rows() {
+        let db = memory_db();
+        for id in 1..=300u64 {
+            let record = completed_http(id, id, id * 1_000, "GET", "example.com", "/", 200);
+            insert_http(&db, &record, id * 1_000, b"", b"");
+        }
+
+        let mut seen = Vec::new();
+        scan_http(&db, |item, index, total| {
+            seen.push((item.id, index, total));
+            true
+        })
+        .expect("scan");
+
+        assert_eq!(seen.len(), 300);
+        assert_eq!(
+            seen.iter().map(|(id, _, _)| *id).collect::<Vec<_>>(),
+            (1..=300).collect::<Vec<_>>()
+        );
+        assert_eq!(seen.first().map(|(_, index, _)| *index), Some(1));
+        assert_eq!(seen.last().map(|(_, index, _)| *index), Some(300));
+        assert!(seen.iter().all(|(_, _, total)| *total == 300));
+    }
+
+    #[test]
+    fn scans_visit_websocket_messages_with_connection_metadata() {
+        let db = memory_db();
+        insert_ws(
+            &db,
+            &ws_record(1, 1, 1_000, 10, WsOpcodeRecord::Text, 2),
+            Some(&ws_connection(10)),
+            b"aa",
+        );
+        insert_ws(
+            &db,
+            &ws_record(2, 2, 2_000, 20, WsOpcodeRecord::Binary, 3),
+            None,
+            b"bbb",
+        );
+
+        let mut seen = Vec::new();
+        scan_ws(&db, |item, index, total| {
+            seen.push((
+                item.id,
+                index,
+                total,
+                item.connection.url.clone(),
+                item.payload.data().to_vec(),
+            ));
+            true
+        })
+        .expect("scan");
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            seen[0],
+            (
+                1,
+                1,
+                2,
+                "wss://example.com/socket".to_string(),
+                b"aa".to_vec()
+            )
+        );
+        assert_eq!(
+            seen[1].3, "<connection metadata unavailable>",
+            "missing connection rows keep a placeholder"
+        );
+        assert_eq!(seen[1].4, b"bbb");
     }
 
     #[test]

@@ -65,13 +65,13 @@ pub(crate) struct Args {
 
     /// Maximum captured HTTP exchanges and WebSocket messages retained by a
     /// temporary project (default: `--history-limit`). `0` disables the count
-    /// limit. Saved projects keep every record.
+    /// limit. Saved projects have separate, opt-in retention settings.
     #[arg(long, value_name = "N")]
     pub temporary_retention_limit: Option<u64>,
 
     /// Maximum request/response and WebSocket payload bytes retained by a
     /// temporary project (default: `--history-bytes`). `0` disables the byte
-    /// limit. Saved projects keep every record.
+    /// limit. Saved projects have separate, opt-in retention settings.
     #[arg(long, value_name = "BYTES")]
     pub temporary_retention_bytes: Option<u64>,
 

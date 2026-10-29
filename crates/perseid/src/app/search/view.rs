@@ -12,12 +12,11 @@ use crate::app::MessagePane;
 use crate::app::inspector::{self, InspectorState};
 use crate::app::message_view::{message_tabs, message_text_with_matches, message_view_text};
 use crate::app::widgets::{empty_state, section_tab, table_frame};
-use crate::history::History;
 use crate::theme;
 use crate::view;
 
-use super::SearchState;
-use super::engine::{MATCH_HIGHLIGHT_LIMIT, SearchOptions, result_host, result_url};
+use super::engine::{MATCH_HIGHLIGHT_LIMIT, SEARCH_RESULT_LIMIT, SearchOptions};
+use super::{SearchSources, SearchState};
 
 const SEARCH_DETAIL_ID: &str = "perseid.search.detail";
 const SEARCH_QUERY_ID: &str = "perseid.search.query";
@@ -29,7 +28,7 @@ impl SearchState {
     pub(super) fn show(
         &mut self,
         ctx: &egui::Context,
-        history: &History,
+        sources: &SearchSources<'_>,
         scope: &BTreeSet<String>,
         inspector: &mut InspectorState,
     ) {
@@ -39,6 +38,11 @@ impl SearchState {
         if ctx.input(|input| input.key_pressed(Key::Escape)) {
             self.open = false;
             return;
+        }
+
+        self.poll();
+        if self.running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(75));
         }
 
         let mut open = self.open;
@@ -57,15 +61,17 @@ impl SearchState {
             .min_size(egui::vec2(680.0, 430.0))
             .default_pos(default_pos)
             .show(ctx, |ui| {
-                let history_changed = self.last_history_revision != Some(history.revision());
+                let history_changed = self.last_history_revision
+                    != Some(sources.history.revision())
+                    || self.last_websocket_revision != Some(sources.websocket_history.revision());
                 let mut run = self.options.dynamic_update && self.ran && history_changed;
 
                 self.controls(ui, &mut run);
                 if run {
-                    self.run(history, scope);
+                    self.run(sources, scope);
                 }
                 self.status_line(ui);
-                self.ensure_detail(history);
+                self.ensure_detail(sources);
 
                 egui::Panel::bottom(SEARCH_DETAIL_ID)
                     .resizable(true)
@@ -77,11 +83,11 @@ impl SearchState {
                             .stroke(egui::Stroke::new(1.0, theme::BORDER))
                             .inner_margin(egui::Margin::same(5)),
                     )
-                    .show(ui, |ui| self.detail(ui, history, inspector));
+                    .show(ui, |ui| self.detail(ui, inspector));
 
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::SURFACE))
-                    .show(ui, |ui| self.results_table(ui, history));
+                    .show(ui, |ui| self.results_table(ui));
             });
 
         self.open = open;
@@ -97,7 +103,7 @@ impl SearchState {
                 [width, 24.0],
                 TextEdit::singleline(&mut self.query)
                     .id(egui::Id::unique(SEARCH_QUERY_ID))
-                    .hint_text("Search request and response bodies"),
+                    .hint_text("Search captured HTTP, WebSockets, Repeater, and Intruder"),
             );
             if self.focus_query {
                 response.request_focus();
@@ -146,14 +152,28 @@ impl SearchState {
         ui.horizontal(|ui| {
             if let Some(error) = &self.error {
                 ui.colored_label(theme::RED, error);
+            } else if self.running {
+                ui.spinner();
+                let text = self.progress.as_ref().map_or_else(
+                    || "Searching stored traffic…".to_owned(),
+                    |progress| {
+                        format!(
+                            "Searching stored {} · {} / {}",
+                            progress.source.label(),
+                            progress.scanned,
+                            progress.total
+                        )
+                    },
+                );
+                ui.label(RichText::new(text).small().color(theme::TEXT_MUTED));
             } else if self.ran {
                 let count = self.results.len();
                 let noun = if count == 1 { "result" } else { "results" };
-                ui.label(
-                    RichText::new(format!("Search completed · {count} {noun}"))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
+                let mut text = format!("Search completed · {count} {noun}");
+                if self.limit_reached {
+                    text.push_str(&format!(" · capped at {SEARCH_RESULT_LIMIT} results"));
+                }
+                ui.label(RichText::new(text).small().color(theme::TEXT_MUTED));
                 if self.dirty && !self.options.dynamic_update {
                     ui.label(
                         RichText::new("settings changed — press Go to rerun")
@@ -164,7 +184,7 @@ impl SearchState {
             } else if self.query.is_empty() {
                 ui.label(
                     RichText::new(
-                        "Search decodes gzip, deflate, and Brotli bodies before matching.",
+                        "Searches stored HTTP and WebSocket history plus Repeater tabs and Intruder results. Encoded bodies are decoded before matching.",
                     )
                     .small()
                     .color(theme::TEXT_MUTED),
@@ -180,11 +200,11 @@ impl SearchState {
         ui.add_space(3.0);
     }
 
-    fn results_table(&mut self, ui: &mut egui::Ui, history: &History) {
+    fn results_table(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("Results").strong().color(theme::TEXT));
-            if self.ran {
+            if self.ran || !self.results.is_empty() {
                 let count = self.results.len();
                 ui.label(
                     RichText::new(format!("({count})"))
@@ -203,21 +223,29 @@ impl SearchState {
             );
             return;
         }
-        if !self.ran {
+        if !self.ran && !self.running {
             empty_state(
                 ui,
-                "Search captured traffic",
-                "Enter a term, choose request or response locations, and press Go or Enter. Content-encoded bodies are decoded before matching.",
+                "Search all stored traffic",
+                "Enter a term, choose request or response locations, and press Go or Enter. Stored HTTP and WebSocket history is scanned in the background; Repeater and Intruder results are searched in place.",
             );
             return;
         }
         if self.results.is_empty() {
-            let body = if self.options.negative {
-                "Every selected location contained the term. Try a different term or turn off negative match."
+            if self.running {
+                empty_state(
+                    ui,
+                    "Searching stored traffic",
+                    "New results appear as stored HTTP and WebSocket rows are scanned.",
+                );
             } else {
-                "Try a different term, enable more locations, or check the scope and negative match options."
-            };
-            empty_state(ui, "No matches", body);
+                let body = if self.options.negative {
+                    "Every selected location contained the term. Try a different term or turn off negative match."
+                } else {
+                    "Try a different term, enable more locations or tools, or check the scope and negative match options."
+                };
+                empty_state(ui, "No matches", body);
+            }
             return;
         }
 
@@ -241,9 +269,9 @@ impl SearchState {
                 .auto_shrink([false, false])
                 .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::exact(62.0))
-                .column(Column::initial(155.0).at_least(100.0))
-                .column(Column::initial(380.0).at_least(220.0))
+                .column(Column::exact(80.0))
+                .column(Column::initial(150.0).at_least(100.0))
+                .column(Column::initial(360.0).at_least(200.0))
                 .column(Column::exact(76.0))
                 .column(Column::exact(76.0))
                 .column(Column::remainder().at_least(126.0));
@@ -269,90 +297,106 @@ impl SearchState {
                 })
                 .body(|body| {
                     body.rows(18.0, self.results.len(), |mut row| {
-                        let id = self.results[row.index()];
-                        let Some(item) = history.get(id) else {
-                            return;
-                        };
+                        let hit = &self.results[row.index()];
 
-                        row.set_selected(selected == Some(id));
-                        row.col(|ui| {
-                            ui.label(RichText::new("Proxy").small().color(theme::TEXT));
-                        });
-                        let host = result_host(item);
-                        row.col(|ui| {
-                            ui.add(Label::new(RichText::new(&host).color(theme::TEXT)).truncate())
-                                .on_hover_text(&host);
-                        });
-                        let url = result_url(item);
-                        row.col(|ui| {
-                            ui.add(Label::new(RichText::new(&url).color(theme::TEXT)).truncate())
-                                .on_hover_text(&url);
-                        });
+                        row.set_selected(selected == Some(hit.key));
                         row.col(|ui| {
                             ui.label(
-                                RichText::new(view::status_text(item))
-                                    .color(view::status_color(item)),
-                            );
-                        });
-                        row.col(|ui| {
-                            ui.label(
-                                RichText::new(view::human_bytes(item.transferred()))
+                                RichText::new(hit.key.source.label())
                                     .small()
                                     .color(theme::TEXT),
                             );
                         });
                         row.col(|ui| {
+                            ui.add(
+                                Label::new(RichText::new(&hit.host).color(theme::TEXT)).truncate(),
+                            )
+                            .on_hover_text(&hit.host);
+                        });
+                        row.col(|ui| {
+                            ui.add(
+                                Label::new(RichText::new(&hit.url).color(theme::TEXT)).truncate(),
+                            )
+                            .on_hover_text(&hit.url);
+                        });
+                        row.col(|ui| {
+                            if let Some(status) = hit.status {
+                                ui.label(
+                                    RichText::new(status.to_string())
+                                        .color(view::status_class_color(status)),
+                                );
+                            } else {
+                                ui.label(RichText::new("—").small().color(theme::TEXT_MUTED));
+                            }
+                        });
+                        row.col(|ui| {
                             ui.label(
-                                RichText::new(view::format_time(item.timestamp))
+                                RichText::new(view::human_bytes(hit.length))
                                     .small()
-                                    .color(theme::TEXT_MUTED),
+                                    .color(theme::TEXT),
                             );
+                        });
+                        row.col(|ui| {
+                            let time = hit
+                                .timestamp
+                                .map_or_else(|| "—".to_owned(), view::format_time);
+                            ui.label(RichText::new(time).small().color(theme::TEXT_MUTED));
                         });
 
                         if row.response().clicked() {
-                            clicked = Some(id);
+                            clicked = Some(hit.key);
                         }
                     });
                 });
         });
 
-        if let Some(id) = clicked
-            && self.selected != Some(id)
+        if let Some(key) = clicked
+            && self.selected != Some(key)
         {
-            self.selected = Some(id);
+            self.selected = Some(key);
             self.detail = None;
         }
     }
 
-    fn detail(&mut self, ui: &mut egui::Ui, history: &History, inspector: &mut InspectorState) {
+    fn detail(&mut self, ui: &mut egui::Ui, inspector: &mut InspectorState) {
         let Some(cache) = &self.detail else {
-            empty_state(
-                ui,
-                "No result selected",
-                "Choose a row in the results table to inspect its request and response.",
-            );
-            return;
-        };
-        let Some(item) = history.get(cache.id) else {
-            empty_state(
-                ui,
-                "Exchange no longer in history",
-                "The selected result was evicted or cleared. Run the search again.",
-            );
+            if self.selected.is_some() {
+                empty_state(
+                    ui,
+                    "Result no longer available",
+                    "This row is still listed, but its message is no longer in the current project or workspace. Run the search again to refresh.",
+                );
+            } else {
+                empty_state(
+                    ui,
+                    "No result selected",
+                    "Choose a row in the results table to inspect its request and response.",
+                );
+            }
             return;
         };
 
         let mut pane = self.pane;
-        if pane == MessagePane::Response && item.response.is_none() {
+        if cache.single_message {
+            pane = MessagePane::Response;
+        }
+        if pane == MessagePane::Response && !cache.has_response {
             pane = MessagePane::Request;
+        }
+        if pane == MessagePane::Request && !cache.has_request {
+            pane = MessagePane::Response;
         }
         let mode = match pane {
             MessagePane::Request => self.request_view,
             MessagePane::Response => self.response_view,
         };
-        let text = match pane {
-            MessagePane::Request => message_view_text(&cache.request, mode),
-            MessagePane::Response => message_view_text(&cache.response, mode),
+        let text = if cache.single_message {
+            message_view_text(&cache.response, mode)
+        } else {
+            match pane {
+                MessagePane::Request => message_view_text(&cache.request, mode),
+                MessagePane::Response => message_view_text(&cache.response, mode),
+            }
         };
         let matches = self
             .matcher
@@ -363,11 +407,19 @@ impl SearchState {
 
         ui.add_space(1.0);
         ui.horizontal(|ui| {
-            if section_tab(ui, pane == MessagePane::Request, "Request").clicked() {
-                self.pane = MessagePane::Request;
-            }
-            if section_tab(ui, pane == MessagePane::Response, "Response").clicked() {
-                self.pane = MessagePane::Response;
+            if cache.single_message {
+                section_tab(ui, true, "Message");
+            } else {
+                if cache.has_request
+                    && section_tab(ui, pane == MessagePane::Request, "Request").clicked()
+                {
+                    self.pane = MessagePane::Request;
+                }
+                if cache.has_response
+                    && section_tab(ui, pane == MessagePane::Response, "Response").clicked()
+                {
+                    self.pane = MessagePane::Response;
+                }
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -390,20 +442,29 @@ impl SearchState {
                     );
                 }
                 ui.label(
-                    RichText::new(view::human_bytes(item.transferred()))
+                    RichText::new(view::human_bytes(cache.length))
                         .small()
                         .color(theme::TEXT_MUTED),
                 );
-                if let Some(duration) = item.duration() {
+                if let Some(duration) = cache.duration {
                     ui.label(
                         RichText::new(view::format_duration(duration))
                             .small()
                             .color(theme::TEXT_MUTED),
                     );
                 }
-                ui.colored_label(view::status_color(item), view::status_text(item));
+                if let Some(status) = cache.status {
+                    ui.colored_label(view::status_class_color(status), status.to_string());
+                }
+                if let Some(number) = cache.number {
+                    ui.label(
+                        RichText::new(format!("#{number}"))
+                            .small()
+                            .color(theme::TEXT_MUTED),
+                    );
+                }
                 ui.label(
-                    RichText::new(format!("#{}", item.number))
+                    RichText::new(cache.key.source.label())
                         .small()
                         .color(theme::TEXT_MUTED),
                 );
@@ -421,18 +482,31 @@ impl SearchState {
         self.response_view = response_view;
         ui.add_space(1.0);
 
-        inspector::side_panel(ui, inspector, cache.id, &cache.inspector);
+        if let Some(model) = &cache.inspector {
+            inspector::side_panel(ui, inspector, cache.key.id, model);
+        }
 
-        if pane == MessagePane::Response && item.response.is_none() {
-            empty_state(
-                ui,
-                "No response captured",
-                "The exchange is still in flight or ended before a response was received.",
-            );
+        let shown_missing = match pane {
+            MessagePane::Request => !cache.has_request,
+            MessagePane::Response => !cache.has_response,
+        };
+        if shown_missing {
+            let (title, body) = if pane == MessagePane::Response {
+                (
+                    "No response retained",
+                    "This Repeater tab or Intruder result has no completed response.",
+                )
+            } else {
+                (
+                    "Request unavailable",
+                    "The request for this result is no longer available in the workspace.",
+                )
+            };
+            empty_state(ui, title, body);
             return;
         }
 
-        message_text_with_matches(ui, cache.id, pane, mode, text, &matches);
+        message_text_with_matches(ui, cache.key.cache_id(), pane, mode, text, &matches);
     }
 }
 
@@ -480,7 +554,7 @@ fn options_group(ui: &mut egui::Ui, options: &mut SearchOptions) -> bool {
             &mut columns[0],
             &mut options.negative,
             "Negative match",
-            "Show exchanges that do not match in any selected location.",
+            "Show messages that do not match in any selected location.",
         );
         changed |= checkbox(
             &mut columns[1],
@@ -505,42 +579,58 @@ fn locations_group(ui: &mut egui::Ui, options: &mut SearchOptions) -> bool {
             &mut columns[0],
             &mut options.request_headers,
             "Request headers",
-            "Search the request line and request headers.",
+            "Search request lines and headers, plus WebSocket connection metadata.",
         );
         changed |= checkbox(
             &mut columns[1],
             &mut options.request_body,
             "Request body",
-            "Search the decoded request body.",
+            "Search decoded request bodies. WebSocket payloads use either body option.",
         );
         changed |= checkbox(
             &mut columns[0],
             &mut options.response_headers,
             "Response headers",
-            "Search the response status line and headers.",
+            "Search response status lines and headers, plus WebSocket connection metadata.",
         );
         changed |= checkbox(
             &mut columns[1],
             &mut options.response_body,
             "Response body",
-            "Search the decoded response body.",
+            "Search decoded response bodies. WebSocket payloads use either body option.",
         );
     });
     changed
 }
 
 fn tools_group(ui: &mut egui::Ui, options: &mut SearchOptions) -> bool {
-    let changed = checkbox(
-        ui,
-        &mut options.proxy_history,
-        "Proxy history",
-        "Search captured HTTP and decrypted HTTPS exchanges.",
-    );
-    ui.label(
-        RichText::new("HTTP history only")
-            .small()
-            .color(theme::TEXT_MUTED),
-    );
+    let mut changed = false;
+    ui.columns(2, |columns| {
+        changed |= checkbox(
+            &mut columns[0],
+            &mut options.proxy_history,
+            "Proxy history",
+            "Search every stored HTTP exchange, including rows outside the loaded history snapshot.",
+        );
+        changed |= checkbox(
+            &mut columns[1],
+            &mut options.websockets,
+            "WebSockets",
+            "Search every stored WebSocket message and its connection URL.",
+        );
+        changed |= checkbox(
+            &mut columns[0],
+            &mut options.repeater,
+            "Repeater",
+            "Search the request editor and retained response of every Repeater tab.",
+        );
+        changed |= checkbox(
+            &mut columns[1],
+            &mut options.intruder,
+            "Intruder",
+            "Search the rendered request and retained response of every Intruder result.",
+        );
+    });
     changed
 }
 

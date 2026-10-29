@@ -114,6 +114,20 @@ impl WebSocketHistory {
         self.order.iter().filter_map(|id| self.items.get(id))
     }
 
+    pub(crate) fn remove_stored(&mut self, ids: &[u64]) {
+        for id in ids {
+            if let Some(item) = self.items.remove(id) {
+                self.retained_bytes = self
+                    .retained_bytes
+                    .saturating_sub(item.payload.data().len());
+            }
+        }
+        if !ids.is_empty() {
+            self.order.retain(|id| self.items.contains_key(id));
+            self.revision += 1;
+        }
+    }
+
     /// Fold one proxy event into the history. Non-WebSocket events are ignored.
     pub fn apply(&mut self, event: ProxyEvent) -> Option<u64> {
         let ProxyEvent::WebSocketMessage {

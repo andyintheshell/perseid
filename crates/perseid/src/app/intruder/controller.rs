@@ -21,12 +21,16 @@ impl PerseidApp {
     pub(in crate::app) fn send_selected_to_intruder(&mut self) {
         let Some(item) = self
             .selected
-            .and_then(|id| self.history.get(id))
+            .and_then(|id| self.selected_http_item(id))
             .filter(|item| !item.is_tunnel())
+            .cloned()
         else {
             return;
         };
+        self.send_history_to_intruder(&item);
+    }
 
+    pub(in crate::app) fn send_history_to_intruder(&mut self, item: &crate::history::HistoryItem) {
         if self.intruder.running
             && let Some(engine) = &self.intruder_engine
         {
@@ -92,6 +96,7 @@ impl PerseidApp {
         }
         self.intruder_engine = None;
         let config = IntruderConfig {
+            cookie_jar: Some(self.cookie_jar.clone()),
             capture_limit: self.capture_limit,
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),
@@ -378,6 +383,7 @@ impl PerseidApp {
             return;
         }
         let state = &mut self.intruder;
+        state.payload_file_dialog = None;
         state.scheme = workspace.scheme.clone();
         state.host = workspace.host.clone();
         state.request = workspace.request.clone();

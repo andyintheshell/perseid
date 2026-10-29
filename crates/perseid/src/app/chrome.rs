@@ -166,7 +166,7 @@ impl PerseidApp {
                     }
                     ui.separator();
                     if ui.button("Quit").clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                        self.request_quit();
                     }
                 });
                 ui.menu_button("View", |ui| {
@@ -253,7 +253,7 @@ impl PerseidApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if window_control(ui, WindowControl::Close, maximized, fullscreen).clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.request_quit();
                 }
                 let maximize_button =
                     window_control(ui, WindowControl::Maximize, maximized, fullscreen);
@@ -306,6 +306,12 @@ impl PerseidApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if super::widgets::settings_button(ui, self.settings.open)
+                    .on_hover_text("Settings")
+                    .clicked()
+                {
+                    self.settings.open = !self.settings.open;
+                }
                 if search_button(ui, self.search.open)
                     .on_hover_text(format!("Search ({search_shortcut})"))
                     .clicked()
@@ -352,7 +358,7 @@ impl PerseidApp {
                 ui.colored_label(theme::BLUE, format!("{in_flight} in flight"));
             }
 
-            let pending = self.intercept_queue.len();
+            let pending = self.intercept_queue.len() + self.websocket_intercept_queue.len();
             if pending > 0 {
                 ui.separator();
                 ui.colored_label(theme::AMBER, format!("{pending} awaiting intercept"));

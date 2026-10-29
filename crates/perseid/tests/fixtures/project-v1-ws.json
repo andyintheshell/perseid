@@ -1,0 +1,10 @@
+{
+  "record_version": 1,
+  "id": 2,
+  "display_number": 1,
+  "timestamp_ms": 1700000000001,
+  "connection_id": 1,
+  "direction": "to_client",
+  "opcode": "binary",
+  "payload": {"observed_len": 3, "stored_len": 3, "truncated": false, "complete": true}
+}

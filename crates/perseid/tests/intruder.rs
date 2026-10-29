@@ -21,6 +21,80 @@ use tokio::net::TcpListener;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+#[tokio::test]
+async fn cookie_jar_adds_missing_cookies_without_overwriting_payloads() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let captured = seen.clone();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let service = service_fn(move |request: Request<Incoming>| {
+            let captured = captured.clone();
+            async move {
+                captured.lock().unwrap().push(
+                    request
+                        .headers()
+                        .get("cookie")
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                );
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .header("Set-Cookie", "next=rotated; Path=/")
+                        .body(Full::new(Bytes::new()))
+                        .unwrap(),
+                )
+            }
+        });
+        let _ = hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .await;
+    });
+    let jar: perseid::proxy::cookies::SharedCookieJar = Default::default();
+    {
+        let mut jar = jar.lock().unwrap();
+        jar.apply = true;
+        jar.update = true;
+        jar.insert(&format!("http://{addr}/"), "sid=jar; Path=/")
+            .unwrap();
+        jar.insert(&format!("http://{addr}/"), "other=jar; Path=/")
+            .unwrap();
+    }
+    let mut intruder = Intruder::start(IntruderConfig {
+        timeout: TIMEOUT,
+        cookie_jar: Some(jar.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    intruder
+        .start_attack(plan(
+            addr,
+            "GET / HTTP/1.1\r\nCookie: sid=$$old$$\r\n\r\n",
+            &["payload"],
+        ))
+        .unwrap();
+    let (results, _, _) = collect_attack(&mut intruder).await;
+    assert!(matches!(
+        results[0].result,
+        RepeaterResult::Response { status: 200, .. }
+    ));
+    let value = seen.lock().unwrap()[0].clone();
+    assert!(value.contains("sid=payload"));
+    assert!(value.contains("other=jar"));
+    assert!(!value.contains("sid=jar"));
+    assert!(
+        jar.lock()
+            .unwrap()
+            .entries()
+            .iter()
+            .any(|entry| entry.2 == "next" && entry.3 == "rotated")
+    );
+    server.abort();
+}
+
 fn plan(addr: std::net::SocketAddr, template: &str, payloads: &[&str]) -> IntruderPlan {
     IntruderPlan {
         attack: AttackType::Sniper,

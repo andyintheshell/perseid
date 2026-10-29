@@ -5,10 +5,10 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version status:** `v0.2.0` is the latest published crate and GitHub
-release, including the first project-persistence implementation. The workspace
-on `main` is `0.3.0-dev` for ongoing development.
-The release branch is preparing `0.2.1` from the current `main` snapshot.
+**Current version status:** `v0.3.0` is the latest published crate and GitHub
+release; project persistence was introduced in `v0.2.0`. The workspace
+version is `0.3.0`. M3 is complete
+for this release scope; remaining M3 issues moved to M4 (see the [roadmap](roadmap.md)).
 
 ## Current release formats
 
@@ -27,13 +27,28 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
 
-1. Create a release-preparation branch from the reviewed `main` snapshot, and
-   incorporate the protected `release` branch's history. Set
-   `[workspace.package] version` in the root `Cargo.toml` to the version being
-   prepared. Run `cargo check --workspace` to update `Cargo.lock`. The version
+### 0.3.0 release highlights
+
+- M3 daily-workbench release scope is complete; six remaining issues moved to
+  M4, not silently marked implemented. The parity estimate remains 78.6%.
+- Full-store HTTP paging/lazy details, full-store paged site map, saved logical
+  retention, and atomic schema-v1→v2 migration are available. **Back up v1 files
+  before opening: `0.2.x` cannot open upgraded projects.**
+- Cookie/session settings provide a bounded in-memory jar; application of cookies
+  and response updates for Repeater/Intruder are opt-in. No automatic login.
+- Normal quit protects unsaved temporary work and acknowledges saved workspace
+  writes, with recovery choices on failure/timeout. This is not crash recovery;
+  see [exit guarantees](project-exit-guarantees.md).
+- Platform package smoke tests below are still required before publication.
+
+### Release procedure
+
+1. Set `[workspace.package] version` in the root `Cargo.toml` on `main` to the
+   version being prepared. Run `cargo check --workspace` to update `Cargo.lock`;
+   review and commit both files through the normal pull-request flow. The version
    produces tag `v<version>` and determines all asset names.
-2. Review and merge the preparation branch into the protected `release` branch.
-   Manual dispatch can preflight the builders on another branch without
+2. Merge the reviewed `main` branch into the protected `release` branch and push
+   it. Manual dispatch can preflight the builders on another branch without
    publishing; dispatching on `release` will create or update the draft as usual.
 3. Wait for all five native build jobs and the draft job to finish. The draft is
    not public until someone publishes it. On a failed build, fix the issue on
@@ -81,6 +96,31 @@ maintainers.
 - **All platforms:** Verify the downloaded files against `SHA256SUMS.txt`,
   inspect generated notes, and check that upgrading does not remove existing
   settings or a generated CA/private key.
+- **Projects:** Reopen a copy of a schema-v1 project and verify the atomic v2
+  upgrade preserves HTTP/WebSocket binary bodies and notes. Browse older HTTP
+  pages, send an old row to a tool, and search beyond the live cache. Apply saved
+  retention and check it survives reopen/Save Copy; a failed open must preserve
+  the current project and running proxy. Automated fixtures cover these paths,
+  but packaged-app startup smoke tests do not exercise them.
+
+### Project storage notes for releases and packages
+
+Projects remain RAM-only until explicitly saved; `.perseid` files live at the
+user-selected path, independently of the installation and local CA directory.
+Installers/upgrades/uninstallers must not remove user projects or copies.
+Saved projects autosave, default to unlimited retention, and offer opt-in
+combined record/body limits under **Project storage…**. Limits exclude
+workbench snapshots and database overhead and do not cap physical file size.
+There is no automatic compaction; Save Copy writes retained data to a fresh file
+and may be smaller.
+
+Release notes for the schema-v2 change must mention the atomic v1 upgrade and
+that `0.2.x` cannot open upgraded files: preserve a closed-file backup before
+opening if backward compatibility is needed. Files are not encrypted. Clear
+history removes captures, not independent tool snapshots or the project file.
+Delete a whole project through the filesystem after switching away or quitting,
+and remove copies/backups separately. None of these operations securely erases
+disk bytes. See [Safety and privacy](safety.md) and [Workbench](workbench.md).
 
 ## Local packaging helpers
 

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use redb::Database;
 
 use super::super::schema::{self, ProjectMeta, STATE_MIGRATING};
-use super::{ProjectMode, ProjectState, ProjectStatus};
+use super::{ProjectMode, ProjectState, ProjectStatus, RetentionLimits};
 
 pub(crate) struct Shared {
     pub(super) database: RwLock<Option<Arc<Database>>>,
@@ -37,6 +37,8 @@ impl Shared {
                 capture_loss_count: meta.capture_loss_count,
                 event_loss_count: meta.event_loss_count,
                 retention_evictions: meta.retention_evictions,
+                retention: RetentionLimits::new(meta.retention_records, meta.retention_bytes),
+                retained_body_bytes: meta.http_body_bytes.saturating_add(meta.ws_body_bytes),
                 last_error: None,
             }),
             next_http_id: AtomicU64::new(meta.next_http_id),
@@ -100,6 +102,8 @@ impl Shared {
             status.capture_loss_count = meta.capture_loss_count;
             status.event_loss_count = meta.event_loss_count;
             status.retention_evictions = meta.retention_evictions;
+            status.retention = RetentionLimits::new(meta.retention_records, meta.retention_bytes);
+            status.retained_body_bytes = meta.http_body_bytes.saturating_add(meta.ws_body_bytes);
             if bump_generation {
                 status.generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
             }
@@ -159,6 +163,8 @@ impl Shared {
                 capture_loss_count: 0,
                 event_loss_count: 0,
                 retention_evictions: 0,
+                retention: RetentionLimits::new(0, 0),
+                retained_body_bytes: 0,
                 last_error: Some("project status unavailable".to_string()),
             });
         status.capture_loss_count = status

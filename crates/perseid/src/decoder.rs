@@ -19,7 +19,7 @@ use std::ops::Range;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
-use blake2::digest::consts::{U16, U20, U28, U32, U48, U64};
+use blake2::digest::consts::{U16, U20, U28, U32, U48, U64, U128};
 use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
@@ -149,9 +149,7 @@ pub struct SmartStep {
 
 /// Hash algorithms available in the Decoder.
 ///
-/// This covers the common Java and BouncyCastle digests. The long tail of
-/// provider-specific names (SKEIN, TupleHash, OID aliases) is intentionally
-/// omitted; the docs list that limitation.
+/// Fixed-output digest variants offered by Decoder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum HashAlgorithm {
     Blake2b160,
@@ -185,10 +183,56 @@ pub enum HashAlgorithm {
     Tiger,
     Whirlpool,
     Ripemd160,
+    Skein256_128,
+    Skein256_160,
+    Skein256_224,
+    Skein256_256,
+    Skein512_128,
+    Skein512_160,
+    Skein512_224,
+    Skein512_256,
+    Skein512_384,
+    Skein512_512,
+    Skein1024_384,
+    Skein1024_512,
+    Skein1024_1024,
+    TupleHash128,
+    TupleHash256,
 }
 
 impl HashAlgorithm {
-    pub const ALL: [Self; 31] = [
+    /// Standard digest OIDs registered by common Java security providers.
+    /// An alias selects the canonical algorithm and has the same output.
+    pub const OID_ALIASES: &'static [(&'static str, Self)] = &[
+        ("1.3.6.1.4.1.1722.12.2.1.5", Self::Blake2b160),
+        ("1.3.6.1.4.1.1722.12.2.1.8", Self::Blake2b256),
+        ("1.3.6.1.4.1.1722.12.2.1.12", Self::Blake2b384),
+        ("1.3.6.1.4.1.1722.12.2.1.16", Self::Blake2b512),
+        ("1.3.6.1.4.1.1722.12.2.2.4", Self::Blake2s128),
+        ("1.3.6.1.4.1.1722.12.2.2.5", Self::Blake2s160),
+        ("1.3.6.1.4.1.1722.12.2.2.7", Self::Blake2s224),
+        ("1.3.6.1.4.1.1722.12.2.2.8", Self::Blake2s256),
+        ("1.2.840.113549.2.2", Self::Md2),
+        ("1.2.840.113549.2.4", Self::Md4),
+        ("1.2.840.113549.2.5", Self::Md5),
+        ("1.3.14.3.2.26", Self::Sha1),
+        ("2.16.840.1.101.3.4.2.4", Self::Sha224),
+        ("2.16.840.1.101.3.4.2.1", Self::Sha256),
+        ("2.16.840.1.101.3.4.2.2", Self::Sha384),
+        ("2.16.840.1.101.3.4.2.3", Self::Sha512),
+        ("2.16.840.1.101.3.4.2.5", Self::Sha512_224),
+        ("2.16.840.1.101.3.4.2.6", Self::Sha512_256),
+        ("2.16.840.1.101.3.4.2.7", Self::Sha3_224),
+        ("2.16.840.1.101.3.4.2.8", Self::Sha3_256),
+        ("2.16.840.1.101.3.4.2.9", Self::Sha3_384),
+        ("2.16.840.1.101.3.4.2.10", Self::Sha3_512),
+        ("1.3.36.3.2.1", Self::Ripemd160),
+        ("1.0.10118.3.0.49", Self::Ripemd160),
+        ("1.0.10118.3.0.55", Self::Whirlpool),
+        ("1.2.156.10197.1.401", Self::Sm3),
+        ("1.2.156.197.1.401", Self::Sm3),
+    ];
+    pub const ALL: [Self; 46] = [
         Self::Blake2b160,
         Self::Blake2b256,
         Self::Blake2b384,
@@ -206,6 +250,21 @@ impl HashAlgorithm {
         Self::Md4,
         Self::Md5,
         Self::Ripemd160,
+        Self::Skein256_128,
+        Self::Skein256_160,
+        Self::Skein256_224,
+        Self::Skein256_256,
+        Self::Skein512_128,
+        Self::Skein512_160,
+        Self::Skein512_224,
+        Self::Skein512_256,
+        Self::Skein512_384,
+        Self::Skein512_512,
+        Self::Skein1024_384,
+        Self::Skein1024_512,
+        Self::Skein1024_1024,
+        Self::TupleHash128,
+        Self::TupleHash256,
         Self::Sha1,
         Self::Sha224,
         Self::Sha256,
@@ -255,6 +314,21 @@ impl HashAlgorithm {
             Self::Tiger => "Tiger",
             Self::Whirlpool => "Whirlpool",
             Self::Ripemd160 => "RIPEMD-160",
+            Self::Skein256_128 => "SKEIN-256-128",
+            Self::Skein256_160 => "SKEIN-256-160",
+            Self::Skein256_224 => "SKEIN-256-224",
+            Self::Skein256_256 => "SKEIN-256-256",
+            Self::Skein512_128 => "SKEIN-512-128",
+            Self::Skein512_160 => "SKEIN-512-160",
+            Self::Skein512_224 => "SKEIN-512-224",
+            Self::Skein512_256 => "SKEIN-512-256",
+            Self::Skein512_384 => "SKEIN-512-384",
+            Self::Skein512_512 => "SKEIN-512-512",
+            Self::Skein1024_384 => "SKEIN-1024-384",
+            Self::Skein1024_512 => "SKEIN-1024-512",
+            Self::Skein1024_1024 => "SKEIN-1024-1024",
+            Self::TupleHash128 => "TupleHash128-256",
+            Self::TupleHash256 => "TupleHash256-512",
         }
     }
 }
@@ -665,8 +739,52 @@ fn hash_bytes(algorithm: HashAlgorithm, input: &[u8]) -> Result<Vec<u8>> {
         H::Tiger => digest::<tiger::Tiger>(input),
         H::Whirlpool => digest::<whirlpool::Whirlpool>(input),
         H::Ripemd160 => digest::<ripemd::Ripemd160>(input),
+        H::Skein256_128 => digest::<skein::Skein256<U16>>(input),
+        H::Skein256_160 => digest::<skein::Skein256<U20>>(input),
+        H::Skein256_224 => digest::<skein::Skein256<U28>>(input),
+        H::Skein256_256 => digest::<skein::Skein256<U32>>(input),
+        H::Skein512_128 => digest::<skein::Skein512<U16>>(input),
+        H::Skein512_160 => digest::<skein::Skein512<U20>>(input),
+        H::Skein512_224 => digest::<skein::Skein512<U28>>(input),
+        H::Skein512_256 => digest::<skein::Skein512<U32>>(input),
+        H::Skein512_384 => digest::<skein::Skein512<U48>>(input),
+        H::Skein512_512 => digest::<skein::Skein512<U64>>(input),
+        H::Skein1024_384 => digest::<skein::Skein1024<U48>>(input),
+        H::Skein1024_512 => digest::<skein::Skein1024<U64>>(input),
+        H::Skein1024_1024 => digest::<skein::Skein1024<U128>>(input),
+        H::TupleHash128 => tuple_hash::<168>(&[input], 32),
+        H::TupleHash256 => tuple_hash::<136>(&[input], 64),
     };
     Ok(bytes)
+}
+
+// SP 800-185 TupleHash: Decoder's input is one tuple element, not a
+// delimiter-separated list. This also lets tests exercise multi-element vectors.
+fn tuple_hash<const RATE: usize>(items: &[&[u8]], output_len: usize) -> Vec<u8> {
+    use digest::{ExtendableOutput, Update, XofReader};
+    fn encode(value: u64, right: bool) -> Vec<u8> {
+        let bytes = value.to_be_bytes();
+        let start = bytes.iter().position(|byte| *byte != 0).unwrap_or(7);
+        let n = (8 - start) as u8;
+        let mut encoded = Vec::with_capacity(n as usize + 1);
+        if !right {
+            encoded.push(n);
+        }
+        encoded.extend_from_slice(&bytes[start..]);
+        if right {
+            encoded.push(n);
+        }
+        encoded
+    }
+    let mut hasher = cshake::CShake::<RATE>::new_with_function_name(b"TupleHash", b"");
+    for item in items {
+        hasher.update(&encode((item.len() as u64) * 8, false));
+        hasher.update(item);
+    }
+    hasher.update(&encode((output_len as u64) * 8, true));
+    let mut output = vec![0; output_len];
+    hasher.finalize_xof().read(&mut output);
+    output
 }
 
 fn digest<D: digest::Digest + Default>(input: &[u8]) -> Vec<u8> {
@@ -896,6 +1014,97 @@ fn digit_value(byte: u8) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skein_golden_vectors() {
+        // Skein 1.3 golden KAT, empty message for each state size.
+        for (algorithm, expected) in [
+            (
+                HashAlgorithm::Skein256_256,
+                "c8877087da56e072870daa843f176e9453115929094c3a40c463a196c29bf7ba",
+            ),
+            (
+                HashAlgorithm::Skein512_512,
+                concat!(
+                    "bc5b4c50925519c290cc634277ae3d6257212395cba733bbad37a4af0fa06af4",
+                    "1fca7903d06564fea7a2d3730dbdb80c1f85562dfcc070334ea4d1d9e72cba7a"
+                ),
+            ),
+            (
+                HashAlgorithm::Skein1024_1024,
+                concat!(
+                    "0fff9563bb3279289227ac77d319b6fff8d7e9f09da1247b72a0a265cd6d2a62",
+                    "645ad547ed8193db48cff847c06494a03f55666d3b47eb4c20456c9373c86297",
+                    "d630d5578ebd34cb40991578f9f52b18003efa35d3da6553ff35db91b81ab890",
+                    "bec1b189b7f52cb2a783ebb7d823d725b0b4a71f6824e88f68f982eefc6d19c6"
+                ),
+            ),
+        ] {
+            assert_eq!(hash_hex(algorithm, b"").unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn tuple_hash_nist_vectors_and_single_input() {
+        // NIST SP 800-185 TupleHash samples 1 and 4, empty customization.
+        let items: &[&[u8]] = &[&[0, 1, 2], &[0x10, 0x11, 0x12, 0x13, 0x14, 0x15]];
+        assert_eq!(
+            hex_lower(&tuple_hash::<168>(items, 32)),
+            "c5d8786c1afb9b82111ab34b65b2c0048fa64e6d48e263264ce1707d3ffc8ed1"
+        );
+        assert_eq!(
+            hex_lower(&tuple_hash::<136>(items, 64)),
+            concat!(
+                "cfb7058caca5e668f81a12a20a2195ce97a925f1dba3e7449a56f82201ec6073",
+                "11ac2696b1ab5ea2352df1423bde7bd4bb78c9aed1a853c78672f9eb23bbe194"
+            )
+        );
+        assert_eq!(
+            hash_hex(HashAlgorithm::TupleHash128, b"abc").unwrap(),
+            "873195cadfea6bc6a71cdd903da87afb49fd232d71db817c3abcad48ad8a7898"
+        );
+        assert_ne!(tuple_hash::<168>(&[b""], 32), tuple_hash::<168>(&[], 32));
+        assert_ne!(
+            tuple_hash::<168>(&[b"ab", b"c"], 32),
+            tuple_hash::<168>(&[b"abc"], 32)
+        );
+    }
+
+    #[test]
+    fn new_hashes_have_expected_lengths_and_obey_input_limit() {
+        use HashAlgorithm::*;
+        for (algorithm, bytes) in [
+            (Skein256_128, 16),
+            (Skein256_160, 20),
+            (Skein256_224, 28),
+            (Skein256_256, 32),
+            (Skein512_128, 16),
+            (Skein512_160, 20),
+            (Skein512_224, 28),
+            (Skein512_256, 32),
+            (Skein512_384, 48),
+            (Skein512_512, 64),
+            (Skein1024_384, 48),
+            (Skein1024_512, 64),
+            (Skein1024_1024, 128),
+            (TupleHash128, 32),
+            (TupleHash256, 64),
+        ] {
+            assert_eq!(
+                hash_hex(algorithm, b"abc").unwrap().len(),
+                bytes * 2,
+                "{algorithm:?}"
+            );
+            assert!(
+                transform(
+                    &vec![0; MAX_INPUT_BYTES + 1],
+                    None,
+                    Transform::Hash(algorithm)
+                )
+                .is_err()
+            );
+        }
+    }
 
     fn decode(codec: Codec, input: &[u8]) -> Vec<u8> {
         apply(Transform::Decode(codec), input).expect("decode should succeed")

@@ -1,5 +1,9 @@
 # Agent guidance
 
+## Responses
+
+Be concise in all responses. Avoid unnecessary narration, repetition, and explanations. Preserve complete code, exact commands, error messages, security considerations, and important implementation details. Do not sacrifice correctness or testing to reduce tokens.
+
 ## Tests and coverage
 
 - The project-wide test-coverage target is 80%. Treat this as a goal to work

@@ -861,6 +861,21 @@ pub enum DecoderHashRecord {
     Tiger,
     Whirlpool,
     Ripemd160,
+    Skein256_128,
+    Skein256_160,
+    Skein256_224,
+    Skein256_256,
+    Skein512_128,
+    Skein512_160,
+    Skein512_224,
+    Skein512_256,
+    Skein512_384,
+    Skein512_512,
+    Skein1024_384,
+    Skein1024_512,
+    Skein1024_1024,
+    TupleHash128,
+    TupleHash256,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -985,6 +1000,12 @@ pub struct SearchOptionsWorkspace {
     #[serde(default = "default_true")]
     pub proxy_history: bool,
     #[serde(default = "default_true")]
+    pub websockets: bool,
+    #[serde(default = "default_true")]
+    pub repeater: bool,
+    #[serde(default = "default_true")]
+    pub intruder: bool,
+    #[serde(default = "default_true")]
     pub request_headers: bool,
     #[serde(default = "default_true")]
     pub request_body: bool,
@@ -1003,12 +1024,49 @@ impl Default for SearchOptionsWorkspace {
             in_scope_only: false,
             dynamic_update: false,
             proxy_history: true,
+            websockets: true,
+            repeater: true,
+            intruder: true,
             request_headers: true,
             request_body: true,
             response_headers: true,
             response_body: true,
         }
     }
+}
+
+/// Which workbench surface a search result came from.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSourceRecord {
+    #[default]
+    ProxyHttp,
+    ProxyWebSocket,
+    Repeater,
+    Intruder,
+}
+
+/// One retained search result. The source plus ID is a stable reference; the
+/// remaining fields are a display snapshot so rows can be shown before their
+/// full message is loaded from the project file.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SearchResultWorkspace {
+    #[serde(default)]
+    pub source: SearchSourceRecord,
+    #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
+    pub number: Option<u64>,
+    #[serde(default)]
+    pub timestamp_ms: Option<u64>,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub status: Option<u16>,
+    #[serde(default)]
+    pub length: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1023,12 +1081,23 @@ pub struct SearchWorkspace {
     pub ran: bool,
     #[serde(default)]
     pub dirty: bool,
-    /// Result row IDs. They refer to project history IDs and are filtered to
-    /// rows present in the loaded snapshot when the workspace is applied.
+    /// Legacy result IDs, kept so older Perseid versions can still read the
+    /// search workspace. New workspaces use [`Self::result_items`].
     #[serde(default)]
     pub results: Vec<u64>,
+    /// Legacy selected ID. New workspaces use [`Self::selected_item`].
     #[serde(default)]
     pub selected: Option<u64>,
+    /// Structured results with their source and display metadata. Project
+    /// opens restore these even when only part of the traffic fits the UI
+    /// snapshot.
+    #[serde(default)]
+    pub result_items: Vec<SearchResultWorkspace>,
+    #[serde(default)]
+    pub selected_item: Option<SearchResultWorkspace>,
+    /// Whether the configured result cap stopped the scan early.
+    #[serde(default)]
+    pub limit_reached: bool,
     #[serde(default)]
     pub pane: MessagePaneRecord,
     #[serde(default)]
@@ -1415,6 +1484,9 @@ mod tests {
                 dirty: false,
                 results: vec![7],
                 selected: Some(7),
+                result_items: Vec::new(),
+                selected_item: None,
+                limit_reached: false,
                 pane: MessagePaneRecord::Request,
                 request_view: MessageViewRecord::Hex,
                 response_view: MessageViewRecord::Raw,

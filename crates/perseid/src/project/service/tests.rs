@@ -1,3 +1,4 @@
+use redb::TableHandle;
 use std::time::SystemTime;
 
 use crate::proxy::{
@@ -8,6 +9,168 @@ use crate::proxy::{
 use super::*;
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[test]
+fn required_workspace_failure_prevents_save_copy_and_flush_and_can_recover() {
+    let handle = ProjectHandle::temporary().unwrap();
+    let db = handle.current_db().unwrap();
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(schema::WORKSPACE).unwrap();
+    // Deliberately replace the workspace table with an incompatible type.
+    let wrong = redb::TableDefinition::<u64, u64>::new(schema::WORKSPACE.name());
+    drop(tx.open_table(wrong).unwrap());
+    tx.commit().unwrap();
+    let destination = TempProject::new("required-workspace");
+    for copy in [false, true] {
+        assert!(
+            handle
+                .save_workspace(
+                    WorkspaceState::default(),
+                    destination.path.clone(),
+                    false,
+                    copy
+                )
+                .recv_timeout(REPLY_TIMEOUT)
+                .unwrap()
+                .is_err()
+        );
+        assert!(!destination.path.exists());
+        assert_eq!(handle.status().mode, ProjectMode::Temporary);
+    }
+    assert!(
+        handle
+            .flush_workspace(WorkspaceState::default())
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(handle.flush().recv_timeout(REPLY_TIMEOUT).unwrap().is_err());
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(wrong).unwrap();
+    drop(tx.open_table(schema::WORKSPACE).unwrap());
+    tx.commit().unwrap();
+    handle
+        .save_workspace(
+            WorkspaceState::default(),
+            destination.path.clone(),
+            false,
+            false,
+        )
+        .recv_timeout(REPLY_TIMEOUT)
+        .unwrap()
+        .unwrap();
+}
+
+#[test]
+fn periodic_workspace_write_failure_is_sticky_until_a_successful_retry() {
+    let handle = ProjectHandle::temporary().unwrap();
+    let db = handle.current_db().unwrap();
+    let wrong = redb::TableDefinition::<u64, u64>::new(schema::WORKSPACE.name());
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(schema::WORKSPACE).unwrap();
+    drop(tx.open_table(wrong).unwrap());
+    tx.commit().unwrap();
+
+    assert!(handle.set_workspace(WorkspaceState::default()));
+    assert!(matches!(
+        handle.flush().recv_timeout(REPLY_TIMEOUT).unwrap(),
+        Err(ProjectError::WorkspacePersistence(_))
+    ));
+    assert!(handle.status().last_error.is_some());
+    let destination = TempProject::new("periodic-workspace-failure");
+    assert!(
+        handle
+            .save_as(destination.path.clone(), false)
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(
+        handle
+            .save_copy(destination.path.clone(), false)
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(!destination.path.exists());
+
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(wrong).unwrap();
+    drop(tx.open_table(schema::WORKSPACE).unwrap());
+    tx.commit().unwrap();
+    assert!(handle.set_workspace(WorkspaceState::default()));
+    handle.flush().recv_timeout(REPLY_TIMEOUT).unwrap().unwrap();
+    handle
+        .save_copy(destination.path.clone(), false)
+        .recv_timeout(REPLY_TIMEOUT)
+        .unwrap()
+        .unwrap();
+    assert!(destination.path.exists());
+}
+
+#[test]
+fn stopped_writer_returns_errors_for_required_workspace_operations() {
+    let handle = ProjectHandle::temporary().unwrap();
+    handle.shutdown();
+    let destination = TempProject::new("stopped-workspace");
+    assert!(matches!(
+        handle
+            .flush_workspace(WorkspaceState::default())
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap(),
+        Err(ProjectError::ServiceUnavailable)
+    ));
+    for copy in [false, true] {
+        assert!(matches!(
+            handle
+                .save_workspace(
+                    WorkspaceState::default(),
+                    destination.path.clone(),
+                    false,
+                    copy
+                )
+                .recv_timeout(REPLY_TIMEOUT)
+                .unwrap(),
+            Err(ProjectError::ServiceUnavailable)
+        ));
+    }
+    assert!(!destination.path.exists());
+}
+
+#[test]
+fn saturated_queue_rejects_required_workspace_without_enqueuing_a_save() {
+    let mut handle = ProjectHandle::temporary().unwrap();
+    handle.shutdown();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    handle.sender = sender;
+    handle
+        .sender
+        .try_send(Command::SetWorkspace(Box::default()))
+        .ok()
+        .unwrap();
+    let destination = TempProject::new("full-workspace");
+    assert!(
+        handle
+            .save_workspace(
+                WorkspaceState::default(),
+                destination.path.clone(),
+                false,
+                false
+            )
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(
+        handle
+            .flush_workspace(WorkspaceState::default())
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(!destination.path.exists());
+    drop(receiver);
+}
 
 /// A unique path under the system temporary directory, removed on drop.
 struct TempProject {
@@ -911,6 +1074,150 @@ fn saved_projects_never_apply_temporary_retention_limits() {
     assert_eq!(meta.http_count, 2);
     assert_eq!(meta.ws_count, 1);
     assert_eq!(meta.retention_evictions, 0);
+}
+
+#[test]
+fn saved_retention_is_applied_immediately_and_survives_reopen_and_copy() {
+    let project = ProjectHandle::temporary().unwrap();
+    let file = TempProject::new("persistent-limits");
+    let copy = TempProject::new("persistent-limits-copy");
+    wait(project.save_as(file.path.clone(), false)).unwrap();
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"", b"one"),
+            ws_message(2, 1, b"ws"),
+            started(3, "GET"),
+            finished(3, b"", b"three"),
+            started(4, "GET"),
+            finished(4, b"", b"four"),
+        ],
+    );
+    wait(project.flush()).unwrap();
+    wait(project.set_retention(RetentionLimits::new(2, 0))).unwrap();
+    assert_eq!(project.status().http_count, 1);
+    assert_eq!(project.status().ws_count, 1);
+    assert!(project.get_http(ids[0]).unwrap().is_none());
+    assert_eq!(project.status().retention_evictions, 2);
+    wait(project.save_copy(copy.path.clone(), false)).unwrap();
+    wait(project.new_project(10, 1024)).unwrap();
+    wait(project.open(copy.path.clone(), 10, 1024)).unwrap();
+    assert_eq!(project.status().retention, RetentionLimits::new(2, 0));
+    capture_all(&project, &[started(10, "POST"), finished(10, b"", b"new")]);
+    wait(project.flush()).unwrap();
+    assert_eq!(project.status().http_count, 1);
+    assert_eq!(project.status().ws_count, 1);
+    assert!(project.get_http(ids[6]).unwrap().is_none());
+}
+
+#[test]
+fn saved_body_retention_honours_zero_and_in_flight_exceptions() {
+    let project = ProjectHandle::temporary().unwrap();
+    let file = TempProject::new("persistent-byte-limits");
+    wait(project.save_as(file.path.clone(), false)).unwrap();
+    wait(project.set_retention(RetentionLimits::new(0, 4))).unwrap();
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            started(2, "GET"),
+            finished(2, b"a", b"bb"),
+            started(3, "GET"),
+            finished(3, b"a", b"bbb"),
+        ],
+    );
+    wait(project.flush()).unwrap();
+    assert!(project.get_http(ids[0]).unwrap().is_some()); // in flight
+    assert!(project.get_http(ids[1]).unwrap().is_none());
+    assert_eq!(project.status().retained_body_bytes, 4);
+    capture_all(&project, &[finished(1, b"", b"older")]);
+    wait(project.flush()).unwrap();
+    assert!(project.get_http(ids[0]).unwrap().is_none());
+    wait(project.set_retention(RetentionLimits::new(0, 0))).unwrap();
+    capture_all(
+        &project,
+        &[started(4, "GET"), finished(4, b"", b"unbounded")],
+    );
+    wait(project.flush()).unwrap();
+    assert_eq!(project.status().http_count, 2);
+}
+
+#[test]
+fn failed_retention_rolls_back_policy_counters_and_already_pruned_rows() {
+    let (db, mut meta) = batch_project();
+    apply_batch(
+        &db,
+        &mut meta,
+        &[
+            started(1, "GET"),
+            finished(1, b"a", b"b"),
+            started(2, "GET"),
+            finished(2, b"a", b"b"),
+            started(3, "GET"),
+            finished(3, b"a", b"b"),
+        ],
+    )
+    .unwrap();
+    let tx = db.begin_write().unwrap();
+    tx.open_table(schema::HTTP_EXCHANGES)
+        .unwrap()
+        .insert(2, b"bad".as_slice())
+        .unwrap();
+    tx.commit().unwrap();
+    assert!(super::persistence::set_retention(&db, &mut meta, RetentionLimits::new(1, 0)).is_err());
+    assert_eq!(meta.http_count, 3);
+    assert_eq!(meta.retention_evictions, 0);
+    assert_eq!(meta.retention_records, 0);
+    let stored = schema::read_meta(&db.begin_read().unwrap()).unwrap();
+    assert_eq!(stored.http_count, 3);
+    assert_eq!(stored.http_body_bytes, 6);
+    assert_eq!(stored.retention_records, 0);
+    assert!(queries::get_http(&db, 1).unwrap().is_some());
+    // Queued, not-yet-committed IDs must never be classified as evicted.
+    assert_eq!(
+        queries::pruned_ids(&db, vec![1, 4], vec![1]).unwrap(),
+        (vec![], vec![])
+    );
+}
+
+#[test]
+fn failed_file_opens_preserve_identity_and_accept_further_captures() {
+    let project = ProjectHandle::temporary().unwrap();
+    let saved = ProjectHandle::temporary().unwrap();
+    let locked = TempProject::new("locked-error");
+    wait(saved.save_as(locked.path.clone(), false)).unwrap();
+    let missing = TempProject::new("missing-error");
+    let corrupt = TempProject::new("corrupt-error");
+    std::fs::write(&corrupt.path, b"not a database").unwrap();
+    let generation = project.status().generation;
+    for path in [&missing.path, &locked.path, &corrupt.path] {
+        let error = wait(project.open(path.clone(), 10, 1024)).unwrap_err();
+        assert!(!error.to_string().is_empty());
+        assert_eq!(project.status().generation, generation);
+        capture_all(
+            &project,
+            &[started(100 + project.status().http_count, "GET")],
+        );
+        wait(project.flush()).unwrap();
+    }
+    assert_eq!(project.status().http_count, 3);
+    assert!(!missing.path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn read_only_project_reports_actionable_error_without_switching() {
+    use std::os::unix::fs::PermissionsExt;
+    let file = TempProject::new("read-only");
+    let project = ProjectHandle::temporary().unwrap();
+    wait(project.save_copy(file.path.clone(), false)).unwrap();
+    std::fs::set_permissions(&file.path, std::fs::Permissions::from_mode(0o400)).unwrap();
+    let error = wait(project.open(file.path.clone(), 10, 1024)).unwrap_err();
+    assert!(error.to_string().contains("writable"));
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    std::fs::set_permissions(&file.path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    wait(project.open(file.path.clone(), 10, 1024)).unwrap();
 }
 
 #[test]
