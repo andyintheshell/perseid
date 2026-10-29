@@ -93,6 +93,8 @@ jobs:
   # default suite runs after every push to main, weekly, and on manual dispatch.
   # The PR suite excludes path-problem queries (including injection and sensitive
   # data-flow checks); those findings will only be reported by the full scans.
+  # Expensive diagnostic/summary queries are also excluded where CodeQL permits;
+  # full scans retain diagnostics used to assess extraction quality.
   analyze-rust:
     name: Analyze (rust)
     needs: changes
@@ -120,6 +122,8 @@ jobs:
             query-filters:
               - exclude:
                   kind: path-problem
+              - exclude:
+                  id: /rust\/(diagnostics|diagnostic|summary|telemetry)\//
 
       - name: Initialize CodeQL (full)
         if: github.event_name != 'pull_request'
