@@ -135,6 +135,27 @@ fn toggle_marker_wraps_unwraps_and_handles_empty_positions() {
 }
 
 #[test]
+fn toggle_marker_handles_multibyte_boundaries_and_existing_markers() {
+    for character in ["é", "中", "😀"] {
+        let text = format!("{character}value");
+        let start = character.len();
+        for selection in [start..start, start..text.len()] {
+            let (marked, range) = toggle_marker(&text, selection.clone());
+            assert_eq!(range, start + 2..selection.end + 2);
+            assert_eq!(&marked[range.clone()], &text[selection.clone()]);
+            let (restored, restored_range) = toggle_marker(&marked, range);
+            assert_eq!(restored, text);
+            assert_eq!(restored_range, selection);
+        }
+        let marked = format!("{character}$${character}$$");
+        let start = character.len();
+        let (restored, range) = toggle_marker(&marked, start..marked.len());
+        assert_eq!(restored, format!("{character}{character}"));
+        assert_eq!(range, start..start + character.len());
+    }
+}
+
+#[test]
 fn auto_mark_covers_query_form_and_cookie_values() {
     let request = "POST /search?q=term&page=2 HTTP/1.1\nHost: example.test\nCookie: session=abc; theme=dark\nContent-Type: application/x-www-form-urlencoded\n\nuser=alice&pass=secret";
     let (marked, count) = auto_mark(request);
