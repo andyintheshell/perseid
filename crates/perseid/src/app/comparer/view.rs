@@ -364,7 +364,10 @@ impl ComparerState {
         let legend_height = 28.0;
         let pane_height = (ui.available_height() - legend_height).max(160.0);
         let gap = 8.0;
-        let pane_width = ((ui.available_width() - gap) * 0.5).max(260.0);
+        // The horizontal layout adds item spacing on both sides of the gap.
+        // Account for it so the panes don't enlarge the window every frame.
+        let pane_width =
+            ((ui.available_width() - gap - 2.0 * ui.spacing().item_spacing.x) * 0.5).max(260.0);
         let mut navigation = 0;
         ui.horizontal_top(|ui| {
             navigation = self.result_pane(ui, 0, result, pane_width, pane_height, &font);
@@ -803,6 +806,40 @@ fn legend_chip(ui: &mut egui::Ui, label: &str, color: Color32) {
 mod tests {
     use super::*;
     use crate::comparer::ChangeKind;
+
+    #[test]
+    fn result_window_does_not_grow_between_frames() {
+        let ctx = egui::Context::default();
+        let mut state = ComparerState::new();
+        state.insert_item(b"first".to_vec(), 0).unwrap();
+        state.insert_item(b"second".to_vec(), 1).unwrap();
+        state.compare(CompareMode::Words);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(3000.0, 2000.0),
+            )),
+            ..Default::default()
+        };
+        let mut sizes = Vec::new();
+        for _ in 0..20 {
+            let mut output = ctx.run_ui(input.clone(), |ui| state.result_window(ui.ctx()));
+            output.textures_delta.clear();
+            sizes.push(
+                ctx.memory(|memory| memory.area_rect(egui::Id::unique(RESULT_WINDOW_ID)))
+                    .unwrap()
+                    .size(),
+            );
+        }
+        assert!(
+            (sizes[19].x - sizes[4].x).abs() < 1.0,
+            "window sizes: {sizes:?}"
+        );
+        assert!(
+            (sizes[19].y - sizes[4].y).abs() < 1.0,
+            "window sizes: {sizes:?}"
+        );
+    }
 
     #[test]
     fn text_line_job_preserves_text_and_highlights() {
