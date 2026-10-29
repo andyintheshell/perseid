@@ -67,70 +67,74 @@ impl PerseidApp {
                     }
                     ui.horizontal_top(|ui| {
                         let width = (ui.available_width() - 150.0).max(300.0);
-                        ui.allocate_ui(egui::vec2(width, 340.0), |ui| {
-                            use egui_extras::{Column, TableBuilder};
-                            TableBuilder::new(ui)
-                                .striped(true)
-                                .resizable(true)
-                                .sense(egui::Sense::click())
-                                .column(Column::initial(115.0))
-                                .column(Column::initial(55.0))
-                                .column(Column::initial(100.0))
-                                .column(Column::remainder().at_least(80.0))
-                                .column(Column::initial(48.0))
-                                .column(Column::initial(65.0))
-                                .column(Column::initial(85.0))
-                                .min_scrolled_height(320.0)
-                                .max_scroll_height(320.0)
-                                .header(24.0, |mut row| {
-                                    for title in [
-                                        "Domain",
-                                        "Path",
-                                        "Name",
-                                        "Value",
-                                        "Secure",
-                                        "HTTP only",
-                                        "Expires",
-                                    ] {
-                                        row.col(|ui| {
-                                            ui.strong(title);
-                                        });
-                                    }
-                                })
-                                .body(|body| {
-                                    body.rows(22.0, entries.len(), |mut row| {
-                                        let (domain, path, name, value, flags) =
-                                            &entries[row.index()];
-                                        let key = (domain.clone(), path.clone(), name.clone());
-                                        row.set_selected(
-                                            self.settings.selected.as_ref() == Some(&key),
-                                        );
-                                        for text in [
-                                            domain.as_str(),
-                                            path.as_str(),
-                                            name.as_str(),
-                                            value.as_str(),
-                                            if flags.contains("Secure") { "Yes" } else { "" },
-                                            if flags.contains("HttpOnly") {
-                                                "Yes"
-                                            } else {
-                                                ""
-                                            },
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(width, 340.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                use egui_extras::{Column, TableBuilder};
+                                TableBuilder::new(ui)
+                                    .striped(true)
+                                    .resizable(true)
+                                    .sense(egui::Sense::click())
+                                    .column(Column::initial(115.0))
+                                    .column(Column::initial(55.0))
+                                    .column(Column::initial(100.0))
+                                    .column(Column::remainder().at_least(80.0))
+                                    .column(Column::initial(48.0))
+                                    .column(Column::initial(65.0))
+                                    .column(Column::initial(85.0))
+                                    .min_scrolled_height(320.0)
+                                    .max_scroll_height(320.0)
+                                    .header(24.0, |mut row| {
+                                        for title in [
+                                            "Domain",
+                                            "Path",
+                                            "Name",
+                                            "Value",
+                                            "Secure",
+                                            "HTTP only",
+                                            "Expires",
                                         ] {
                                             row.col(|ui| {
-                                                ui.add(egui::Label::new(text).truncate())
-                                                    .on_hover_text(text);
+                                                ui.strong(title);
                                             });
                                         }
-                                        row.col(|ui| {
-                                            ui.label(jar.expiration_label(domain, path, name));
+                                    })
+                                    .body(|body| {
+                                        body.rows(22.0, entries.len(), |mut row| {
+                                            let (domain, path, name, value, flags) =
+                                                &entries[row.index()];
+                                            let key = (domain.clone(), path.clone(), name.clone());
+                                            row.set_selected(
+                                                self.settings.selected.as_ref() == Some(&key),
+                                            );
+                                            for text in [
+                                                domain.as_str(),
+                                                path.as_str(),
+                                                name.as_str(),
+                                                value.as_str(),
+                                                if flags.contains("Secure") { "Yes" } else { "" },
+                                                if flags.contains("HttpOnly") {
+                                                    "Yes"
+                                                } else {
+                                                    ""
+                                                },
+                                            ] {
+                                                row.col(|ui| {
+                                                    ui.add(egui::Label::new(text).truncate())
+                                                        .on_hover_text(text);
+                                                });
+                                            }
+                                            row.col(|ui| {
+                                                ui.label(jar.expiration_label(domain, path, name));
+                                            });
+                                            if row.response().clicked() {
+                                                self.settings.selected = Some(key);
+                                            }
                                         });
-                                        if row.response().clicked() {
-                                            self.settings.selected = Some(key);
-                                        }
                                     });
-                                });
-                        });
+                            },
+                        );
                         ui.vertical(|ui| {
                             ui.set_min_width(130.0);
                             if ui.button("Add cookie").clicked() {
