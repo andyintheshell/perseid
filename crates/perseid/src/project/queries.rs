@@ -4,9 +4,9 @@
 //! retain a transaction for the lifetime of a UI panel or search window.
 //!
 //! The stored HTTP browser pages metadata and fetches selected details by ID.
-//! The live history and site-map tables use a bounded newest-first snapshot;
-//! Search uses [`scan_http`] and [`scan_ws`] to read every stored capture in
-//! short-lived batches.
+//! Live history tables use a bounded newest-first snapshot; Search and Target's
+//! derived site-map index use [`scan_http`] (and Search uses [`scan_ws`]) to read
+//! every stored capture in short-lived batches.
 
 #![allow(dead_code)]
 

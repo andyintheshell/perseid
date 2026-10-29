@@ -232,10 +232,12 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-Perseid `0.2.0` introduced saved projects. The history and site-map tables open
+Perseid `0.2.0` introduced saved projects. The live history tables open
 only a bounded newest-first snapshot of stored history; older records stay in the
 project file and can be found by Search. **Browse stored history…** in HTTP
 history pages through all retained HTTP exchanges and loads details/notes on demand.
+Target's site map also covers all retained HTTP endpoints, with background
+indexing, paged tree/Contents navigation, and lazy exchange details.
 Temporary projects evict the
 oldest captured records and released body bytes when they exceed the configurable
 aggregate retention limits, which default to the history flags. New and Open ask

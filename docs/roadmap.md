@@ -12,9 +12,10 @@ milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
 project-persistence workflow are available. Search scans all stored HTTP and
 WebSocket history as well as current Repeater and Intruder results. The remaining
-M3 follow-ups include full-store site-map/WebSocket table views and
+M3 follow-ups include a full-store WebSocket table view and
 recent-project and quit prompts. Stored HTTP paging, lazy details/notes,
-saved-project logical retention, and atomic v1→v2 migration are available.
+saved-project logical retention, atomic v1→v2 migration, and a full-store site map
+with background indexing, bounded tree/Contents pages, and lazy details are available.
 Temporary and opt-in saved retention use combined count/body limits; physical
 file size is not capped. HTTP/2,
 WebSocket history, Intruder, and Sequencer arrived ahead of the protocol
@@ -62,10 +63,12 @@ promise.
 
   *Status: projects start in temporary memory by default. Save As, Open, and Save
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
-  project-scoped workbench state are written automatically. On open, the history
-  and site-map tables load only a bounded newest-first history snapshot; older
+  project-scoped workbench state are written automatically. On open, the live
+  history tables load only a bounded newest-first history snapshot; older
    records are reachable through the paged **Browse stored history…** HTTP
-   browser with lazy details and notes, and through full-store Search.
+   browser with lazy details and notes, full-store Search, and the paged Target
+   site map. The site map derives endpoints from all retained HTTP exchanges,
+   using a disposable disk index rather than hydrating the complete store.
   Temporary storage evicts the oldest
   captures when it exceeds the configurable aggregate count or retained-body
   limits. New Project and Open Project ask Save/Discard/Cancel when the current

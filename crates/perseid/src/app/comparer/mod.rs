@@ -73,7 +73,7 @@ impl PerseidApp {
     pub(super) fn send_selected_to_comparer(&mut self, pane: MessagePane) {
         let Some(item) = self
             .selected
-            .and_then(|id| self.history.get(id))
+            .and_then(|id| self.selected_http_item(id))
             .filter(|item| !item.is_tunnel())
             .cloned()
         else {

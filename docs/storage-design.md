@@ -36,7 +36,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 | Proposal | Implemented | Why |
 | --- | --- | --- |
 | §9.2 ordered delta replay during Save As | The single writer copies a consistent read snapshot to a new `initializing` file, marks it ready, then switches to it. Capture events queued during the copy are processed by that writer after the switch; queue overflow is reported as capture loss. | No separate delta log is used. Single-writer ordering handles normal handover while retaining the proposed file format and service boundary. |
-| Paged UI over `list_http`/`list_ws` (§7.1) | **Browse stored history…** uses asynchronous 500-row HTTP metadata pages, `(timestamp, id)` cursors, on-demand details, Inspector notes, and direct tool sends. Search scans all retained HTTP/WebSocket records. Live history, WebSocket, and site-map tables remain bounded caches. | Older HTTP records are reachable without hydrating the full store or changing live-table filter semantics. |
+| Paged UI over `list_http`/`list_ws` (§7.1) | **Browse stored history…** uses asynchronous 500-row HTTP metadata pages, `(timestamp, id)` cursors, on-demand details, Inspector notes, and direct tool sends. Search scans all retained HTTP/WebSocket records. The site map uses a disposable disk-backed summary index with independently bounded tree/Contents pages. Only live history tables remain snapshot-based. | Older HTTP records are reachable without hydrating the full store or changing live-table filter semantics. |
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
 | §7.2 separately versioned workspace component keys | One `workspace/v1` JSON document holds all project-scoped workbench state, stored inline up to 32 MiB or split into 8 MiB chunks in the same `workspace` table with a manifest. Reads are capped at 512 MiB. | A single atomic snapshot keeps cross-tool state consistent; chunking handles result bodies without a schema change. |
 | §7.2 persist logical inputs and regenerate derived results | Intruder results store response heads/bodies and rebuild their detail views; Comparer diffs and Sequencer analysis are recomputed on open. Repeater's last response is stored as its Pretty/Raw/Hex views because the tab does not retain the raw body. | Intruder and Repeater responses are already bounded by the UI; storing views preserves the visible result without adding a second body store. |
@@ -47,7 +47,51 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 
 - Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal without explicit consent, staged overwrite of an existing file, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
 - Additional regression coverage: multi-page timestamp ties with concurrent captures, lazy binary details, old-row tool sends/notes, stale reader results after switches, saved retention across reopen/copy, transactional retention rollback, legacy HTTP/WebSocket fixtures, malformed/missing/future/interrupted schema failures, and failed opens preserving the listener/workspace.
-- Follow-ups: full-store site-map/WebSocket table views, recent projects and a quit prompt, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls.
+- Follow-ups: full-store WebSocket table views, recent projects and a quit prompt, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls.
+
+### Full-store site-map index (#151)
+
+`app/target_store.rs` streams retained HTTP records through short-lived project
+read transactions (256 records per scan batch), holding only one decoded
+exchange at a time. It writes grouped endpoint summaries to a private temporary
+redb database with an 8 MiB page cache and 256-record write transactions. Bodies
+are used transiently for the existing decoded HTML-title/form-parameter
+semantics, never copied into the index. No project schema change is needed.
+The index is disposable and rebuilt on reopen, not authoritative content.
+
+Background queries scan summaries and retain at most 501 candidate Contents
+rows and 501 immediate child nodes, returning 500 of each plus continuation
+indicators. Contents uses sort-aware keyset cursors with deterministic
+path/host/method ties; Time also breaks timestamp ties by capture ID. The UI
+holds one page and one lazily hydrated selected exchange. Global display
+filters, scope, summary/note search, and sorting precede paging. Notes remain
+project-scoped and belong to the latest exchange, not an endpoint-wide union.
+
+Committed captures coalesce into background rebuilds (at most one build at a
+time, with a one-second minimum interval). The prior index stays usable during
+rebuild. Capture changes arriving during a scan trigger a subsequent rebuild;
+the view is eventually consistent, not a transactionally pinned project
+snapshot. Pause freezes the installed index but still allows presentation
+queries. Retention/count reductions and generation changes discard readers,
+pages, and selected details even while paused; Clear history cancels the
+local derived state immediately. Dropped generations cancel builds/scans and
+cannot install stale results into a new project, including reused IDs.
+
+Temporary index directories are owner-only on Unix and removed on normal drop.
+An abnormal process exit can leave a `perseid-site-map-*` directory in the OS
+temporary directory; it contains sensitive URL/title summaries, not bodies.
+As with project files, deletion is not secure erasure.
+
+Regression tests cover reopened stores beyond the live cache, multi-page
+timestamp ties, backwards navigation, old binary details/tool sends, grouping,
+mixed schemes, filters, all sorts, notes/search, pause/resume, retention/clear,
+and stale project results. A manually invoked 25,003-endpoint synthetic check
+in a macOS debug build took approximately 1.8 s to build the index and 340 ms
+for the first query, returning only 500 rows and 500 child nodes. Reproduce:
+`cargo test -p perseid --lib large_synthetic_project -- --ignored --nocapture`.
+It also saves/reopens the project with a 10-record live cache and drives
+headless tree/Contents clicks, paging, old details, and a Repeater send. This
+does not substitute for desktop visual verification.
 
 ### 0.4 Compatibility and deletion parity
 
@@ -748,9 +792,10 @@ The links above point to current `main` (workspace `0.3.0-dev`) for readable sou
 
 ## 15. Original final acceptance definition
 
-This was the target for the first persistence implementation. It is not fully
-met: the history and site-map tables still do not page through all saved history,
-although Search now scans it. See §0 for the shipped subset and deviations.
+This was the target for the first persistence implementation. Stored HTTP
+paging, the full-store site map, and Search now navigate retained history without
+hydrating it all. The live HTTP/WebSocket tables still show bounded snapshots.
+See §0 for the shipped subset and deviations.
 
 The initial project-storage implementation is ready to release when a user can:
 

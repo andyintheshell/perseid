@@ -6,8 +6,9 @@
 //! endpoint. CONNECT tunnels are omitted because they carry no HTTP request of
 //! their own; decrypted requests appear as their own entries.
 //!
-//! Everything here is derived from the bounded history snapshot. The site map
-//! is not an independent record store and it does not crawl or infer URLs.
+//! The pure snapshot builder supports live/fixture previews. Target's retained
+//! history view uses these same summaries in a disposable disk-backed index.
+//! Neither path is an independent record store or crawls or infers URLs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
@@ -17,7 +18,7 @@ use crate::proxy::{CapturedBody, RequestInfo};
 use crate::view;
 
 /// One endpoint in the site map: a unique method plus request target.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SiteEntry {
     pub host: String,
     pub scheme: String,
@@ -41,6 +42,37 @@ pub struct SiteEntry {
 }
 
 impl SiteEntry {
+    pub(crate) fn from_item(item: &crate::history::HistoryItem) -> Self {
+        let mut entry = Self {
+            host: if item.request.host.is_empty() {
+                "(unknown host)".into()
+            } else {
+                item.request.host.clone()
+            },
+            scheme: request_scheme(&item.request),
+            path: if item.request.path.is_empty() {
+                "/".into()
+            } else {
+                item.request.path.clone()
+            },
+            method: item.request.method.clone(),
+            id: item.id,
+            count: 1,
+            status: None,
+            in_flight: false,
+            dropped: false,
+            length: 0,
+            mime: String::new(),
+            title: String::new(),
+            params: 0,
+            params_uncertain: false,
+            timestamp: item.timestamp,
+        };
+        let scheme = entry.scheme.clone();
+        update_entry(&mut entry, item, &scheme);
+        entry
+    }
+
     /// The URL path without a query string or fragment. The tree uses this so
     /// `?sort=price` and `?sort=name` share a single leaf node.
     pub fn base_path(&self) -> String {

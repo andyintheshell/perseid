@@ -41,7 +41,7 @@ Equal weighting and half credit are judgment calls, not measurements of the
 fraction of each capability implemented. In particular, a Working row denotes a
 usable workflow, not every Burp option: Intruder lacks payload processing, and
 WebSocket replay cannot reopen closed connections. The biggest partial gaps
-include bounded history/site-map views, session-only WebSocket Repeater tabs,
+include bounded live-history views, session-only WebSocket Repeater tabs,
 Decoder hex-selection behavior, and approximate Sequencer analysis. See the
 matrix for details. Recalculate this snapshot when matrix statuses or scope change.
 
@@ -49,7 +49,7 @@ matrix for details. Recalculate this snapshot when matrix statuses or scope chan
 
 | ✅ Working | 🟡 Partial | 🛠 Planned |
 | --- | --- | --- |
-| HTTP/HTTPS proxy and intercept | Bounded history view and site map | Paging the live history/site-map tables across all saved history |
+| HTTP/HTTPS proxy and intercept | Bounded live history; site map without crawling/discovery | Full-store live WebSocket table |
 | Scope and match/replace | Repeater, Decoder, and Sequencer | — |
 | Comparer, Intruder, and WebSocket editing/replay | WebSocket history; project persistence | Further project workflow polish |
 | Memory display | — | — |
@@ -74,7 +74,7 @@ Decoder, Comparer, and Sequencer.
 | **Intercept and edit** | ✅ Working | Hold, edit, forward, or drop HTTP/1.1 and HTTP/2 requests; response interception is opt-in. Buffered bodies can be edited; streaming or oversized bodies are header-only. |
 | **Message inspection** | ✅ Working | Pretty, Raw, and Hex views; bounded gzip, deflate, and Brotli decoding; parsed Inspector and per-exchange Notes. |
 | **Scope and rewrite rules** | ✅ Working | Filter views by scope; optionally block out-of-scope proxy requests and `CONNECT` tunnels; recheck edited targets. Match/replace supports literal or regex rules on message heads and buffered UTF-8 bodies. |
-| **Target site map** | 🟡 Partial | Burp-style URL view: host/folder/resource tree, per-node Contents table with Host, Method, URL, Params, Status, Length, MIME, Title, Notes, and Time; sorting, search, context-menu sends, and Burp's default display filters (not found, CSS, images, binary, 4xx, empty folders). Pause freezes the derived view. Derived from the loaded history snapshot; not a crawler. Crawl paths, scanner Issues, parameter discovery, and unrequested-URL inference are unavailable. Cache eviction can hide entries without deleting saved records; clearing history removes the records. |
+| **Target site map** | 🟡 Partial | All retained HTTP history, including old endpoints after reopen. Background disk-backed endpoint indexing; host/folder/resource navigation and Contents independently page 500 summaries, with lazy details, Inspector notes, cURL, and tool sends. Host, Method, URL, Params, Status, Length, MIME, Title, Notes, and Time sorting/search cover the selected subtree. Default display filters and scope apply across retained endpoints. Pause freezes summaries, not capture; retention/clear/project switches invalidate paused views too. Latest means greatest capture ID. No crawler, crawl paths, scanner Issues, parameter discovery, or unrequested-URL inference; expand-all is unavailable for the lazy paged tree. |
 | **HTTP history** | 🟡 Partial | The live table uses a bounded newest-first snapshot; **Browse stored history…** pages through retained HTTP rows and loads details/notes on demand. Search scans the full retained store. Complete captures can be copied as curl. Selective per-item deletion remains unavailable. |
 | **Search** | ➕ Beyond CE | Search all stored HTTP and WebSocket history plus current Repeater tabs and retained Intruder results, with case, regex, negative-match, in-scope, and live-update filters; stored scans run in the background with progress and stop when superseded. Results highlight in Pretty/Raw/Hex. Query, options, structured result rows, selection, and views persist with a project; old HTTP-only workspaces drop IDs missing from the loaded snapshot. |
 | **WebSocket history** | 🟡 Partial | Capture, intercept, edit, forward and drop text/binary messages for `ws://` and decrypted `wss://`. Saved projects retain history, but the UI loads a bounded snapshot. |
@@ -113,7 +113,7 @@ For usage details, limits, and safety behavior, see the
 | --- | --- |
 | **M1 — Proxy core** | ✅ Complete: HTTP/1.1 proxy, interception, scope, and match/replace. |
 | **M2 — HTTPS** | ✅ Complete: local CA lifecycle, TLS interception, and pass-through. |
-| **M3 — Daily workbench** | 🟡 In progress: Repeater, Decoder, Comparer, Search across stored HTTP/WebSocket history plus current Repeater/Intruder results, and local project files are available; paging the history/site-map tables across the full saved history and project workflow polish remain. |
+| **M3 — Daily workbench** | 🟡 In progress: Repeater, Decoder, Comparer, full-store Search, stored HTTP paging, a full-store paged site map, and local project files are available; full-store WebSocket table navigation and project workflow polish remain. |
 | **M4 — Protocols and testing tools** | 🟡 In progress: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. |
 | **M5 — Parity hardening** | 🟡 In progress: release packages are published; clean-install testing, crash recovery, accessibility, and broader parity audits remain. |
 

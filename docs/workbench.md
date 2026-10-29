@@ -77,8 +77,8 @@ a row to load request/response details, Pretty/Raw/Hex views, and Inspector
 notes on demand; send it directly to Repeater, Intruder, or Comparer. Pages
 stay in place during capture; **Newest** refreshes to include new arrivals.
 Live-table filters do not apply in this browser. **Search** filters all retained
-HTTP/WebSocket records, including decoded bodies. The site map and live
-WebSocket table still use the bounded snapshot.
+HTTP/WebSocket records, including decoded bodies. The site map also covers all
+retained HTTP history; only the live HTTP/WebSocket tables use the bounded snapshot.
 
 ### Retention and file size
 
@@ -127,9 +127,16 @@ requests by host, folder, and resource; selecting a node filters the
 **Contents** table to that node and everything below it. Query variants share
 the same tree leaf while each method and URL remains its own Contents row.
 Columns cover Host, Method, URL, Params, Status code, Length, MIME type, Title,
-Notes, and Time requested, and every column can be sorted. HTTPS hosts use a
-lock icon; a host captured over both HTTP and HTTPS uses a globe with a small
-lock badge so the tree never presents mixed traffic as a single scheme.
+Notes, and Time requested, and every column can be sorted across the entire
+selected subtree, not just the current page.
+
+The retained-history URL tree is paged: select a host, folder, or resource to
+descend; **↑ Parent** goes back. **More nodes** and **First nodes** navigate wide
+branches in groups of 500. Contents has independent **Next contents**,
+**Previous contents**, and **First contents** controls, also capped at 500 rows.
+Keyboard navigation and **Copy visible URLs** apply to the current Contents
+page. Expand/collapse-all is unavailable for this lazy tree. While an initial
+query is running, a spinner indicates loading.
 
 The filter bar only changes what is displayed. Its defaults match Burp's:
 not-found items, CSS, images, general binary content, 4xx responses, and empty
@@ -140,9 +147,22 @@ Inspector's Notes appear in the table. The **Issues (0)** tab is empty because
 Perseid does not run a scanner, and the crawl-paths view is unavailable because
 Perseid does not crawl or infer unrequested URLs.
 
-The map is built from the currently loaded history snapshot, not from a crawler.
-UI-cache eviction can remove entries from the map without deleting their saved
-project records; clearing history removes the stored records too.
+The map covers **all retained HTTP exchanges**, including endpoints older than
+the live cache after reopening a project. Endpoints group by host, complete
+request path (including query), and method; HTTP/HTTPS variants share a row.
+The greatest capture ID supplies the latest status, title, parameter count,
+scheme, and exchange-specific note; timestamp ties do not change that choice.
+Contents search matches summary fields and notes, not message bodies (use Search
+for those). Selecting an old row loads just that exchange's details, enabling
+the same Inspector, cURL, and tool-send actions without repopulating live history.
+
+Capture commits trigger coalesced background index rebuilds, so new endpoints
+can take a short time to appear. Pause freezes the current summary index while
+capture continues; display filters, scope, search, sorting, and paging still
+work on it. Resume catches up. Retention eviction, Clear history, and project
+switches invalidate even a paused view, including pending results and details.
+Clearing history deletes the underlying records; ordinary UI-cache eviction
+does not remove endpoints from the map. No crawler is involved.
 
 **Target > Issues** is likewise an honest empty state: Perseid has no
 vulnerability scanner and does not import scanner findings.
@@ -782,7 +802,7 @@ separate Space, matching the system green-button behavior.
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
 | Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
 | Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Files are unencrypted; saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
-| Project history view | Opening loads a bounded newest snapshot. **Browse stored history…** pages all retained HTTP rows and loads details/notes on demand; Search scans all retained HTTP/WebSocket records. The site map and live WebSocket table remain cache-based. |
+| Project history view | Opening loads a bounded newest snapshot. **Browse stored history…** pages all retained HTTP rows and loads details/notes on demand; Search scans all retained HTTP/WebSocket records. The site map pages all retained HTTP endpoints with lazy details; the live WebSocket table remains cache-based. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
