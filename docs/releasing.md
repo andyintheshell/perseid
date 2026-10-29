@@ -79,6 +79,31 @@ maintainers.
 - **All platforms:** Verify the downloaded files against `SHA256SUMS.txt`,
   inspect generated notes, and check that upgrading does not remove existing
   settings or a generated CA/private key.
+- **Projects:** Reopen a copy of a schema-v1 project and verify the atomic v2
+  upgrade preserves HTTP/WebSocket binary bodies and notes. Browse older HTTP
+  pages, send an old row to a tool, and search beyond the live cache. Apply saved
+  retention and check it survives reopen/Save Copy; a failed open must preserve
+  the current project and running proxy. Automated fixtures cover these paths,
+  but packaged-app startup smoke tests do not exercise them.
+
+### Project storage notes for releases and packages
+
+Projects remain RAM-only until explicitly saved; `.perseid` files live at the
+user-selected path, independently of the installation and local CA directory.
+Installers/upgrades/uninstallers must not remove user projects or copies.
+Saved projects autosave, default to unlimited retention, and offer opt-in
+combined record/body limits under **Project storage…**. Limits exclude
+workbench snapshots and database overhead and do not cap physical file size.
+There is no automatic compaction; Save Copy writes retained data to a fresh file
+and may be smaller.
+
+Release notes for the schema-v2 change must mention the atomic v1 upgrade and
+that `0.2.x` cannot open upgraded files: preserve a closed-file backup before
+opening if backward compatibility is needed. Files are not encrypted. Clear
+history removes captures, not independent tool snapshots or the project file.
+Delete a whole project through the filesystem after switching away or quitting,
+and remove copies/backups separately. None of these operations securely erases
+disk bytes. See [Safety and privacy](safety.md) and [Workbench](workbench.md).
 
 ## Local packaging helpers
 

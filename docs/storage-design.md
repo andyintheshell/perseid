@@ -11,23 +11,24 @@ shipped in `0.2.0`. See §0 for implementation status and deviations.<br>
 
 ## 0. Review and implementation status
 
-**Reviewed:** 2026-10-23, against the `0.2.0` implementation.
+**Reviewed:** 2026-10-29, against `0.3.0-dev` (schema v2).
 
-**Verdict:** the design was adopted in part, with the deviations and unfinished requirements listed below. In particular, temporary-project aggregate retention is implemented, while persistent-disk retention caps are not. The document was written against the `v0.1.0` release tag, while the implementation shipped in `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
+**Verdict:** persistent HTTP paging/details, saved-project logical retention, and atomic v1→v2 migration are implemented. Physical file-size caps and automatic compaction are not. The document was written against the `v0.1.0` release tag, while persistence first shipped in `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
 
 ### 0.1 Implementation status
 
 Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `backend`, `queries`, `transfer`, `service`) plus `crates/perseid/src/app/project_ui.rs`:
 
-- Schema v1 as specified in §6.2, including the Perseid `application_id`, `schema_version`, `record_version` and `state` checks from §6.1/§11.1; a newer schema or an unsupported record version is rejected with a typed error.
+- Schema v2 retains the v1 tables/records in §6.2 and adds `retention_records` and `retention_bytes` metadata. `migrations.rs` upgrades v1 atomically under exclusive access, recalculates HTTP/WebSocket counts and body-byte accounting, preserves identity/IDs/notes/binary bodies, and defaults saved limits to unlimited. Unknown newer schemas and unsupported record versions are rejected.
 - One writer actor with a bounded command queue, `Durability::Immediate` file commits, capture batching (128 events / 50 ms), flush receipts and workspace write coalescing (§5.2–5.4).
 - HTTP `Started`/`ResponseHead`/`Finished`, WebSocket messages/connections and workspace state persisted, with secondary indexes updated in the same transaction (§6.3–6.5). Bodies are stored as raw bytes; structured records are versioned JSON DTOs.
 - The workspace stores project-scoped workbench state: scope and match/replace rules, UI selections and message views, Inspector notes/sections, Repeater tabs and last responses, Intruder configuration and result rows, Decoder panels, Comparer items/result state, Search state, Sequencer samples/settings/analysis source, and TLS interception/pass-through hosts. CA material and transient network/interception tasks are excluded.
-- Temporary startup, `New Project`, `Open Project…`, `Save Project As…`, `Save Project Copy…`, in-flight repair on open, and clear-history, with the proxy stopped and restarted around open/new (§4).
+- Temporary startup, `New Project`, `Open Project…`, `Save Project As…`, `Save Project Copy…`, in-flight repair on open, and clear-history (§4). Open validates and retains an exclusively opened destination on a worker before stopping the current proxy; only a successful preparation proceeds to the writer swap and proxy restart.
 - Save/Discard/Cancel confirmation before New or Open replaces a temporary project that has captured records or workbench edits. Save opens Save As and continues the switch only after a successful save; cancelling or failing the save keeps the current project.
 - Project status widget (mode, counts, capture loss, retention evictions, last error) and a final flush in `eframe::App::on_exit`.
-- Temporary-project aggregate retention: oldest-first eviction by combined HTTP/WebSocket record count and retained HTTP body/WebSocket payload bytes. Limits default to `--history-limit`/`--history-bytes`, can be set with `--temporary-retention-limit`/`--temporary-retention-bytes`, and `0` disables a dimension. The limits are soft: each stream's newest record and any in-flight HTTP exchange are always kept, so they can be exceeded temporarily; persistent projects never evict automatically.
-- **Remaining limitation:** saved project files still have no automatic disk-retention cap. `--history-limit` and `--history-bytes` bound the UI snapshot, not the file.
+- Oldest-first aggregate retention by combined HTTP/WebSocket count and retained body/payload bytes. Temporary limits default to the history flags and can be overridden with `--temporary-retention-*`. Saved limits default to unlimited and are configurable under **Project storage…**; Apply atomically updates the policy and prunes eligible records. The policy survives reopen/copy. Each stream's newest record and in-flight HTTP exchanges are kept even over budget; `0` disables a dimension. Headers, indexes, and workbench data are excluded. The live caches reconcile pruned IDs asynchronously without discarding queued captures.
+- **Physical storage:** retention does not cap the database file. redb reuses freed pages without necessarily shrinking it; there is no automatic compaction. Save Copy writes retained tables to a fresh file and may reduce size. Project files are unencrypted; Clear history, retention, and filesystem deletion are not secure erasure.
+- **Deletion:** Clear history deletes captures (and HTTP Inspector notes), leaving independent tool snapshots. Discard temporary work by leaving it unsaved; delete a closed saved `.perseid` file and any copies/backups using the filesystem. No dedicated whole-project deletion UI is needed; see the Burp parity note below.
 - A corrupt HTTP, WebSocket, or workspace snapshot now fails the open with a contextual error instead of substituting empty state; the previously open project remains active.
 
 ### 0.2 Deviations from the proposal
@@ -35,17 +36,33 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 | Proposal | Implemented | Why |
 | --- | --- | --- |
 | §9.2 ordered delta replay during Save As | The single writer copies a consistent read snapshot to a new `initializing` file, marks it ready, then switches to it. Capture events queued during the copy are processed by that writer after the switch; queue overflow is reported as capture loss. | No separate delta log is used. Single-writer ordering handles normal handover while retaining the proposed file format and service boundary. |
-| Paged UI over `list_http`/`list_ws` (§7.1) | Paged queries and cursors exist and are tested; the history and site-map tables hydrate a bounded newest-first snapshot (count and byte budget) into the existing `History`/`WebSocketHistory` caches. Search scans all stored HTTP/WebSocket records through the paged queries on a background worker. | Keeps the existing history UI behavior in this change while making all stored traffic searchable; the query API remains the migration path for paged tables. |
+| Paged UI over `list_http`/`list_ws` (§7.1) | **Browse stored history…** uses asynchronous 500-row HTTP metadata pages, `(timestamp, id)` cursors, on-demand details, Inspector notes, and direct tool sends. Search scans all retained HTTP/WebSocket records. Live history, WebSocket, and site-map tables remain bounded caches. | Older HTTP records are reachable without hydrating the full store or changing live-table filter semantics. |
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
 | §7.2 separately versioned workspace component keys | One `workspace/v1` JSON document holds all project-scoped workbench state, stored inline up to 32 MiB or split into 8 MiB chunks in the same `workspace` table with a manifest. Reads are capped at 512 MiB. | A single atomic snapshot keeps cross-tool state consistent; chunking handles result bodies without a schema change. |
 | §7.2 persist logical inputs and regenerate derived results | Intruder results store response heads/bodies and rebuild their detail views; Comparer diffs and Sequencer analysis are recomputed on open. Repeater's last response is stored as its Pretty/Raw/Hex views because the tab does not retain the raw body. | Intruder and Repeater responses are already bounded by the UI; storing views preserves the visible result without adding a second body store. |
 | Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | No recent-project list or quit prompt. **New Project** and **Open Project** ask Save/Discard/Cancel when the temporary project has captured records or workbench edits; Save opens Save As and continues only after a successful save. Normal exit flushes saved-project state and drops temporary history. | Recent-project and quit flows remain follow-up work; unsaved switches are covered. |
-| Migrations (§11.2) | Older schemas are rejected with a clear “requires migration” error; no migration code yet | No schema-v2 exists to migrate; the check keeps forward compatibility safe. |
+| Migrations (§11.2) | v1→v2 is a single durable transaction; errors abort it. No resumable multi-batch migration protocol is needed for this upgrade. | Version metadata is updated in the same commit as the new counters/settings; there is no exposed half-upgraded state. |
 
 ### 0.3 Test and follow-up notes
 
 - Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal without explicit consent, staged overwrite of an existing file, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
-- Follow-up work, in priority order: (1) wire history and site-map views to the paged persistent queries so users can reach older saved records in the tables (Search already scans all stored HTTP/WebSocket records); (2) add a recent-project list and a quit prompt; (3) add schema migration/integrity handling and more crash, scale, and sidecar tests; (4) define persistent disk-capacity/retention controls.
+- Additional regression coverage: multi-page timestamp ties with concurrent captures, lazy binary details, old-row tool sends/notes, stale reader results after switches, saved retention across reopen/copy, transactional retention rollback, legacy HTTP/WebSocket fixtures, malformed/missing/future/interrupted schema failures, and failed opens preserving the listener/workspace.
+- Follow-ups: full-store site-map/WebSocket table views, recent projects and a quit prompt, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls.
+
+### 0.4 Compatibility and deletion parity
+
+| Application | Project schemas |
+| --- | --- |
+| `0.2.x` | Reads/writes v1; rejects v2 |
+| `0.3.0-dev` | Writes v2; atomically upgrades v1 on open; rejects unknown newer schemas |
+
+Keep a backup of a closed v1 file if an older application must still open it.
+Burp's [project management](https://portswigger.net/burp/documentation/desktop/projects/manage-project-files)
+and [HTTP history](https://portswigger.net/burp/documentation/desktop/tools/proxy/http-history)
+documentation describe deleting captured items and saving smaller project copies,
+but do not document a whole-project-file deletion command. Perseid uses Clear
+history plus filesystem deletion after switching away or quitting, as requested
+for #49; selective per-item deletion remains a separate parity gap.
 
 ## 1. Original proposal decision
 

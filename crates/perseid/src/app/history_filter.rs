@@ -557,6 +557,12 @@ fn truncate_summary(text: &str) -> String {
 impl PerseidApp {
     /// Toolbar above the HTTP history table.
     pub(super) fn history_toolbar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            self.stored_history_button(ui);
+            if ui.button("Project storage…").clicked() {
+                self.open_project_storage();
+            }
+        });
         let mut open_filter = false;
         ui.horizontal(|ui| {
             // Lay the row out from the right so the width-hungry summary bar

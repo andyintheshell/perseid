@@ -287,6 +287,22 @@ impl History {
         self.items.get(&id)
     }
 
+    /// Remove records pruned from project storage without resetting row numbers.
+    pub(crate) fn remove_stored(&mut self, ids: &[u64]) {
+        for id in ids {
+            if let Some(item) = self.items.remove(id) {
+                self.retained_bytes = self.retained_bytes.saturating_sub(item_body_bytes(&item));
+                self.in_flight = self
+                    .in_flight
+                    .saturating_sub(usize::from(item.is_in_flight()));
+            }
+        }
+        if !ids.is_empty() {
+            self.order.retain(|id| self.items.contains_key(id));
+            self.revision += 1;
+        }
+    }
+
     /// Oldest first.
     pub fn iter(&self) -> impl Iterator<Item = &HistoryItem> {
         self.order.iter().filter_map(|id| self.items.get(id))

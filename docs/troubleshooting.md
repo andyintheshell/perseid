@@ -81,14 +81,25 @@ exchanges are also separate from Proxy history by design.
 - **Check the path and permissions.** Project dialogs include a folder browser
   for navigating to a project. Save As and Save Copy ask before replacing an
   existing file; choose **Keep Existing** or a different name if the file is
-  not the project you meant to replace.
+  not the project you meant to replace. Open never creates a missing file.
+  Copy a read-only project to a writable location first. If locked, close the
+  project in the other application before retrying.
 - **Check the version.** Project files require Perseid `0.2.0` or newer. Newer
-  or unsupported schema versions are rejected rather than silently rewritten.
+  schemas require a newer application. This development version migrates v1 to
+  v2 atomically; keep a backup if you need to use a `0.2.x` application again.
+  Incomplete/corrupt projects should be restored from a backup. Failed opens
+  keep the current project, workspace, and running listener usable.
 - **History limits do not delete old saved records.** Opening a project loads a
   bounded newest-first snapshot controlled by `--history-limit` and
-  `--history-bytes`. Older records remain in the file and are scanned by Search,
-  but the history and site-map tables cannot page through them yet. **Clear
-  history** is destructive and removes stored captures from the active project.
+  `--history-bytes`. Use **Browse stored history…** for older HTTP rows/details
+  or **Search** for all retained HTTP/WebSocket messages. Check **Project storage…**
+  and the eviction count: explicitly configured retention and **Clear history**
+  remove stored captures. They cannot be recovered by raising the UI-cache limit.
+- **A file need not shrink after deletion.** Freed redb pages are reusable;
+  retention is not a physical file-size cap. Save Copy writes retained data to a
+  fresh file and may be smaller. To delete a whole project, switch away or quit
+  and delete its `.perseid` file and backups through the filesystem. These
+  operations are not secure erasure; project files are not encrypted.
 - **Check the project status widget** for the last persistence error or capture
   loss. If a saved write failed, do not assume the newest changes reached disk;
   address the reported path/permission/disk-space issue before closing.

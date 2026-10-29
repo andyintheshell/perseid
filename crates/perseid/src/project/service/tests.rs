@@ -914,6 +914,150 @@ fn saved_projects_never_apply_temporary_retention_limits() {
 }
 
 #[test]
+fn saved_retention_is_applied_immediately_and_survives_reopen_and_copy() {
+    let project = ProjectHandle::temporary().unwrap();
+    let file = TempProject::new("persistent-limits");
+    let copy = TempProject::new("persistent-limits-copy");
+    wait(project.save_as(file.path.clone(), false)).unwrap();
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            finished(1, b"", b"one"),
+            ws_message(2, 1, b"ws"),
+            started(3, "GET"),
+            finished(3, b"", b"three"),
+            started(4, "GET"),
+            finished(4, b"", b"four"),
+        ],
+    );
+    wait(project.flush()).unwrap();
+    wait(project.set_retention(RetentionLimits::new(2, 0))).unwrap();
+    assert_eq!(project.status().http_count, 1);
+    assert_eq!(project.status().ws_count, 1);
+    assert!(project.get_http(ids[0]).unwrap().is_none());
+    assert_eq!(project.status().retention_evictions, 2);
+    wait(project.save_copy(copy.path.clone(), false)).unwrap();
+    wait(project.new_project(10, 1024)).unwrap();
+    wait(project.open(copy.path.clone(), 10, 1024)).unwrap();
+    assert_eq!(project.status().retention, RetentionLimits::new(2, 0));
+    capture_all(&project, &[started(10, "POST"), finished(10, b"", b"new")]);
+    wait(project.flush()).unwrap();
+    assert_eq!(project.status().http_count, 1);
+    assert_eq!(project.status().ws_count, 1);
+    assert!(project.get_http(ids[6]).unwrap().is_none());
+}
+
+#[test]
+fn saved_body_retention_honours_zero_and_in_flight_exceptions() {
+    let project = ProjectHandle::temporary().unwrap();
+    let file = TempProject::new("persistent-byte-limits");
+    wait(project.save_as(file.path.clone(), false)).unwrap();
+    wait(project.set_retention(RetentionLimits::new(0, 4))).unwrap();
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "GET"),
+            started(2, "GET"),
+            finished(2, b"a", b"bb"),
+            started(3, "GET"),
+            finished(3, b"a", b"bbb"),
+        ],
+    );
+    wait(project.flush()).unwrap();
+    assert!(project.get_http(ids[0]).unwrap().is_some()); // in flight
+    assert!(project.get_http(ids[1]).unwrap().is_none());
+    assert_eq!(project.status().retained_body_bytes, 4);
+    capture_all(&project, &[finished(1, b"", b"older")]);
+    wait(project.flush()).unwrap();
+    assert!(project.get_http(ids[0]).unwrap().is_none());
+    wait(project.set_retention(RetentionLimits::new(0, 0))).unwrap();
+    capture_all(
+        &project,
+        &[started(4, "GET"), finished(4, b"", b"unbounded")],
+    );
+    wait(project.flush()).unwrap();
+    assert_eq!(project.status().http_count, 2);
+}
+
+#[test]
+fn failed_retention_rolls_back_policy_counters_and_already_pruned_rows() {
+    let (db, mut meta) = batch_project();
+    apply_batch(
+        &db,
+        &mut meta,
+        &[
+            started(1, "GET"),
+            finished(1, b"a", b"b"),
+            started(2, "GET"),
+            finished(2, b"a", b"b"),
+            started(3, "GET"),
+            finished(3, b"a", b"b"),
+        ],
+    )
+    .unwrap();
+    let tx = db.begin_write().unwrap();
+    tx.open_table(schema::HTTP_EXCHANGES)
+        .unwrap()
+        .insert(2, b"bad".as_slice())
+        .unwrap();
+    tx.commit().unwrap();
+    assert!(super::persistence::set_retention(&db, &mut meta, RetentionLimits::new(1, 0)).is_err());
+    assert_eq!(meta.http_count, 3);
+    assert_eq!(meta.retention_evictions, 0);
+    assert_eq!(meta.retention_records, 0);
+    let stored = schema::read_meta(&db.begin_read().unwrap()).unwrap();
+    assert_eq!(stored.http_count, 3);
+    assert_eq!(stored.http_body_bytes, 6);
+    assert_eq!(stored.retention_records, 0);
+    assert!(queries::get_http(&db, 1).unwrap().is_some());
+    // Queued, not-yet-committed IDs must never be classified as evicted.
+    assert_eq!(
+        queries::pruned_ids(&db, vec![1, 4], vec![1]).unwrap(),
+        (vec![], vec![])
+    );
+}
+
+#[test]
+fn failed_file_opens_preserve_identity_and_accept_further_captures() {
+    let project = ProjectHandle::temporary().unwrap();
+    let saved = ProjectHandle::temporary().unwrap();
+    let locked = TempProject::new("locked-error");
+    wait(saved.save_as(locked.path.clone(), false)).unwrap();
+    let missing = TempProject::new("missing-error");
+    let corrupt = TempProject::new("corrupt-error");
+    std::fs::write(&corrupt.path, b"not a database").unwrap();
+    let generation = project.status().generation;
+    for path in [&missing.path, &locked.path, &corrupt.path] {
+        let error = wait(project.open(path.clone(), 10, 1024)).unwrap_err();
+        assert!(!error.to_string().is_empty());
+        assert_eq!(project.status().generation, generation);
+        capture_all(
+            &project,
+            &[started(100 + project.status().http_count, "GET")],
+        );
+        wait(project.flush()).unwrap();
+    }
+    assert_eq!(project.status().http_count, 3);
+    assert!(!missing.path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn read_only_project_reports_actionable_error_without_switching() {
+    use std::os::unix::fs::PermissionsExt;
+    let file = TempProject::new("read-only");
+    let project = ProjectHandle::temporary().unwrap();
+    wait(project.save_copy(file.path.clone(), false)).unwrap();
+    std::fs::set_permissions(&file.path, std::fs::Permissions::from_mode(0o400)).unwrap();
+    let error = wait(project.open(file.path.clone(), 10, 1024)).unwrap_err();
+    assert!(error.to_string().contains("writable"));
+    assert_eq!(project.status().mode, ProjectMode::Temporary);
+    std::fs::set_permissions(&file.path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    wait(project.open(file.path.clone(), 10, 1024)).unwrap();
+}
+
+#[test]
 fn open_surfaces_corrupt_http_snapshots_and_preserves_the_current_project() {
     let source = ProjectHandle::temporary().expect("source project");
     let saved_id = capture_all(

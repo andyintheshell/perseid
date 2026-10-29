@@ -42,8 +42,10 @@ The `perseid` package provides both the desktop application and the
 - Bounded capture/history resources and a live memory indicator.
 
 WebSocket editing/replay and automated scanning are not implemented. Project
-persistence is an initial slice: it has no encryption or schema migrations, and
-the UI currently opens only a bounded newest-first history snapshot. See the
+persistence has no encryption. The UI opens a bounded newest-first live snapshot;
+**Browse stored history…** pages through all retained HTTP exchanges with lazy
+details and notes. Schema-v1 projects migrate atomically to v2 on open; back up
+before upgrading if older application compatibility is needed. See the
 [workbench guide](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#projects-and-persistence)
 for exactly what is saved. Temporary projects evict the oldest captured
 records when they exceed the configurable `--temporary-retention-limit` and
@@ -51,8 +53,11 @@ records when they exceed the configurable `--temporary-retention-limit` and
 disables a dimension). The limits are soft, not a hard RAM ceiling: each
 stream's newest record is kept even when it alone exceeds the byte budget,
 in-flight HTTP exchanges are kept until they complete, and headers, indexes,
-and database overhead are outside the byte budget. Saved project files are not
-automatically pruned and can grow until the disk fills. Burp Suite and Burp
+and database overhead are outside the byte budget. Saved projects default to
+unlimited retention, with opt-in logical limits under **Project storage…**;
+these do not cap physical file size. To delete a whole project, switch away or
+quit and delete the `.perseid` file and any copies via the filesystem. Neither
+retention nor deletion securely erases disk data. Burp Suite and Burp
 Suite Community Edition are
 trademarks of PortSwigger Ltd. Perseid is independently developed, contains no
 PortSwigger software or logos, and is not affiliated with, sponsored by, or
