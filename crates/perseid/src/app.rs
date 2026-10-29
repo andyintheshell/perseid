@@ -719,6 +719,7 @@ impl eframe::App for PerseidApp {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
         self.poll_project();
+        self.handle_close_request(&ctx);
         self.drain_events(&ctx);
         self.comparer.handle_input(&ctx);
         self.poll_sequencer(&ctx);

@@ -73,6 +73,7 @@ impl ProjectDialogKind {
 pub(super) enum ProjectSwitch {
     New,
     Open(PathBuf),
+    Quit,
 }
 
 struct ProjectSwitchPrompt {
@@ -180,6 +181,9 @@ pub(super) struct ProjectUi {
     dialog_icon: Option<egui::TextureHandle>,
     switch_prompt: Option<ProjectSwitchPrompt>,
     switch_after_save: Option<ProjectSwitch>,
+    quit_flush: Option<Receiver<std::result::Result<CommitReceipt, ProjectError>>>,
+    quit_workspace: Option<WorkspaceState>,
+    quit_ready: bool,
     pending: Vec<PendingProject>,
     notice: Option<ProjectNotice>,
     last_workspace: Option<WorkspaceState>,
@@ -211,6 +215,9 @@ impl ProjectUi {
             dialog_icon: None,
             switch_prompt: None,
             switch_after_save: None,
+            quit_flush: None,
+            quit_workspace: None,
+            quit_ready: false,
             pending: Vec::new(),
             notice: None,
             last_workspace: None,
@@ -242,7 +249,8 @@ impl ProjectUi {
     }
 
     pub(super) fn is_busy(&self) -> bool {
-        self.retention_pending.is_some()
+        self.quit_flush.is_some()
+            || self.retention_pending.is_some()
             || self.pending.iter().any(PendingProject::is_file_operation)
     }
 
@@ -594,6 +602,9 @@ impl ProjectUi {
     fn switch_prompt(&mut self, ctx: &egui::Context) -> Option<ProjectSwitchAction> {
         let prompt = self.switch_prompt.as_ref()?;
         let destination = match &prompt.request {
+            ProjectSwitch::Quit => {
+                "Quitting will discard the current temporary project.".to_string()
+            }
             ProjectSwitch::New => {
                 "Starting a new project will replace the current temporary project.".to_string()
             }
@@ -1023,8 +1034,71 @@ impl PerseidApp {
 
     fn perform_project_switch(&mut self, request: ProjectSwitch) {
         match request {
+            ProjectSwitch::Quit => self.begin_quit_flush(),
             ProjectSwitch::New => self.begin_new_project(),
             ProjectSwitch::Open(path) => self.begin_open_project(path),
+        }
+    }
+
+    fn begin_quit_flush(&mut self) {
+        self.sync_workspace(true);
+        self.project.quit_workspace = Some(self.workspace_snapshot());
+        if let Some(handle) = self.project.handle() {
+            self.project.quit_flush = Some(handle.flush());
+        } else {
+            self.project.quit_ready = true;
+        }
+    }
+
+    /// All ordinary exit paths enter here; repeated requests never replace a
+    /// pending decision or bypass an in-flight project operation.
+    pub(super) fn request_quit(&mut self) {
+        if !self.project.pending.is_empty() || self.project.retention_pending.is_some() {
+            self.notify_project_busy();
+            return;
+        }
+        if self.project.quit_ready
+            || self.project.switch_prompt.is_some()
+            || self.project.switch_after_save.is_some()
+            || self.project.dialog.is_some()
+        {
+            return;
+        }
+        self.request_project_switch(ProjectSwitch::Quit);
+    }
+
+    pub(super) fn handle_close_request(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.viewport().close_requested()) && !self.project.quit_ready {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.request_quit();
+        }
+        if let Some(receiver) = &self.project.quit_flush {
+            let result = match receiver.try_recv() {
+                Ok(result) => Some(result.map_err(|err| err.to_string())),
+                Err(TryRecvError::Disconnected) => Some(Err(
+                    "Project writer stopped before the final save.".to_string(),
+                )),
+                Err(TryRecvError::Empty) => None,
+            };
+            if let Some(result) = result {
+                self.project.quit_flush = None;
+                match result {
+                    Ok(_) => {
+                        if self.project.quit_workspace.as_ref() == Some(&self.workspace_snapshot())
+                        {
+                            self.project.quit_ready = true;
+                        } else {
+                            self.begin_quit_flush();
+                        }
+                    }
+                    Err(err) => self
+                        .project
+                        .notify_error(format!("Could not save before quitting: {err}")),
+                }
+            }
+        }
+        if self.project.quit_ready {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
@@ -2687,6 +2761,128 @@ pub(super) mod tests {
 #[cfg(test)]
 mod switch_tests {
     use super::*;
+
+    #[test]
+    fn window_close_is_cancelled_until_the_quit_decision_completes() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |_| app.handle_close_request(&ctx));
+        output.textures_delta.clear();
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::CancelClose)
+        );
+        assert_eq!(
+            app.project.switch_prompt.as_ref().unwrap().request,
+            ProjectSwitch::Quit
+        );
+        assert!(!app.project.quit_ready);
+    }
+
+    #[test]
+    fn quit_cancel_and_cancelled_dialog_preserve_work_and_repeated_requests() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        app.request_quit();
+        app.request_quit();
+        assert_eq!(
+            app.project.switch_prompt.as_ref().unwrap().request,
+            ProjectSwitch::Quit
+        );
+        app.project.cancel_switch();
+        assert!(app.scope_enabled);
+        assert!(!app.project.quit_ready);
+        app.request_quit();
+        app.project.begin_switch_save();
+        app.request_quit();
+        assert_eq!(app.project.switch_after_save, Some(ProjectSwitch::Quit));
+        app.project.close_dialog();
+        assert!(app.project.switch_after_save.is_none());
+        assert!(app.scope_enabled);
+        assert!(app.project.quit_flush.is_none());
+    }
+
+    #[test]
+    fn quit_discard_waits_for_flush_and_busy_requests_cannot_bypass_it() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        app.scope_enabled = true;
+        app.request_quit();
+        let request = app.project.take_switch_request().unwrap();
+        app.perform_project_switch(request);
+        assert!(!app.project.quit_ready);
+        app.request_quit();
+        assert!(app.project.switch_prompt.is_none());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.project.quit_ready && Instant::now() < deadline {
+            app.handle_close_request(&ctx);
+            std::thread::yield_now();
+        }
+        assert!(app.project.quit_ready);
+    }
+
+    #[test]
+    fn quit_save_failure_and_final_flush_failure_keep_session_open() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        app.request_quit();
+        app.project.begin_switch_save();
+        app.project.dialog = None;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        drop(sender);
+        app.project.pending.push(PendingProject::Save {
+            copy: false,
+            path: PathBuf::from("missing.perseid"),
+            receiver,
+        });
+        app.poll_project();
+        assert!(app.project.switch_after_save.is_none());
+        assert!(!app.project.quit_ready);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        drop(sender);
+        app.project.quit_flush = Some(receiver);
+        app.handle_close_request(&egui::Context::default());
+        assert!(app.project.quit_flush.is_none());
+        assert!(!app.project.quit_ready);
+        assert!(app.scope_enabled);
+    }
+
+    #[test]
+    fn quit_save_persists_latest_workspace_before_close() {
+        let mut app = PerseidApp::test_app();
+        let path =
+            std::env::temp_dir().join(format!("perseid-quit-{}.perseid", uuid::Uuid::new_v4()));
+        app.scope_enabled = true;
+        app.request_quit();
+        app.project.begin_switch_save();
+        app.project.dialog = None;
+        app.begin_save_project(path.clone(), false, false);
+        app.scope_enabled = false;
+        let ctx = egui::Context::default();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.project.quit_ready && Instant::now() < deadline {
+            app.poll_project();
+            app.handle_close_request(&ctx);
+            std::thread::yield_now();
+        }
+        assert!(app.project.quit_ready);
+        assert!(path.is_file());
+        assert_eq!(
+            app.project.last_workspace.as_ref().unwrap(),
+            &app.workspace_snapshot()
+        );
+        drop(app);
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn an_empty_temporary_project_switches_without_a_prompt() {
