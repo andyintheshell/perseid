@@ -532,7 +532,12 @@ empty initially and stays in application memory until Perseid exits, including
 when switching projects. It is not saved or exported with a project. Captured
 requests, responses and projects may independently contain cookie values.
 
-Both applying cookies and updating from Repeater/Intruder responses are off by
+Proxy request cookies and response Set-Cookie headers update the jar by default,
+even when history capture is paused. Turn this off in Settings if needed. New
+cookies seen only in browser requests are host-only with path `/`, because the
+request does not include their original domain, path, or expiry attributes.
+Cookies in HTTPS tunnels are visible only when TLS interception is enabled.
+Applying cookies and updating from Repeater/Intruder responses are off by
 default and controlled separately. Add or refresh a cookie manually by entering
 its response URL and a `Set-Cookie` value; inspect, edit, delete or clear entries
 in Settings. Matching uses the connection URL, not an edited Host header, and
@@ -540,7 +545,7 @@ honors domain, host-only, path, expiration and Secure (HTTPS only). SameSite is
 stored but not enforced because direct requests have no browser site context.
 The jar rejects public-suffix domains, cookies over 4096 bytes, and more than
 512 stored cookies or 32 KiB of cookie names and values. It does not observe
-Proxy traffic or browser state.
+browser state outside proxied traffic.
 
 When applying cookies, Repeater replaces request cookie names found in the jar
 and preserves unrelated names. Intruder preserves all explicitly supplied cookie

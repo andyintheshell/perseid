@@ -19,6 +19,7 @@ impl PerseidApp {
         let (settings, rule_error) = self.sanitized_proxy_settings();
         self.rules_error = rule_error;
         let config = ProxyConfig {
+            cookie_jar: Some(self.cookie_jar.clone()),
             listen: self.listen,
             capture_limit: self.capture_limit,
             intercept_limit: self.intercept_limit,

@@ -20,14 +20,14 @@ names=(
   perseid-proxy-intercept.png perseid-proxy-match-replace.png perseid-proxy-tls.png
   perseid-intruder.png perseid-repeater.png perseid-repeater-websockets.png perseid-decoder.png
   perseid-comparer.png perseid-comparer-result.png perseid-sequencer.png
-  perseid-sequencer-result.png perseid-search.png perseid-memory.png
+  perseid-sequencer-result.png perseid-search.png perseid-settings.png perseid-memory.png
 )
 labels=(
   'Proxy - HTTP history' 'Projects - File menu' 'Projects - Save dialog'
   'Proxy - WebSockets history' 'Target - Site map' 'Target - Scope'
   'Proxy - Intercept' 'Proxy - Match/replace' 'Proxy - Proxy settings'
   'Intruder' 'Repeater' 'Repeater - WebSockets' 'Decoder' 'Comparer' 'Comparer - Result'
-  'Sequencer' 'Sequencer - Result' 'Search' 'Memory usage'
+  'Sequencer' 'Sequencer - Result' 'Search' 'Settings' 'Memory usage'
 )
 {
   echo '# Perseid screenshot gallery'

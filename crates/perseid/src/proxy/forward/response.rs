@@ -131,6 +131,13 @@ pub(super) async fn relay(
         }
     }
 
+    if let Some(jar) = &ctx.cookie_jar
+        && let Ok(mut jar) = jar.lock()
+    {
+        let target = format!("{}://{}{}", request.scheme, request.host, request.path);
+        jar.observe_proxy_response(&target, &header_list(&parts.headers));
+    }
+
     if capture {
         let head = ResponseHead {
             version: version_str(parts.version),

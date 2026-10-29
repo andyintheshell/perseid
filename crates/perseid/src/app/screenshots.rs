@@ -67,6 +67,7 @@ const SCENE_FILES: &[&str] = &[
     "perseid-proxy-websockets.png",
     "perseid-search.png",
     "perseid-repeater-websockets.png",
+    "perseid-settings.png",
 ];
 
 const CURL_UA: &str = "curl/8.22.0";
@@ -327,6 +328,7 @@ impl PerseidApp {
         self.comparer = ComparerState::new();
         self.sequencer = SequencerState::new();
         self.search = SearchState::default();
+        self.settings = Default::default();
         self.project.reset_for_screenshot();
 
         match index {
@@ -469,6 +471,21 @@ impl PerseidApp {
                     .cloned()
                     .ok_or_else(|| "screenshot WebSocket message 23 is missing".to_string())?;
                 self.send_websocket_to_repeater(&item);
+            }
+            18 => {
+                self.settings.open = true;
+                let mut jar = self
+                    .cookie_jar
+                    .lock()
+                    .map_err(|_| "cookie jar unavailable")?;
+                jar.clear();
+                jar.insert(
+                    "https://shop.example.com/",
+                    "session=demo-session; Path=/; Secure; HttpOnly",
+                )
+                .map_err(str::to_owned)?;
+                jar.insert("https://shop.example.com/", "theme=dark; Path=/")
+                    .map_err(str::to_owned)?;
             }
             _ => return Err(format!("unknown screenshot scene {index}")),
         }

@@ -1,7 +1,7 @@
 //! In-memory cookie state shared by direct replay tools.
 //!
 //! Values must never be logged or serialized. The store is deliberately not
-//! connected to proxy capture or project persistence.
+//! connected to project persistence.
 
 use std::sync::{Arc, Mutex};
 
@@ -10,16 +10,81 @@ use url::Url;
 
 use super::events::HeaderList;
 
-#[derive(Default)]
 pub struct CookieJar {
     store: CookieStore,
     pub apply: bool,
     pub update: bool,
+    pub update_proxy: bool,
+}
+
+impl Default for CookieJar {
+    fn default() -> Self {
+        Self {
+            store: CookieStore::default(),
+            apply: false,
+            update: false,
+            update_proxy: true,
+        }
+    }
 }
 
 pub type SharedCookieJar = Arc<Mutex<CookieJar>>;
 
 impl CookieJar {
+    /// Observe browser cookies. Request headers lack scope attributes, so new
+    /// cookies are host-only and use the root path. Known matching cookies keep
+    /// their existing scope and flags when their value changes.
+    pub fn observe_proxy_request(&mut self, target: &str, headers: &HeaderList) {
+        if !self.update_proxy {
+            return;
+        }
+        let Ok(url) = Url::parse(target) else { return };
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return;
+        }
+        for (_, header) in headers
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case("cookie"))
+        {
+            for pair in header.split(';').map(str::trim) {
+                let Some((name, value)) = pair.split_once('=') else {
+                    continue;
+                };
+                let name = name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let mut matches = self.store.matches(&url);
+                matches.retain(|c| {
+                    c.name() == name && (url.scheme() == "https" || !c.secure().unwrap_or(false))
+                });
+                matches.sort_by_key(|c| std::cmp::Reverse(String::from(&c.path).len()));
+                if matches.first().is_some_and(|c| c.value() == value) {
+                    continue;
+                }
+                let replacement = matches.first().map(|c| {
+                    let mut raw = (***c).clone();
+                    raw.set_value(value.to_owned());
+                    raw.set_path(String::from(&c.path));
+                    format!("{raw:#}")
+                });
+                let header = replacement.unwrap_or_else(|| format!("{name}={value}; Path=/"));
+                let _ = self.insert(target, &header);
+            }
+        }
+    }
+
+    pub fn observe_proxy_response(&mut self, target: &str, headers: &HeaderList) {
+        if !self.update_proxy {
+            return;
+        }
+        for (_, value) in headers
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case("set-cookie"))
+        {
+            let _ = self.insert(target, value);
+        }
+    }
     /// Insert one Set-Cookie value relative to its response URL.
     pub fn insert(&mut self, target: &str, header: &str) -> Result<(), &'static str> {
         if header.len() > 4096 {
@@ -210,6 +275,29 @@ impl CookieJar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn proxy_request_updates_known_cookie_and_does_not_broaden_scope() {
+        let mut jar = CookieJar::default();
+        assert!(jar.update_proxy);
+        assert!(!jar.apply && !jar.update);
+        jar.insert(
+            "https://example.test/a/page",
+            "sid=old; Path=/a; Secure; HttpOnly",
+        )
+        .unwrap();
+        jar.observe_proxy_request(
+            "https://example.test/a/page",
+            &vec![("cookie".into(), "sid=new; other=value".into())],
+        );
+        let entries = jar.entries();
+        assert!(entries.iter().any(|e| e.1 == "/a"
+            && e.2 == "sid"
+            && e.3 == "new"
+            && e.4.contains("Secure")
+            && e.4.contains("HttpOnly")));
+        assert!(entries.iter().any(|e| e.1 == "/" && e.2 == "other"));
+        assert!(!entries.iter().any(|e| e.1 == "/" && e.2 == "sid"));
+    }
     #[test]
     fn matching_updates_and_precedence() {
         let mut jar = CookieJar {

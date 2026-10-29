@@ -86,6 +86,8 @@ impl fmt::Debug for TlsConfig {
 /// Configuration for [`crate::proxy::Proxy::start`].
 #[derive(Clone)]
 pub struct ProxyConfig {
+    /// Optional shared cookie jar for observing proxied HTTP traffic.
+    pub cookie_jar: Option<super::cookies::SharedCookieJar>,
     /// Address to bind. Keep this on loopback unless you know what you're doing.
     pub listen: SocketAddr,
     /// Per-body capture limit in bytes.
@@ -115,6 +117,7 @@ pub struct ProxyConfig {
 impl ProxyConfig {
     pub fn new(listen: SocketAddr) -> Self {
         Self {
+            cookie_jar: None,
             listen,
             ..Self::default()
         }
@@ -124,6 +127,7 @@ impl ProxyConfig {
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
+            cookie_jar: None,
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
             capture_limit: DEFAULT_CAPTURE_LIMIT,
             intercept_limit: DEFAULT_INTERCEPT_LIMIT,

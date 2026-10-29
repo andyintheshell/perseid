@@ -261,6 +261,7 @@ impl Proxy {
 
         let tls_ca = Arc::new(RwLock::new(config.tls.authority.clone()));
         let ctx = Arc::new(server::Ctx {
+            cookie_jar: config.cookie_jar.clone(),
             client,
             ws_client,
             tls_ca: tls_ca.clone(),

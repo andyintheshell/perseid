@@ -29,6 +29,38 @@ use common::{origin_certificate, origin_certificate_h2, read_request};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+#[tokio::test]
+async fn cookie_jar_observes_proxy_even_when_history_is_paused() {
+    let origin = spawn_origin("HTTP/1.1 200 OK\r\nSet-Cookie: session=from-response; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()).await;
+    let jar: perseid::proxy::cookies::SharedCookieJar = Default::default();
+    let proxy = Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().unwrap(),
+        cookie_jar: Some(jar.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    proxy.set_paused(true);
+    let request = format!(
+        "GET http://{origin}/account HTTP/1.1\r\nHost: {origin}\r\nCookie: browser=from-request\r\nConnection: close\r\n\r\n"
+    );
+    raw_exchange(proxy.local_addr(), &request).await;
+    let entries = jar.lock().unwrap().entries();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.2 == "browser" && e.3 == "from-request")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.2 == "session" && e.3 == "from-response")
+    );
+    jar.lock().unwrap().update_proxy = false;
+    jar.lock().unwrap().clear();
+    raw_exchange(proxy.local_addr(), &request).await;
+    assert!(jar.lock().unwrap().entries().is_empty());
+}
+
 fn init_logging() {
     let _ = env_logger::builder()
         .is_test(true)

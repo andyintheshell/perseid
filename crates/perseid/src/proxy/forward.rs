@@ -388,6 +388,12 @@ async fn handle_with(
     };
     exchange.request = build_request_info(&parts, &target, &parts.uri, default_scheme);
 
+    if let Some(jar) = &ctx.cookie_jar
+        && let Ok(mut jar) = jar.lock()
+    {
+        jar.observe_proxy_request(&target.uri.to_string(), &header_list(&parts.headers));
+    }
+
     if exchange.policy.scope_enforced() && !exchange.policy.in_scope(&exchange.request.host) {
         ctx.block_by_scope();
         return reject_request(

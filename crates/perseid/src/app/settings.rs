@@ -19,10 +19,11 @@ impl PerseidApp {
             ui.heading("Cookie jar");
             ui.label("Stored in memory until Perseid closes; not saved with projects. Existing captured requests may still contain cookies.");
             let Ok(mut jar) = self.cookie_jar.lock() else { ui.label("Cookie jar unavailable"); return; };
+            ui.checkbox(&mut jar.update_proxy, "Update jar from Proxy requests and responses");
             ui.checkbox(&mut jar.apply, "Apply jar cookies to Repeater and Intruder");
             ui.checkbox(&mut jar.update, "Update jar from Repeater and Intruder responses");
             ui.label("Repeater: matching jar names replace request cookies. Intruder: request cookies take precedence, preserving payloads.");
-            ui.label("Parallel requests can race when the server rotates cookies. Browser cookies are not synchronized.");
+            ui.label("Parallel requests can race when the server rotates cookies. Only traffic through Proxy is observed.");
             ui.label("Request editors show the original request, not jar changes made at send time.");
             ui.separator();
             ui.label("Add or replace a cookie using its response URL and a Set-Cookie value:");

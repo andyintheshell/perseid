@@ -13,7 +13,7 @@ The main scenes are captured at 2× and saved at native resolution (2560×1640)
 for HiDPI displays; the memory panel is a smaller close-up. Screenshots
 illustrate the UI, not platform support or performance guarantees.
 
-[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) ·
+[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) · [Settings](#settings) ·
 [WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
 [Intruder](#intruder) · [Repeater](#repeater) · [WebSocket Repeater](#repeater--websockets) · [Sequencer](#sequencer) ·
 [Sequencer result](#sequencer-result) · [Decoder](#decoder) · [Comparer](#comparer) ·
@@ -56,6 +56,12 @@ response heads and decoded bodies, then inspect the selected result in Pretty,
 Raw, or Hex with matches highlighted.
 
 ![Search window with a decoded JSON response and highlighted matches](images/perseid-search.png)
+
+## Settings
+
+Manage the in-memory cookie jar and configure which traffic updates or uses it.
+
+![Settings window with synthetic cookie jar entries](images/perseid-settings.png)
 
 ## Proxy > WebSockets history
 
