@@ -166,7 +166,7 @@ impl PerseidApp {
                     }
                     ui.separator();
                     if ui.button("Quit").clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                        self.request_quit();
                     }
                 });
                 ui.menu_button("View", |ui| {
@@ -253,7 +253,7 @@ impl PerseidApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if window_control(ui, WindowControl::Close, maximized, fullscreen).clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.request_quit();
                 }
                 let maximize_button =
                     window_control(ui, WindowControl::Maximize, maximized, fullscreen);
