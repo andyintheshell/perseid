@@ -298,10 +298,7 @@ pub fn toggle_marker(template: &str, selection: Range<usize>) -> (String, Range<
 
     if start == end {
         // Toggle an empty position when the caret sits between two delimiters.
-        if start >= MARKER.len()
-            && template[start - MARKER.len()..start].eq(MARKER)
-            && template[start..].starts_with(MARKER)
-        {
+        if template[..start].ends_with(MARKER) && template[start..].starts_with(MARKER) {
             let mut out = template.to_string();
             out.replace_range(start - MARKER.len()..start + MARKER.len(), "");
             return (out, start - MARKER.len()..start - MARKER.len());
@@ -328,10 +325,7 @@ pub fn toggle_marker(template: &str, selection: Range<usize>) -> (String, Range<
 
     // The selection may sit inside an existing position; remove the outside
     // delimiters.
-    if start >= MARKER.len()
-        && template[start - MARKER.len()..start].eq(MARKER)
-        && template[end..].starts_with(MARKER)
-    {
+    if template[..start].ends_with(MARKER) && template[end..].starts_with(MARKER) {
         let mut out = template.to_string();
         out.replace_range(end..end + MARKER.len(), "");
         out.replace_range(start - MARKER.len()..start, "");

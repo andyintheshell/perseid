@@ -104,3 +104,32 @@ impl IntruderState {
         ctx.memory_mut(|memory| memory.request_focus(editor_id));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marker_selection_is_preserved_in_editor_character_offsets() {
+        let ctx = egui::Context::default();
+        let mut state = IntruderState::new();
+        state.request = "😀中文".to_owned();
+        for target in [4..4, 4..state.request.len()] {
+            let (request, range) = crate::proxy::toggle_marker(&state.request, target.clone());
+            state.request = request;
+            state.select_request(&ctx, range.clone());
+            assert_eq!(state.cursor, range.start);
+            assert_eq!(
+                state.selection,
+                (range.start != range.end).then_some(range.clone())
+            );
+            let editor = TextEditState::load(&ctx, egui::Id::unique(INTRUDER_EDITOR_ID)).unwrap();
+            let chars = editor.cursor.char_range().unwrap().as_sorted_char_range();
+            assert_eq!(chars.start.0, state.request[..range.start].chars().count());
+            assert_eq!(chars.end.0, state.request[..range.end].chars().count());
+            let (request, restored) = crate::proxy::toggle_marker(&state.request, range);
+            state.request = request;
+            assert_eq!(restored, target);
+        }
+    }
+}
