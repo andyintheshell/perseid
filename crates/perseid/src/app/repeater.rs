@@ -636,16 +636,25 @@ impl PerseidApp {
                     WebSocketOpcode::Text => "Text message",
                     WebSocketOpcode::Binary => "Binary message (hex bytes)",
                 });
-                ui.add(
-                    egui::TextEdit::multiline(&mut ws.draft)
-                        .char_limit(match ws.opcode {
-                            WebSocketOpcode::Text => send_limit,
-                            WebSocketOpcode::Binary => send_limit.saturating_mul(3),
-                        })
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(20),
-                );
+                let show_invisibles =
+                    super::message_view::invisible_toggle(ui, ws.opcode == WebSocketOpcode::Text);
+                let output = egui::TextEdit::multiline(&mut ws.draft)
+                    .char_limit(match ws.opcode {
+                        WebSocketOpcode::Text => send_limit,
+                        WebSocketOpcode::Binary => send_limit.saturating_mul(3),
+                    })
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(20)
+                    .show(ui);
+                if show_invisibles {
+                    super::message_view::paint_invisibles(
+                        ui,
+                        &output.galley,
+                        output.galley_pos,
+                        &egui::TextStyle::Monospace.resolve(ui.style()),
+                    );
+                }
             });
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Connection history");

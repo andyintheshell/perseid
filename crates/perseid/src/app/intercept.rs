@@ -306,19 +306,30 @@ impl PerseidApp {
                 if let Some(error) = &entry.error {
                     ui.colored_label(theme::RED, error);
                 }
+                let show_invisibles = super::message_view::invisible_toggle(
+                    ui,
+                    entry.item.opcode() == WebSocketOpcode::Text,
+                );
                 egui::ScrollArea::vertical()
                     .id_salt("ws.intercept.editor")
                     .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut entry.draft)
-                                .char_limit(match entry.item.opcode() {
-                                    WebSocketOpcode::Text => limit,
-                                    WebSocketOpcode::Binary => limit.saturating_mul(3),
-                                })
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(5),
-                        );
+                        let output = egui::TextEdit::multiline(&mut entry.draft)
+                            .char_limit(match entry.item.opcode() {
+                                WebSocketOpcode::Text => limit,
+                                WebSocketOpcode::Binary => limit.saturating_mul(3),
+                            })
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(5)
+                            .show(ui);
+                        if show_invisibles {
+                            super::message_view::paint_invisibles(
+                                ui,
+                                &output.galley,
+                                output.galley_pos,
+                                &egui::TextStyle::Monospace.resolve(ui.style()),
+                            );
+                        }
                     });
             });
         if forward {

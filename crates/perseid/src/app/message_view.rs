@@ -227,6 +227,8 @@ fn message_frame(
     text: &mut dyn egui::TextBuffer,
     context: MessageContext<'_>,
 ) -> bool {
+    let toggle_key = ui.make_persistent_id("perseid.message.invisibles");
+    let show_invisibles = ui.data(|data| data.get_temp::<bool>(toggle_key).unwrap_or(false));
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
     let secondary_pressed =
@@ -248,11 +250,33 @@ fn message_frame(
                 hex_selection = message_hex(ui, id, pane, mode, text.as_str())
                     .map(|bytes| format_hex_selection(&bytes));
             } else {
-                let output = message_numbered(ui, id, pane, mode, text, context.matches);
+                let output =
+                    message_numbered(ui, id, pane, mode, text, context.matches, show_invisibles);
                 selection = output.selection;
                 changed = output.changed;
             }
         });
+
+    // Float the control in the upper-right corner without shifting the editor
+    // or affecting its selection and context-menu hit testing elsewhere.
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(
+            frame.response.rect.right() - 32.0,
+            frame.response.rect.top() + 2.0,
+        ),
+        egui::vec2(30.0, 22.0),
+    );
+    let mut controls = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    if controls
+        .add_enabled(
+            mode != MessageView::Hex,
+            egui::Button::selectable(show_invisibles, "\\n"),
+        )
+        .on_hover_text("Show whitespace and line endings")
+        .clicked()
+    {
+        ui.data_mut(|data| data.insert_temp(toggle_key, !show_invisibles));
+    }
 
     // egui's text editor collapses a selection when it is pressed or loses
     // focus (for example when a menu item is clicked). Remember the text that
@@ -337,6 +361,7 @@ fn message_numbered(
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
     matches: Option<&[Range<usize>]>,
+    show_invisibles: bool,
 ) -> NumberedOutput {
     let line_count = text.as_str().lines().count() + usize::from(text.as_str().ends_with('\n'));
     let font = message_font();
@@ -403,6 +428,9 @@ fn message_numbered(
             }
             autoscroll_message_selection(ui, &output.response.response);
             paint_line_numbers(ui, &output.galley, output.galley_pos, &font);
+            if show_invisibles {
+                paint_invisibles(ui, &output.galley, output.galley_pos, &font);
+            }
             NumberedOutput {
                 selection: previous_selection
                     .or(output.cursor_range.filter(|range| !range.is_empty())),
@@ -410,6 +438,76 @@ fn message_numbered(
             }
         })
         .inner
+}
+
+/// Keep this setting on the pane, not the message or view mode.
+pub(super) fn invisible_toggle(ui: &mut egui::Ui, enabled: bool) -> bool {
+    let key = ui.make_persistent_id("perseid.message.invisibles");
+    let mut shown = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(false));
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(enabled, egui::Button::selectable(shown, "\\n"))
+                .on_hover_text("Show whitespace and line endings")
+                .clicked()
+            {
+                shown = !shown;
+                ui.data_mut(|data| data.insert_temp(key, shown));
+            }
+        });
+    });
+    enabled && shown
+}
+
+fn invisible_marker(ch: char) -> Option<&'static str> {
+    match ch {
+        ' ' => Some("·"),
+        '\t' => Some("→"),
+        '\r' => Some("\\r"),
+        '\n' => Some("\\n"),
+        _ => None,
+    }
+}
+
+/// Paint on top of the existing galley, preserving its cursor and byte offsets.
+pub(super) fn paint_invisibles(
+    ui: &egui::Ui,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    font: &FontId,
+) {
+    let clip = ui.clip_rect();
+    for row in &galley.rows {
+        let y = origin.y + row.pos.y;
+        if y + row.size.y < clip.top() || y > clip.bottom() {
+            continue;
+        }
+        for glyph in &row.glyphs {
+            if let Some(marker) = invisible_marker(glyph.chr) {
+                ui.painter().text(
+                    egui::pos2(origin.x + row.pos.x + glyph.pos.x, y),
+                    Align2::LEFT_TOP,
+                    marker,
+                    font.clone(),
+                    theme::GRAY,
+                );
+            }
+        }
+        if row.ends_with_newline {
+            let cr_width = if row.glyphs.last().is_some_and(|glyph| glyph.chr == '\r') {
+                font.size * 1.2
+            } else {
+                0.0
+            };
+            ui.painter().text(
+                egui::pos2(origin.x + row.pos.x + row.size.x + cr_width, y),
+                Align2::LEFT_TOP,
+                "\\n",
+                font.clone(),
+                theme::GRAY,
+            );
+        }
+    }
 }
 
 fn autoscroll_message_selection(ui: &egui::Ui, response: &egui::Response) {
@@ -721,6 +819,76 @@ mod tests {
     use super::*;
     use egui::{Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect};
 
+    #[test]
+    fn invisible_markers_leave_the_editable_buffer_unchanged() {
+        assert_eq!(invisible_marker(' '), Some("·"));
+        assert_eq!(invisible_marker('\t'), Some("→"));
+        assert_eq!(invisible_marker('\r'), Some("\\r"));
+        assert_eq!(invisible_marker('\n'), Some("\\n"));
+        assert_eq!(invisible_marker('é'), None);
+        let ctx = Context::default();
+        let mut text = "é \t\r\nnext\n".to_owned();
+        let original = text.clone();
+        let output = ctx.run_ui(RawInput::default(), |ui| {
+            let result = message_numbered(
+                ui,
+                1,
+                MessagePane::Request,
+                MessageView::Raw,
+                &mut text,
+                None,
+                true,
+            );
+            assert!(!result.changed);
+        });
+        output.drop_without_applying_deltas();
+        assert_eq!(text, original);
+    }
+
+    #[test]
+    fn invisible_setting_is_scoped_to_pane_and_survives_hex() {
+        let ctx = Context::default();
+        let output = ctx.run_ui(RawInput::default(), |ui| {
+            ui.push_id("request", |ui| {
+                let key = ui.make_persistent_id("perseid.message.invisibles");
+                ui.data_mut(|data| data.insert_temp(key, true));
+                assert!(invisible_toggle(ui, true));
+                assert!(!invisible_toggle(ui, false));
+                assert!(invisible_toggle(ui, true));
+            });
+            ui.push_id("response", |ui| assert!(!invisible_toggle(ui, true)));
+        });
+        output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn floating_toggle_can_be_clicked_without_changing_text() {
+        let ctx = Context::default();
+        let mut text = "hello\r\n".to_owned();
+        let mut shown = false;
+        let mut frame = |events| {
+            let output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    message_editor(ui, 1, MessagePane::Request, MessageView::Raw, &mut text);
+                    let key = ui.make_persistent_id("perseid.message.invisibles");
+                    shown = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(false));
+                },
+            );
+            output.drop_without_applying_deltas();
+        };
+        frame(vec![]);
+        let pos = egui::pos2(380.0, 15.0);
+        frame(vec![Event::PointerMoved(pos), button(pos, true)]);
+        frame(vec![button(pos, false)]);
+        assert!(shown);
+        assert_eq!(text, "hello\r\n");
+    }
+
     fn button(pos: Pos2, pressed: bool) -> Event {
         Event::PointerButton {
             pos,
@@ -790,6 +958,7 @@ mod tests {
                 MessageView::Raw,
                 &mut readonly,
                 None,
+                false,
             );
         });
         let commands = output.platform_output.commands.clone();
@@ -917,6 +1086,7 @@ mod tests {
                                 MessageView::Raw,
                                 &mut readonly,
                                 None,
+                                false,
                             );
                         },
                     );
