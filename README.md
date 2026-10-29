@@ -136,7 +136,12 @@ important boundaries:
   by older versions. Delete a whole saved project via the filesystem after
   switching away or quitting; deletion is not secure erasure. New
   Project and Open Project ask Save/Discard/Cancel before replacing a temporary
-  project with unsaved work.
+   project with unsaved work. Window close and Quit use the same prompt for
+   temporary captures or meaningful workbench edits. Save waits for Save As and
+   final workspace persistence; cancelled dialogs or failed saves keep the
+   session open. Discard explicitly allows exit; Cancel preserves the session.
+   Quit is blocked during project operations. Forced termination cannot prompt
+   or recover unsaved in-memory contents.
 - **Transient activity is not persisted.** Running attacks and sends, held
   interception decisions, pending network operations, and proxy lifecycle state
   are not restored. The local TLS CA certificate and private key are stored
