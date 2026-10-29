@@ -1,6 +1,6 @@
 # Perseid screenshot gallery
 
-Generated from `14bb14aa907afa63d5801a8edf8141471c5f0a68` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/40954891194) (attempt 1).
+Generated from `b79fea099233dabcd85b9a89ec695336fa4a5e41` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/40955673554) (attempt 1).
 
 ## Proxy - HTTP history
 
@@ -77,6 +77,10 @@ Generated from `14bb14aa907afa63d5801a8edf8141471c5f0a68` by the [Screenshots wo
 ## Settings
 
 ![Settings](perseid-settings.png)
+
+## Cookie jar
+
+![Cookie jar](perseid-cookie-jar.png)
 
 ## Memory usage
 
