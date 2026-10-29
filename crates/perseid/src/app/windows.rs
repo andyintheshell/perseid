@@ -90,10 +90,12 @@ impl PerseidApp {
         let mut open = self.about_open;
         let lockup = self.lockup.clone();
         egui::Window::new("About Perseid")
+            .id(egui::Id::unique("perseid.about"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
                 ui.set_max_width(460.0);
                 if let Some(lockup) = &lockup {
@@ -286,6 +288,63 @@ mod tests {
     use crate::memory::{MemoryMeter, SAMPLE_INTERVAL};
 
     use super::*;
+
+    #[test]
+    fn about_window_starts_centered_and_can_be_dragged() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.about_open = true;
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 900.0));
+        let mut input = egui::RawInput {
+            screen_rect: Some(screen),
+            ..Default::default()
+        };
+        let run = |input: egui::RawInput, app: &mut PerseidApp| {
+            let mut output = ctx.run_ui(input, |ui| app.about_window(ui.ctx()));
+            output.textures_delta.clear();
+        };
+        for _ in 0..3 {
+            run(input.clone(), &mut app);
+        }
+        let rect = || {
+            ctx.memory(|memory| memory.area_rect(egui::Id::unique("perseid.about")))
+                .unwrap()
+        };
+        let initial = rect();
+        assert!(
+            (initial.center() - screen.center()).length() < 2.0,
+            "{initial:?}"
+        );
+
+        let start = initial.left_top() + Vec2::new(100.0, 10.0);
+        let end = start + Vec2::new(100.0, 80.0);
+        input.events = vec![
+            egui::Event::PointerMoved(start),
+            egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        run(input.clone(), &mut app);
+        input.events = vec![egui::Event::PointerMoved(end)];
+        run(input.clone(), &mut app);
+        input.events = vec![egui::Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        run(input.clone(), &mut app);
+        input.events.clear();
+        run(input, &mut app);
+        let moved = rect();
+        assert!(
+            (moved.min - initial.min - (end - start)).length() < 2.0,
+            "{initial:?} -> {moved:?}"
+        );
+    }
 
     /// Run `memory_graph` in a headless context and return the painted shapes.
     fn graph_shapes(samples: &[u64]) -> Vec<Shape> {
