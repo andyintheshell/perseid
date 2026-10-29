@@ -68,6 +68,7 @@ const SCENE_FILES: &[&str] = &[
     "perseid-search.png",
     "perseid-repeater-websockets.png",
     "perseid-settings.png",
+    "perseid-cookie-jar.png",
 ];
 
 const CURL_UA: &str = "curl/8.22.0";
@@ -472,8 +473,9 @@ impl PerseidApp {
                     .ok_or_else(|| "screenshot WebSocket message 23 is missing".to_string())?;
                 self.send_websocket_to_repeater(&item);
             }
-            18 => {
-                self.settings.open = true;
+            18 | 19 => {
+                self.settings.open = index == 18;
+                self.settings.jar_open = index == 19;
                 let mut jar = self
                     .cookie_jar
                     .lock()

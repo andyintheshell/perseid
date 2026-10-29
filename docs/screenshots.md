@@ -61,7 +61,12 @@ Raw, or Hex with matches highlighted.
 
 Manage the in-memory cookie jar and configure which traffic updates or uses it.
 
-![Settings window with synthetic cookie jar entries](images/perseid-settings.png)
+![Session and cookie jar settings](images/perseid-settings.png)
+
+The separate viewer shows cookie scope, values, security flags, and expiration.
+All entries below are synthetic.
+
+![Cookie jar viewer with synthetic entries](images/perseid-cookie-jar.png)
 
 ## Proxy > WebSockets history
 
