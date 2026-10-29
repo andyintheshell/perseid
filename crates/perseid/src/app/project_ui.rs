@@ -2855,6 +2855,127 @@ pub(super) mod tests {
 mod switch_tests {
     use super::*;
 
+    fn receipt() -> CommitReceipt {
+        CommitReceipt {
+            sequence: 0,
+            http_count: 0,
+            ws_count: 0,
+        }
+    }
+
+    #[test]
+    fn recovery_retry_requires_acknowledgement_of_edits_made_while_waiting() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        app.project.quit_error = Some("Injected final write failure".into());
+        assert!(tests::click_window_text(&ctx, "Retry", |ctx| app.quit_recovery_window(ctx)));
+        assert!(app.project.quit_error.is_none());
+        assert!(app.project.quit_flush.is_some());
+        assert!(!app.project.quit_ready);
+
+        // Hold a deterministic old acknowledgement while the user edits.
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.project.quit_flush = Some(receiver);
+        app.scope_enabled = true;
+        sender.send(Ok(receipt())).unwrap();
+        app.handle_close_request(&ctx);
+        assert!(!app.project.quit_ready);
+        assert_eq!(app.project.quit_workspace, Some(app.workspace_snapshot()));
+        assert!(app.project.quit_flush.is_some());
+        app.project
+            .handle()
+            .unwrap()
+            .flush()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        app.handle_close_request(&ctx);
+        assert!(app.project.quit_ready);
+        // on_exit must not submit another unacknowledged workspace after close.
+        app.shutdown_project();
+    }
+
+    #[test]
+    fn recovery_cancel_and_explicit_discard_have_distinct_close_outcomes() {
+        for (label, closes) in [("Cancel", false), ("Discard and Quit", true)] {
+            let mut app = PerseidApp::test_app();
+            let ctx = egui::Context::default();
+            app.scope_enabled = true;
+            app.project.quit_error = Some("Injected flush failure".into());
+            assert!(tests::click_window_text(&ctx, label, |ctx| app.quit_recovery_window(ctx)));
+            assert!(app.project.quit_error.is_none());
+            assert_eq!(app.project.quit_ready, closes);
+            assert!(app.scope_enabled);
+            assert!(app.project.quit_flush.is_none());
+        }
+    }
+
+    #[test]
+    fn recovery_copy_cancellation_and_failed_copy_preserve_the_session() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        app.scope_enabled = true;
+        app.project.quit_error = Some("Injected final write failure".into());
+        assert!(tests::click_window_text(&ctx, "Save Copy…", |ctx| app.quit_recovery_window(ctx)));
+        assert_eq!(
+            app.project.dialog.as_ref().unwrap().kind,
+            ProjectDialogKind::SaveCopy
+        );
+        assert!(app.project.quit_error.is_none());
+        app.project.close_dialog();
+        assert!(!app.project.quit_ready);
+        assert!(app.scope_enabled);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.project.pending.push(PendingProject::Save {
+            copy: true,
+            path: PathBuf::from("recovery-copy.perseid"),
+            receiver,
+        });
+        sender.send(Err(ProjectError::ServiceUnavailable)).unwrap();
+        app.poll_project();
+        assert!(app.project.pending.is_empty());
+        assert!(!app.project.quit_ready);
+        assert!(app.scope_enabled);
+        assert!(app.project.notice().unwrap().1);
+    }
+
+    #[test]
+    fn switch_barrier_waits_rechecks_edits_and_reports_writer_disconnect() {
+        let mut app = PerseidApp::test_app();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.project.switch_flush = Some((ProjectSwitch::New, app.workspace_snapshot(), receiver));
+        app.poll_project();
+        assert!(app.project.switch_flush.is_some());
+        assert!(app.project.pending.is_empty());
+        app.scope_enabled = true;
+        sender.send(Ok(receipt())).unwrap();
+        app.poll_project();
+        assert!(app.project.pending.is_empty());
+        assert_eq!(
+            app.project.switch_flush.as_ref().unwrap().1,
+            app.workspace_snapshot()
+        );
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.project.switch_flush = Some((ProjectSwitch::New, app.workspace_snapshot(), receiver));
+        drop(sender);
+        app.poll_project();
+        assert!(app.project.switch_flush.is_none());
+        assert!(app.project.pending.is_empty());
+        assert!(app.project.notice().unwrap().0.contains("writer stopped"));
+        assert!(app.scope_enabled);
+    }
+
+    #[test]
+    fn quitting_without_a_persistence_handle_does_not_wait_for_a_reply() {
+        let mut app = PerseidApp::test_app();
+        app.project.handle = None;
+        app.begin_quit_flush();
+        assert!(app.project.quit_ready);
+        assert!(app.project.quit_flush.is_none());
+    }
+
     #[test]
     fn final_save_timeout_preserves_workspace_and_late_success_cannot_close() {
         let mut app = PerseidApp::test_app();
