@@ -3,7 +3,14 @@
 use super::*;
 
 impl PerseidApp {
+    pub(super) fn selected_http_item(&self, id: u64) -> Option<&crate::history::HistoryItem> {
+        self.history
+            .get(id)
+            .or_else(|| self.site_map_ui.stored.item(id))
+    }
+
     pub(super) fn clear_history(&mut self) {
+        self.site_map_ui.stored = Default::default();
         self.history.clear();
         self.title_cache.borrow_mut().clear();
         self.selected = None;

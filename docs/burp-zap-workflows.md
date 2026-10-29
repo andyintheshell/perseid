@@ -62,7 +62,7 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 | --- | --- | --- |
 | Proxy capture and HTTP history | **Working**: live history uses a bounded snapshot; the stored HTTP browser pages all retained rows and loads details/notes on demand. Search scans all stored HTTP and WebSocket records. Temporary and opt-in saved retention evict oldest eligible captures. | Maintain; selective item deletion |
 | Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. WebSocket messages can be held and edited as text or hex. Large, streaming, and binary HTTP bodies are limited. | Maintain |
-| Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map has a Burp-style host/folder tree, display filters, and Contents table but is derived from the bounded history snapshot. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve with full-history queries |
+| Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map indexes all retained HTTP endpoints with bounded host/folder navigation, Contents pages, display filters, and lazy details/tool sends. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve discovery separately |
 | Repeater / manual request editor | **Working** for HTTP/HTTPS and live WebSocket connections: editable tabs seeded from history, replay, and Pretty/Raw/Hex inspection. Persistent projects save HTTP tabs and their last responses; WebSocket tabs are session-only. Direct HTTP sends bypass proxy scope and rewriting. | Maintain |
 | Intruder / fuzzer | **Working** for HTTP/HTTPS: editable `$$` positions, shared or per-position payload sets with file loading, four attack modes, up to 32 concurrent requests, and Pretty/Raw/Hex results. Persistent projects save the request and payload configuration and result rows. No payload processing; enforced scope is checked before and during attacks. | Maintain; add payload processing |
 | Decoder / encoder | **Partial**: local transforms work with stacked Text/Hex panels; eight codecs, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms. HTTP history sends full captured messages and message panes send selections. Hex selections currently send displayed hexadecimal text, not binary bytes. Persistent projects save panel contents, operation annotations, view, and selection. 8 MiB input / 16 MiB output caps. | Maintain |
@@ -96,8 +96,8 @@ For current feature details, see the [README](../README.md), [Burp parity matrix
 Milestone 3 now includes redb-backed project history/workspace state as well as
 search, Repeater, Decoder, and Comparer. The storage foundation has landed, and
 Search scans all stored HTTP/WebSocket history plus current Repeater and
-Intruder results, but the history and site-map tables still load a bounded
-snapshot rather than paging through all saved records.
+Intruder results. Stored HTTP history and the site map page across retained
+records/endpoints with lazy details; the live history tables remain bounded snapshots.
 The rankings put Repeater first, and editable HTTP/HTTPS replay now exists: a
 request can be seeded from history, edited in its own tab, sent directly to the
 target, and inspected in Pretty/Raw/Hex. Intruder extends that
@@ -109,7 +109,7 @@ transforms and a replaceable downstream chain. That closes the gaps where the
 product stopped after capture or forced payload edits into an external script.
 
 The remaining M3 work should build around that loop rather than repeat it:
-paging the history and site-map tables through the full saved history, a
+full-store WebSocket table navigation, a
 recent-project list and quit prompt, and byte-preserving Hex transfers to
 Decoder. Comparer now closes the "change one thing and compare" loop with a shared item list and paired
 diff views. WebSocket replay uses live connections; project files already
@@ -202,7 +202,7 @@ The following comparison explains the evidence behind the implementation priorit
   local transformation, and search across stored history: proxy capture,
   interception, scope, message inspection, Repeater, Intruder, Decoder, Comparer,
   Search, and local project files. The remaining daily-workflow gaps include
-  paging the history and site-map tables through all saved history, richer session
+  full-store WebSocket table navigation, richer session
   convenience, WebSocket message interception/replay, and project workflow
   polish—not scanner coverage.
 - Burp CE is explicitly a manual toolkit.[1] PortSwigger calls Repeater and

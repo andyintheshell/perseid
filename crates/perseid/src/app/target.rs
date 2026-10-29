@@ -22,6 +22,8 @@ use super::widgets::{card, empty_state, page_pad, section_bar, section_tab, tabl
 use super::*;
 
 const SITE_MAP_DETAIL_ID: &str = "perseid.site-map.detail";
+#[path = "target_store.rs"]
+mod stored;
 pub(super) const SITE_MAP_SEARCH_ID: &str = "perseid.site-map.search";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -64,6 +66,7 @@ impl SiteMapSort {
 
 /// View-local state for the Target > Site map tab.
 pub(super) struct SiteMapUi {
+    pub(super) stored: stored::StoredMap,
     selected_node: Option<SiteNodeId>,
     /// Expansion state keyed by [`SiteNodeId::key`]. Hosts and the root folder
     /// default to open, matching Burp's initial tree.
@@ -91,6 +94,7 @@ impl Default for SiteMapUi {
 impl SiteMapUi {
     pub(super) fn new() -> Self {
         Self {
+            stored: Default::default(),
             selected_node: None,
             open: BTreeMap::new(),
             filter: SiteMapFilter::default(),
@@ -210,6 +214,12 @@ impl PerseidApp {
     }
 
     fn site_map_view(&mut self, ui: &mut egui::Ui) {
+        if self.project.status().is_some_and(|s| s.http_count > 0)
+            || self.site_map_ui.stored.active()
+        {
+            self.stored_site_map_view(ui);
+            return;
+        }
         self.ensure_site_map();
         let ctx = ui.ctx().clone();
         self.site_map_toolbar(ui);
@@ -399,11 +409,23 @@ impl PerseidApp {
                                 ui.close();
                             }
                             ui.separator();
-                            if ui.button("Expand all folders").clicked() {
+                            if ui
+                                .add_enabled(
+                                    !self.site_map_ui.stored.active(),
+                                    egui::Button::new("Expand all folders"),
+                                )
+                                .clicked()
+                            {
                                 menu_action = Some(SiteMapMenuAction::ExpandAll);
                                 ui.close();
                             }
-                            if ui.button("Collapse all folders").clicked() {
+                            if ui
+                                .add_enabled(
+                                    !self.site_map_ui.stored.active(),
+                                    egui::Button::new("Collapse all folders"),
+                                )
+                                .clicked()
+                            {
                                 menu_action = Some(SiteMapMenuAction::CollapseAll);
                                 ui.close();
                             }
@@ -476,7 +498,10 @@ impl PerseidApp {
                     continue;
                 }
                 let notes = self.inspector.note(entry.id).unwrap_or_default();
-                let item = self.history.get(entry.id);
+                let item = self
+                    .history
+                    .get(entry.id)
+                    .or_else(|| self.site_map_ui.stored.item(entry.id));
                 let row = SiteRowRef { entry, item, notes };
                 if needle.is_empty() || site_row_matches(&row, &needle) {
                     rows.push(row);
@@ -516,7 +541,7 @@ impl PerseidApp {
         if !selected_in_rows {
             let next = if node_changed {
                 rows.iter()
-                    .max_by_key(|row| row.entry.timestamp)
+                    .max_by_key(|row| (row.entry.timestamp, row.entry.id))
                     .map(|row| row.entry.id)
             } else {
                 rows.first().map(|row| row.entry.id)

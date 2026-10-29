@@ -104,7 +104,10 @@ It does not include running attacks or sends, held interception messages, pendin
 network operations, or proxy lifecycle state. Opening a project loads only a
 bounded newest-first history snapshot; older records remain in the file and can
 be found by Search; **Browse stored history…** pages through all retained HTTP
-records and loads details and notes on demand. The site map remains cache-based. If
+records and loads details and notes on demand. The site map covers all retained
+HTTP endpoints using a disposable disk index and bounded pages. Its private
+temporary directory contains sensitive URL/title summaries and is removed on
+normal exit; a crash can leave it in the OS temporary directory. If
 a stored HTTP, WebSocket, or workspace snapshot cannot be decoded, the open fails
 visibly and the previously open project and running proxy stay active. The project does not
 include the local TLS CA certificate or private key.

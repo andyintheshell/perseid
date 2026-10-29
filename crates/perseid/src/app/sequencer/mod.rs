@@ -42,7 +42,11 @@ impl PerseidApp {
     pub(super) fn send_selected_to_sequencer(&mut self) {
         let Some(item) = self
             .selected
-            .and_then(|id| self.history.get(id))
+            .and_then(|id| {
+                self.history
+                    .get(id)
+                    .or_else(|| self.site_map_ui.stored.item(id))
+            })
             .filter(|item| !item.is_tunnel())
         else {
             return;

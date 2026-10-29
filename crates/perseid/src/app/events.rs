@@ -144,6 +144,7 @@ impl PerseidApp {
         if self
             .selected
             .is_some_and(|id| self.history.get(id).is_none())
+            && !(self.main_tab == MainTab::Target && self.target_section == TargetSection::SiteMap)
         {
             self.selected = None;
             self.detail = None;

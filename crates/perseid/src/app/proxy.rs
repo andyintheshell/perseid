@@ -884,11 +884,11 @@ impl PerseidApp {
 
     pub(super) fn ensure_detail(&mut self, id: u64) {
         if self.detail.as_ref().is_some_and(|cache| cache.id == id)
-            && self.history.get(id).is_some()
+            && self.selected_http_item(id).is_some()
         {
             return;
         }
-        self.detail = self.history.get(id).map(|item| DetailCache {
+        self.detail = self.selected_http_item(id).map(|item| DetailCache {
             id,
             request: view::request_views(item),
             response: view::response_views(item),
@@ -907,7 +907,16 @@ impl PerseidApp {
         };
         self.ensure_detail(id);
 
-        let Some(item) = self.history.get(id) else {
+        let Some(item) = self
+            .history
+            .get(id)
+            .or_else(|| self.site_map_ui.stored.item(id))
+        else {
+            if self.site_map_ui.stored.loading(id) {
+                ui.spinner();
+                ui.label("Loading retained exchange…");
+                return;
+            }
             empty_state(
                 ui,
                 "Exchange no longer in history",

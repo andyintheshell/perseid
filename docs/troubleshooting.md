@@ -71,7 +71,9 @@ public interface just to work around a local port conflict.
    empty folders. Click the filter bar and choose **Show all items** (or relax
    specific filters) to reveal entries.
 
-The site map uses the currently loaded history snapshot, not active crawling.
+The site map indexes all retained HTTP history in the background, not active
+crawling. Wait for the spinner, select a host, and use **More nodes** or
+**Next contents** for branches with more than 500 items. Resume the map if paused.
 HTTPS pass-through tunnels have no visible decrypted requests, and `CONNECT`
 transport tunnels do not get their own history rows. Repeater and Intruder
 exchanges are also separate from Proxy history by design.
