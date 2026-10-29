@@ -39,7 +39,7 @@ perseid
 
 Perseid `0.2.1` is published on crates.io and includes persistent projects.
 Prebuilt packages are available from GitHub Releases. A source checkout of
-`main` contains ongoing `0.3.0-dev` development.
+This branch prepares `0.3.0`; it is not yet a published release.
 
 ### Download a prebuilt binary
 

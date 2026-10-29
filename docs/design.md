@@ -148,9 +148,10 @@ Save/Discard/Cancel when the temporary
 project has unsaved work. Saved projects support opt-in combined record/body
 retention and atomic schema-v1→v2 migration. Open validates the destination before
 stopping the current proxy. Physical file-size caps, compaction, and
-recent-project/quit prompts remain planned; WebSocket
-message interception/replay and a native extension point are also not
-implemented.
+recent projects remain planned. Normal quit prompts for unsaved temporary work
+and waits asynchronously for acknowledged saved-workspace writes; see
+[exit guarantees](project-exit-guarantees.md). WebSocket interception and
+live-connection replay are implemented; a native extension point is not.
 Proxy, Repeater, and Intruder network operations run off the UI thread. Proxy
 capture events use a bounded, lossy
 channel with a drop counter; the project writer has its own bounded queue and

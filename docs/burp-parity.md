@@ -20,7 +20,8 @@ implementation, or compatibility with Burp extensions.
 
 ## Parity estimate: 78.6%
 
-As of **2026-10-29**, on main at `10b08c9`, the estimated parity for the
+As of **2026-10-29**, for the `0.3.0` release preparation based on main at
+`d323306`, the estimated parity for the
 manual-workflow scope below is **78.6%**. This is a documentation-based
 assessment of the matrix, not a new hands-on audit or a measurement of all Burp
 CE features, reliability, or product maturity.
@@ -113,8 +114,8 @@ For usage details, limits, and safety behavior, see the
 | --- | --- |
 | **M1 — Proxy core** | ✅ Complete: HTTP/1.1 proxy, interception, scope, and match/replace. |
 | **M2 — HTTPS** | ✅ Complete: local CA lifecycle, TLS interception, and pass-through. |
-| **M3 — Daily workbench** | 🟡 In progress: Repeater, Decoder, Comparer, full-store Search, stored HTTP paging, a full-store paged site map, and local project files are available; full-store WebSocket table navigation and project workflow polish remain. |
-| **M4 — Protocols and testing tools** | 🟡 In progress: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. |
+| **M3 — Daily workbench** | ✅ Complete for the `0.3.0` release scope: Repeater, Decoder, Comparer, full-store Search, stored HTTP paging, a full-store paged site map, and local project files. Remaining issues moved to M4; completion does not imply full capability parity. |
+| **M4 — Protocols and testing tools** | 🟡 Current focus: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. Includes M3 carryovers for WebSocket paging, history filters, settings, site map annotations, Decoder transfers, and recent projects; see the roadmap. |
 | **M5 — Parity hardening** | 🟡 In progress: release packages are published; clean-install testing, crash recovery, accessibility, and broader parity audits remain. |
 
 ## When does a capability count as parity?

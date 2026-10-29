@@ -3,7 +3,7 @@
 [Documentation](README.md) · [Roadmap](roadmap.md) · [Capability matrix](burp-parity.md) · [Workbench guide](workbench.md)
 
 > **Reading this page:** the implementation snapshot and roadmap implications
-> were last updated **27 October 2026**. The Burp and ZAP research is
+> were last updated **29 October 2026** for `0.3.0` release preparation. The Burp and ZAP research is
 > qualitative, not a representative usage survey; vendor sources were checked **20 October
 > 2026**. For current status, use the [capability matrix](burp-parity.md) and
 > [roadmap](roadmap.md).
@@ -17,8 +17,8 @@
 
 Perseid focuses on the manual testing loop shared by Burp Community Edition
 (CE) and ZAP: capture traffic, inspect it, change a request, and compare the
-results. The browser retains its own authenticated session; Perseid does not
-currently manage or refresh that session for replay.
+results. The browser retains its own authenticated session; Perseid also has
+an optional in-memory cookie jar for replay, but no automatic re-authentication.
 
 ```mermaid
 flowchart LR
@@ -44,8 +44,8 @@ and captured body bytes differ.
 | Area | Snapshot | Next step |
 | --- | --- | --- |
 | **Core HTTP loop** | Capture, interception, replay, payload testing, comparison, local transforms, and search across stored history are available. | Maintain the loop; finish full-history paging. |
-| **Projects and evidence** | Captures and workspace state persist in local project files; HTTP history supports Copy as curl. | Add recent projects, a quit prompt, and useful export formats. |
-| **Sessions** | A browser keeps its own cookies; replay can reuse captured headers. | Add a small cookie and session-handling slice. |
+| **Projects and evidence** | Captures and workspace state persist; normal quit protects unsaved work and acknowledges saved writes. HTTP history supports Copy as curl. | Add recent projects and useful export formats. |
+| **Sessions** | A browser keeps its own cookies; an optional in-memory cookie jar supports Proxy, Repeater, and Intruder. | Login macros and automatic re-authentication remain gaps. |
 | **WebSockets** | Message capture, interception, editing, and live-connection replay work. | Consider new-connection replay and fuzzing. |
 | **Automation** | No scanner, crawler, or automation API. | Scanner and crawler are non-goals; extensions and automation are post-parity. |
 
@@ -73,8 +73,8 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
-| Persistence and search | **Partial**: temporary projects are RAM-only; saved projects autosave to a user-selected `.perseid` file. Saved retention defaults to unlimited but supports opt-in logical limits; no physical disk cap or encryption. Schema v1 upgrades atomically to v2. Search covers all retained HTTP/WebSocket history and tool results; older HTTP rows are pageable. Clear history deletes captures; whole files are deleted through the filesystem when closed. | **M3 — in progress** |
-| Authentication and session handling | **Partial**: an external browser keeps its own cookies while proxying; Perseid has no cookie jar, login macro, token refresh, per-user context, or session rules. | **P1 — add to M3/M4** |
+| Persistence and search | **Partial**: temporary projects are RAM-only; saved projects autosave to a user-selected `.perseid` file. Saved retention defaults to unlimited but supports opt-in logical limits; no physical disk cap or encryption. Schema v1 upgrades atomically to v2. Search covers all retained HTTP/WebSocket history and tool results; older HTTP rows are pageable. Clear history deletes captures; whole files are deleted through the filesystem when closed. | **M3 release scope complete; remaining issues in M4** |
+| Authentication and session handling | **Partial**: bounded in-memory cookie jar, proxy observation, optional Repeater/Intruder cookie application and response updates, and manual editing. No login macros, automatic re-authentication, or per-user contexts. | Maintain; broader session automation remains a gap |
 | WebSocket testing | **Partial**: bounded history, interception, text/hex editing, and live-connection replay for plain `ws://` and decrypted `wss://`. Saved projects retain messages, but the UI loads a bounded snapshot. No new-connection replay or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | **Partial**: saved projects retain captured exchanges and project-scoped workbench state; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
 | Sequencer / token analysis | **Partial**: manual and live regex token sampling; character- and bit-level randomness tests; effective-entropy chart and per-analysis settings. No parameter-aware capture; statistics are bounded approximations. | Maintain |
@@ -93,7 +93,7 @@ For current feature details, see the [README](../README.md), [Burp parity matrix
 
 ### 1. Intruder, Repeater, and Decoder have landed; finish the loop around them
 
-Milestone 3 now includes redb-backed project history/workspace state as well as
+Milestone 3 is complete for the release scope, including redb-backed project history/workspace state as well as
 search, Repeater, Decoder, and Comparer. The storage foundation has landed, and
 Search scans all stored HTTP/WebSocket history plus current Repeater and
 Intruder results. Stored HTTP history and the site map page across retained
@@ -108,30 +108,31 @@ numeric conversions, Gzip, hashes, and Smart decode, with selection-aware
 transforms and a replaceable downstream chain. That closes the gaps where the
 product stopped after capture or forced payload edits into an external script.
 
-The remaining M3 work should build around that loop rather than repeat it:
-full-store WebSocket table navigation, a
-recent-project list and quit prompt, and byte-preserving Hex transfers to
-Decoder. Comparer now closes the "change one thing and compare" loop with a shared item list and paired
+The remaining M3 issues have moved to M4: full-store WebSocket table navigation,
+recent projects, structured history filters, application settings, site map
+annotations, and remaining Decoder transfers. Normal quit protection is
+implemented; crash recovery and byte-preserving Hex transfers remain gaps.
+Comparer now closes the "change one thing and compare" loop with a shared item list and paired
 diff views. WebSocket replay uses live connections; project files already
 preserve Repeater request tabs and responses, Intruder results, and the other
 project-scoped workspace state.
 
-### 2. Add a small session-handling slice
+### 2. Maintain the session-handling slice
 
 Session and authentication handling ranks seventh in both tools. Perseid can
 proxy authenticated browsing because the external browser holds the cookies,
 and seeding a Repeater tab copies the selected request's headers, including
-`Cookie`. Repeated testing still needs a way to keep that session alive and
-refresh credentials. The smallest useful slice is:
+`Cookie`. The small session-handling slice has landed:
 
-- a per-host cookie jar populated from `Set-Cookie`;
-- an optional "update cookies from response" behavior;
-- later, a simple login macro or re-authentication request.
+- a bounded in-memory cookie jar populated from proxy requests and `Set-Cookie`;
+- opt-in cookie application and response updates for Repeater and Intruder;
+- a viewer and manual cookie editor in Settings.
 
 This is smaller than ZAP's context/authentication model and smaller than Burp's
 full session-handling rules, but it removes a blocker that otherwise appears
-immediately on real engagements. It should be pulled into M3 or early M4 rather
-than left implicit.
+immediately on real engagements. Login macros and automatic re-authentication
+remain unimplemented. See [Workbench](workbench.md#cookie-jar)
+for defaults, limits, and Intruder payload precedence.
 
 ### 3. Finish M4's protocol work
 
@@ -141,9 +142,9 @@ concurrency; Sequencer covers manual and live regex sampling, character- and
 bit-level tests, effective-entropy results, and per-analysis settings. That
 leaves:
 
-1. **WebSocket message interception and replay** next. Capture/history for
-   plain `ws://` and decrypted `wss://` has landed; editing and resending are the
-   remaining parts of the same target-dependent workflow.
+1. **Full-store WebSocket paging and lazy details** next. Capture/history,
+   interception, editing, and live-connection replay for plain `ws://` and
+   decrypted `wss://` have landed. New-connection replay and fuzzing remain gaps.
 2. **Session handling and Intruder refinements** such as payload processing
    should follow rather than being displaced by further Sequencer work. Its
    lowest-frequency ranking still makes it a maintain-and-refine tool, not a
@@ -203,7 +204,7 @@ The following comparison explains the evidence behind the implementation priorit
   interception, scope, message inspection, Repeater, Intruder, Decoder, Comparer,
   Search, and local project files. The remaining daily-workflow gaps include
   full-store WebSocket table navigation, richer session
-  convenience, WebSocket message interception/replay, and project workflow
+   convenience, new-connection WebSocket replay, and project workflow
   polish—not scanner coverage.
 - Burp CE is explicitly a manual toolkit.[1] PortSwigger calls Repeater and
   Intruder "the center of the Burp Suite manual testing workflow" and says they

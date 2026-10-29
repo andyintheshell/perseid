@@ -85,7 +85,9 @@ Perseid has two project modes:
   use **File > Save Project As…**. **New Project** and **Open Project** ask
   Save/Discard/Cancel before replacing a temporary project that has unsaved
   records or workbench edits; Save opens Save As and only continues after a
-  successful save. A quit prompt is not implemented.
+  successful save. Ordinary quit also prompts for unsaved temporary work and
+  waits for acknowledged saved-workspace writes; failures keep the session open
+  unless explicitly discarded. See [exit guarantees](project-exit-guarantees.md).
 - **Persistent:** **Save Project As…** or **Open Project…** uses one
   user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
   project-scoped workbench state are committed automatically. **Save Project

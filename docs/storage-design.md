@@ -11,7 +11,7 @@ shipped in `0.2.0`. See §0 for implementation status and deviations.<br>
 
 ## 0. Review and implementation status
 
-**Reviewed:** 2026-10-29, against `0.3.0-dev` (schema v2).
+**Reviewed:** 2026-10-29, for `0.3.0` release preparation (schema v2).
 
 **Verdict:** persistent HTTP paging/details, saved-project logical retention, and atomic v1→v2 migration are implemented. Physical file-size caps and automatic compaction are not. The document was written against the `v0.1.0` release tag, while persistence first shipped in `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
 
@@ -40,14 +40,14 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
 | §7.2 separately versioned workspace component keys | One `workspace/v1` JSON document holds all project-scoped workbench state, stored inline up to 32 MiB or split into 8 MiB chunks in the same `workspace` table with a manifest. Reads are capped at 512 MiB. | A single atomic snapshot keeps cross-tool state consistent; chunking handles result bodies without a schema change. |
 | §7.2 persist logical inputs and regenerate derived results | Intruder results store response heads/bodies and rebuild their detail views; Comparer diffs and Sequencer analysis are recomputed on open. Repeater's last response is stored as its Pretty/Raw/Hex views because the tab does not retain the raw body. | Intruder and Repeater responses are already bounded by the UI; storing views preserves the visible result without adding a second body store. |
-| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | No recent-project list or quit prompt. **New Project** and **Open Project** ask Save/Discard/Cancel when the temporary project has captured records or workbench edits; Save opens Save As and continues only after a successful save. Normal exit flushes saved-project state and drops temporary history. | Recent-project and quit flows remain follow-up work; unsaved switches are covered. |
+| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | **New Project**, **Open Project**, and ordinary quit ask Save/Discard/Cancel for unsaved temporary work. Saved-project quit waits asynchronously for acknowledged workspace commit and flush, with recovery choices on failure/timeout. | Recent projects remain M4 work; see [exit guarantees](project-exit-guarantees.md) for limits. |
 | Migrations (§11.2) | v1→v2 is a single durable transaction; errors abort it. No resumable multi-batch migration protocol is needed for this upgrade. | Version metadata is updated in the same commit as the new counters/settings; there is no exposed half-upgraded state. |
 
 ### 0.3 Test and follow-up notes
 
 - Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal without explicit consent, staged overwrite of an existing file, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
 - Additional regression coverage: multi-page timestamp ties with concurrent captures, lazy binary details, old-row tool sends/notes, stale reader results after switches, saved retention across reopen/copy, transactional retention rollback, legacy HTTP/WebSocket fixtures, malformed/missing/future/interrupted schema failures, and failed opens preserving the listener/workspace.
-- Follow-ups: full-store WebSocket table views, recent projects and a quit prompt, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls.
+- Follow-ups: full-store WebSocket table views, recent projects, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls. Normal quit protection is implemented.
 
 ### Full-store site-map index (#151)
 
@@ -98,7 +98,7 @@ does not substitute for desktop visual verification.
 | Application | Project schemas |
 | --- | --- |
 | `0.2.x` | Reads/writes v1; rejects v2 |
-| `0.3.0-dev` | Writes v2; atomically upgrades v1 on open; rejects unknown newer schemas |
+| `0.3.0` | Writes v2; atomically upgrades v1 on open; rejects unknown newer schemas |
 
 Keep a backup of a closed v1 file if an older application must still open it.
 Burp's [project management](https://portswigger.net/burp/documentation/desktop/projects/manage-project-files)
@@ -219,7 +219,7 @@ current behavior.
 - No `.perseid` file is created; the only allowable disk writes in this mode are existing **global application** files such as the CA and user preferences (not project content).
 - Temporary history follows explicit aggregate entry-count and retained-body limits. The writer evicts the oldest HTTP/WebSocket records after a capture commit and reports evictions in the status bar. The limits are soft: each stream's newest record and any in-flight HTTP exchange are kept, so they can be exceeded temporarily. Limits default to `--history-limit`/`--history-bytes` and can be overridden with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension.
 - The UI should distinguish **Temporary** from **Saved** without introducing a confusing dirty asterisk: unsaved temporary data is *always* at risk of exit.
-- On New/Open, show a **Save / Discard / Cancel** prompt if the temporary project has meaningful content. Save uses Save As; a cancelled or failed save leaves the current project open. A quit prompt remains future work.
+- On New/Open/ordinary quit, show a **Save / Discard / Cancel** prompt if the temporary project has meaningful content. Save uses Save As; a cancelled or failed save leaves the current project open. Saved quit acknowledgement and recovery behavior is documented in [exit guarantees](project-exit-guarantees.md).
 
 ### 4.2 Save Project As…: temporary to persistent
 
@@ -714,7 +714,7 @@ Implement in narrowly scoped PRs; make the smallest vertical slice functional be
 ### Phase C — Two-mode UI and project transitions
 
 - [x] Add Untitled Temporary status, New, Open, Save As, Save Copy, and Save/Discard/Cancel prompts for New/Open.
-- [ ] Add a recent-project list and a quit prompt.
+- [ ] Add a recent-project list (M4). The quit prompt and acknowledged saved-workspace exit are implemented.
 - [ ] Add project generation IDs, flush receipts, visible write-error and capture-loss indicators.
 - [ ] Implement snapshot transfer first in a controlled, explicitly quiesced path, then the ordered delta handover for seamless Save As.
 - [ ] Test project switching while the proxy and held interception are active; do not auto-forward held requests.
@@ -779,7 +779,7 @@ Capture write throughput, p50/p95/p99 transaction/commit time, UI frame-time whi
 - [WebSocket history](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/websocket_history.rs).
 - [Workbench app](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/app.rs) — current state ownership and capture drain.
 
-The links above point to current `main` (workspace `0.3.0-dev`) for readable source paths. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for what has since shipped and verify paths against current source before implementing follow-up work.
+The links above point to current `main` for readable source paths; this snapshot prepares workspace `0.3.0`. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for implementation status and verify paths against current source before implementing follow-up work.
 
 ### redb
 

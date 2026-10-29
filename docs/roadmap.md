@@ -7,13 +7,17 @@ The north star is feature parity with Burp Suite Community Edition's manual
 toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
-**Current focus: Milestone 3, the daily workbench.** Proxy core and HTTPS
+**Current focus: Milestone 4, protocols and testing tools.** Milestone 3 is
+complete for the `0.3.0` release preparation; its remaining issues have moved
+to M4, not been implemented or dropped. Proxy core and HTTPS
 milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
 project-persistence workflow are available. Search scans all stored HTTP and
 WebSocket history as well as current Repeater and Intruder results. The remaining
-M3 follow-ups include a full-store WebSocket table view and
-recent-project and quit prompts. Stored HTTP paging, lazy details/notes,
+M4 follow-ups include a full-store WebSocket table view and
+recent-project workflow polish. Normal quit now protects unsaved work and
+acknowledges saved workspace commits; crash recovery remains M5 work.
+Stored HTTP paging, lazy details/notes,
 saved-project logical retention, atomic v1→v2 migration, and a full-store site map
 with background indexing, bounded tree/Contents pages, and lazy details are available.
 Temporary and opt-in saved retention use combined count/body limits; physical
@@ -58,10 +62,10 @@ promise.
   match/replace, and bounded-capture pipeline as plain HTTP. See
   [HTTPS interception](tls.md).*
 
-- [ ] **Milestone 3 — Daily workbench:** redb-backed persistent project history
+- [x] **Milestone 3 — Daily workbench:** redb-backed persistent project history
   and supported workspace state, Search, Repeater, Decoder, and Comparer.
 
-  *Status: projects start in temporary memory by default. Save As, Open, and Save
+  *Complete for the release scope: projects start in temporary memory by default. Save As, Open, and Save
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
   project-scoped workbench state are written automatically. On open, the live
   history tables load only a bounded newest-first history snapshot; older
@@ -72,8 +76,9 @@ promise.
   Temporary storage evicts the oldest
   captures when it exceeds the configurable aggregate count or retained-body
   limits. New Project and Open Project ask Save/Discard/Cancel when the current
-  temporary project has unsaved work; a recent-project list and quit prompt are
-   not implemented. Saved projects now support opt-in combined record/body
+  temporary project has unsaved work; ordinary quit also prompts and waits for
+  acknowledged saved-project writes. A recent-project list is not implemented.
+  Saved projects now support opt-in combined record/body
    retention, defaulting to unlimited, and atomic v1→v2 schema migration.
    Retention is logical: it does not cap or compact physical files. Whole-project
    deletion uses the filesystem after switching away or quitting; files are
@@ -107,6 +112,15 @@ promise.
   and saved attacks remain. Sequencer supports manual and live regex sampling,
   character- and bit-level tests, effective-entropy results, and per-analysis
   settings, with bounded in-memory samples.*
+
+  **Carried over from M3:** structured HTTP history filters
+  ([#57](https://github.com/andyintheshell/perseid/issues/57)), application settings
+  and opt-in tool-state persistence ([#58](https://github.com/andyintheshell/perseid/issues/58)),
+  site map annotations ([#59](https://github.com/andyintheshell/perseid/issues/59)),
+  remaining Send to Decoder behavior ([#60](https://github.com/andyintheshell/perseid/issues/60)),
+  full-store WebSocket paging/lazy details ([#150](https://github.com/andyintheshell/perseid/issues/150)),
+  and a recent-project list without automatic reopening
+  ([#152](https://github.com/andyintheshell/perseid/issues/152)).
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a
