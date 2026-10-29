@@ -72,6 +72,7 @@
 
 mod capture;
 mod config;
+pub mod cookies;
 mod events;
 mod forward;
 mod intercept;

@@ -48,6 +48,8 @@ const MAX_HEAD_BYTES: usize = 64 * 1024;
 /// Runtime settings for the direct replay engine.
 #[derive(Clone)]
 pub struct RepeaterConfig {
+    /// Optional shared, in-memory session cookies.
+    pub cookie_jar: Option<super::cookies::SharedCookieJar>,
     /// Maximum response body bytes retained for display.
     pub capture_limit: usize,
     /// End-to-end timeout for one request.
@@ -61,6 +63,7 @@ pub struct RepeaterConfig {
 impl Default for RepeaterConfig {
     fn default() -> Self {
         Self {
+            cookie_jar: None,
             capture_limit: crate::proxy::DEFAULT_CAPTURE_LIMIT,
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),
@@ -476,7 +479,16 @@ impl Repeater {
 
                 runtime.spawn(async move {
                     let _ = startup_tx.send(Ok(()));
-                    worker(client, job_rx, result_tx, capture_limit, timeout, notify).await;
+                    worker(
+                        client,
+                        job_rx,
+                        result_tx,
+                        capture_limit,
+                        timeout,
+                        notify,
+                        config.cookie_jar,
+                    )
+                    .await;
                 });
 
                 runtime.block_on(async {
@@ -563,6 +575,7 @@ async fn worker(
     capture_limit: usize,
     timeout: Duration,
     notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    cookie_jar: Option<super::cookies::SharedCookieJar>,
 ) {
     let concurrency = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
     while let Some(job) = jobs.recv().await {
@@ -572,6 +585,7 @@ async fn worker(
         let client = client.clone();
         let results = results.clone();
         let notify = notify.clone();
+        let cookie_jar = cookie_jar.clone();
         tokio::spawn(async move {
             let Job {
                 id,
@@ -579,7 +593,7 @@ async fn worker(
                 reservation,
             } = job;
             let started = Instant::now();
-            let result = execute(&client, request, capture_limit, timeout).await;
+            let result = execute(&client, request, capture_limit, timeout, cookie_jar, false).await;
             let response = RepeaterResponse {
                 id,
                 duration: started.elapsed(),
@@ -604,17 +618,30 @@ async fn worker(
 
 pub(super) async fn execute(
     client: &Client<HttpsConnector<HttpConnector>, ProxyBody>,
-    request: RepeaterRequest,
+    mut request: RepeaterRequest,
     capture_limit: usize,
     timeout: Duration,
+    cookie_jar: Option<super::cookies::SharedCookieJar>,
+    preserve_existing: bool,
 ) -> RepeaterResult {
     let future = async move {
+        let target = request.uri.clone();
+        if let Some(jar) = &cookie_jar
+            && let Ok(jar) = jar.lock()
+        {
+            jar.apply_to(&target, &mut request.headers, preserve_existing);
+        }
         let request = build_request(request)?;
         let response = client
             .request(request)
             .await
             .map_err(|err| format!("upstream request failed: {err}"))?;
         let (parts, body) = response.into_parts();
+        if let Some(jar) = &cookie_jar
+            && let Ok(mut jar) = jar.lock()
+        {
+            jar.update_from(&target, &header_list(&parts.headers));
+        }
         let (body, body_error) = read_body(body, capture_limit).await;
         let reason = parts
             .extensions
@@ -715,6 +742,69 @@ async fn read_body(mut body: Incoming, limit: usize) -> (CapturedBody, Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cookie_jar_refreshes_across_real_sends() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for i in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                seen.push(String::from_utf8(request).unwrap());
+                let response = if i == 0 {
+                    "HTTP/1.1 200 OK\r\nSet-Cookie: sid=rotated; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+            seen
+        });
+        let jar: super::super::cookies::SharedCookieJar = Default::default();
+        {
+            let mut jar = jar.lock().unwrap();
+            jar.apply = true;
+            jar.update = true;
+        }
+        let repeater = Repeater::start(RepeaterConfig {
+            cookie_jar: Some(jar),
+            ..Default::default()
+        })
+        .unwrap();
+        let request = RepeaterRequest::parse(
+            "GET / HTTP/1.1\nCookie: sid=old\n\n",
+            vec![],
+            "http",
+            &address.to_string(),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            repeater.send(request.clone()).unwrap();
+            let result = repeater
+                .results
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            assert!(matches!(
+                result.response.result,
+                RepeaterResult::Response { status: 200, .. }
+            ));
+        }
+        let seen = server.join().unwrap();
+        assert!(seen[0].to_ascii_lowercase().contains("cookie: sid=old"));
+        assert!(seen[1].to_ascii_lowercase().contains("cookie: sid=rotated"));
+    }
 
     fn small_request() -> RepeaterRequest {
         RepeaterRequest::parse("GET / HTTP/1.1\n\n", Vec::new(), "http", "127.0.0.1:1").unwrap()

@@ -522,8 +522,34 @@ It verifies origin certificates against platform trust anchors, falling back
 to bundled public roots if none are available.
 
 **HTTP Repeater bypasses interception, match/replace, and proxy scope enforcement.**
-Its HTTP exchanges do not appear in Proxy history. It also has no browser cookie jar
-or automatic session refresh; review copied cookies and tokens before sending.
+Its HTTP exchanges do not appear in Proxy history. It does not share the browser's
+cookie jar or automatically re-authenticate; review copied cookies and tokens.
+
+### Cookie jar
+
+Open **Settings** using the gear beside global Search. The shared cookie jar is
+empty initially and stays in application memory until Perseid exits, including
+when switching projects. It is not saved or exported with a project. Captured
+requests, responses and projects may independently contain cookie values.
+
+Both applying cookies and updating from Repeater/Intruder responses are off by
+default and controlled separately. Add or refresh a cookie manually by entering
+its response URL and a `Set-Cookie` value; inspect, edit, delete or clear entries
+in Settings. Matching uses the connection URL, not an edited Host header, and
+honors domain, host-only, path, expiration and Secure (HTTPS only). SameSite is
+stored but not enforced because direct requests have no browser site context.
+The jar rejects public-suffix domains, cookies over 4096 bytes, and more than
+512 stored cookies or 32 KiB of cookie names and values. It does not observe
+Proxy traffic or browser state.
+
+When applying cookies, Repeater replaces request cookie names found in the jar
+and preserves unrelated names. Intruder preserves all explicitly supplied cookie
+names, including fuzz payloads, and adds only missing names; to refresh an
+existing Intruder cookie, remove it from the template. Editors and Intruder
+result details display the original request rather than send-time jar changes.
+Parallel requests can race when a server rotates a cookie, so reduce concurrency
+or disable updates for such applications. The jar is not a login macro and will
+not re-authenticate an expired session.
 
 Captured history seeds use the decoded, bounded message representation, so
 compressed, binary, or large bodies can be lossy. Review seed warnings before

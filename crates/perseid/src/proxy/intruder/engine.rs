@@ -29,6 +29,8 @@ const MAX_QUEUED_RESULT_BYTES: usize = 64 * 1024 * 1024;
 /// Runtime settings shared by every attack in one engine.
 #[derive(Clone)]
 pub struct IntruderConfig {
+    /// Optional shared, in-memory session cookies.
+    pub cookie_jar: Option<crate::proxy::cookies::SharedCookieJar>,
     /// Maximum response body bytes retained for each result.
     pub capture_limit: usize,
     /// End-to-end timeout for one request.
@@ -42,6 +44,7 @@ pub struct IntruderConfig {
 impl Default for IntruderConfig {
     fn default() -> Self {
         Self {
+            cookie_jar: None,
             capture_limit: crate::proxy::DEFAULT_CAPTURE_LIMIT,
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),
@@ -177,6 +180,7 @@ impl Intruder {
                                     cancel,
                                     notify.clone(),
                                     running_thread.clone(),
+                                    config.cookie_jar.clone(),
                                 ));
                             }
                             Command::Stop => {
@@ -286,6 +290,7 @@ async fn run_attack(
     cancel: Arc<AtomicBool>,
     notify: Option<Arc<dyn Fn() + Send + Sync>>,
     running: Arc<AtomicBool>,
+    cookie_jar: Option<crate::proxy::cookies::SharedCookieJar>,
 ) {
     let prepared = match plan.prepare() {
         Ok(prepared) => prepared,
@@ -393,9 +398,11 @@ async fn run_attack(
         let client = client.clone();
         let results = results.clone();
         let notify = notify.clone();
+        let cookie_jar = cookie_jar.clone();
         tasks.spawn(async move {
             let started = Instant::now();
-            let result = execute_repeater(&client, request, capture_limit, timeout).await;
+            let result =
+                execute_repeater(&client, request, capture_limit, timeout, cookie_jar, true).await;
             let event = result_event(attack_id, sequence, payloads, started.elapsed(), result);
             let _ = send_event(&results, event, &notify).await;
             drop(permit);

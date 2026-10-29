@@ -7,6 +7,11 @@ Perseid is intended for systems you own or are explicitly authorized to test,
 including purpose-built training labs. Intercepted requests may contain
 passwords, session tokens, cookies, or personal data.
 
+The optional Settings cookie jar holds session credentials in application memory
+until exit, including across project switches. It is not saved to projects or
+exported, but captured messages and project files can contain the same secrets.
+Clear the jar when changing engagements, and avoid sharing screenshots of it.
+
 ## Authorized use
 
 Do not point Perseid at third-party systems without permission. The

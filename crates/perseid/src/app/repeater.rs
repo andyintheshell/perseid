@@ -775,6 +775,7 @@ impl PerseidApp {
             return Ok(());
         }
         let config = RepeaterConfig {
+            cookie_jar: Some(self.cookie_jar.clone()),
             capture_limit: self.capture_limit,
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),

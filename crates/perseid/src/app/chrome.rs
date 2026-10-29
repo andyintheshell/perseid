@@ -306,6 +306,12 @@ impl PerseidApp {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if super::widgets::settings_button(ui, self.settings.open)
+                    .on_hover_text("Settings")
+                    .clicked()
+                {
+                    self.settings.open = !self.settings.open;
+                }
                 if search_button(ui, self.search.open)
                     .on_hover_text(format!("Search ({search_shortcut})"))
                     .clicked()

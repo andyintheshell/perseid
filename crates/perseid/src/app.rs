@@ -42,6 +42,7 @@ mod screenshots;
 mod search;
 mod selection;
 mod sequencer;
+mod settings;
 mod target;
 mod tls;
 mod util;
@@ -324,6 +325,8 @@ pub struct PerseidApp {
     response_view: MessageView,
     inspector: inspector::InspectorState,
     search: search::SearchState,
+    cookie_jar: crate::proxy::cookies::SharedCookieJar,
+    settings: settings::SettingsState,
     /// Direct replay engine, started on the first Send so a proxy-off run can
     /// still use Repeater.
     repeater: Option<Repeater>,
@@ -516,6 +519,8 @@ impl PerseidApp {
             response_view: MessageView::default(),
             inspector: inspector::InspectorState::default(),
             search: search::SearchState::default(),
+            cookie_jar: Default::default(),
+            settings: Default::default(),
             repeater: None,
             repeater_tabs: Vec::new(),
             repeater_active: 0,
@@ -660,6 +665,8 @@ impl PerseidApp {
             response_view: MessageView::default(),
             inspector: inspector::InspectorState::default(),
             search: search::SearchState::default(),
+            cookie_jar: Default::default(),
+            settings: Default::default(),
             repeater: None,
             repeater_tabs: Vec::new(),
             repeater_active: 0,
@@ -763,6 +770,7 @@ impl eframe::App for PerseidApp {
         self.comparer_windows(&ctx);
         self.sequencer_windows(&ctx);
         self.search_window(&ctx);
+        self.settings_window(&ctx);
         #[cfg(not(target_os = "macos"))]
         self.resize_handles(ui);
 
