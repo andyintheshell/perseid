@@ -117,6 +117,7 @@ pub fn status_class_color(status: u16) -> Color32 {
 
 /// Formatted representations of one side of an exchange, for the
 /// Request/Response tabs and their Pretty/Raw/Hex views.
+#[derive(Clone, Default)]
 pub struct MessageViews {
     pub pretty: String,
     pub raw: String,
@@ -269,6 +270,29 @@ fn format_response_head_with(item: &HistoryItem, decoded: &DecodeResult) -> Stri
         push_headers(&mut out, &headers);
     }
     out
+}
+
+/// Reconstruct a captured message head and retain the original body bytes.
+pub(crate) fn captured_message_bytes(item: &HistoryItem, response: bool) -> Option<Vec<u8>> {
+    let mut head = if response {
+        item.response.as_ref()?;
+        format_response_head_with(item, &Ok(None))
+    } else {
+        format_request_head_with(item, &Ok(None))
+    };
+    // The capture stores parsed headers, so the head is reconstructed with CRLF.
+    head = head.replace('\n', "\r\n");
+    let mut bytes = head.into_bytes();
+    bytes.extend_from_slice(b"\r\n");
+    let body = if response {
+        item.response_body()
+    } else {
+        Some(&item.request_body)
+    };
+    if let Some(body) = body {
+        bytes.extend_from_slice(body.data());
+    }
+    Some(bytes)
 }
 
 pub fn request_views(item: &HistoryItem) -> MessageViews {
@@ -806,6 +830,20 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn captured_messages_keep_binary_bodies_and_reconstruct_heads() {
+        let item = item_with_bodies(vec![0, 255, 13, 10], vec![254, 0, 128]);
+        let request = captured_message_bytes(&item, false).unwrap();
+        assert!(request.starts_with(b"POST /upload HTTP/1.1\r\n"));
+        assert!(request.ends_with(b"\r\n\r\n\x00\xff\r\n"));
+        let response = captured_message_bytes(&item, true).unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert!(response.ends_with(b"\r\n\r\n\xfe\x00\x80"));
+        let mut missing = item;
+        missing.response = None;
+        assert!(captured_message_bytes(&missing, true).is_none());
     }
 
     #[test]

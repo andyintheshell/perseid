@@ -29,6 +29,38 @@ use common::{origin_certificate, origin_certificate_h2, read_request};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+#[tokio::test]
+async fn cookie_jar_observes_proxy_even_when_history_is_paused() {
+    let origin = spawn_origin("HTTP/1.1 200 OK\r\nSet-Cookie: session=from-response; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()).await;
+    let jar: perseid::proxy::cookies::SharedCookieJar = Default::default();
+    let proxy = Proxy::start(ProxyConfig {
+        listen: "127.0.0.1:0".parse().unwrap(),
+        cookie_jar: Some(jar.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    proxy.set_paused(true);
+    let request = format!(
+        "GET http://{origin}/account HTTP/1.1\r\nHost: {origin}\r\nCookie: browser=from-request\r\nConnection: close\r\n\r\n"
+    );
+    raw_exchange(proxy.local_addr(), &request).await;
+    let entries = jar.lock().unwrap().entries();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.2 == "browser" && e.3 == "from-request")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.2 == "session" && e.3 == "from-response")
+    );
+    jar.lock().unwrap().update_proxy = false;
+    jar.lock().unwrap().clear();
+    raw_exchange(proxy.local_addr(), &request).await;
+    assert!(jar.lock().unwrap().entries().is_empty());
+}
+
 fn init_logging() {
     let _ = env_logger::builder()
         .is_test(true)
@@ -2486,6 +2518,269 @@ async fn websocket_handshake_relays_frames_and_captures_messages() {
     let (again_downstream, _, _, _) = find(WebSocketDirection::ToClient, b"again");
     assert_eq!(again_upstream.id, connection.id);
     assert_eq!(again_downstream.id, connection.id);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn websocket_interception_edits_drops_and_preserves_message_order() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = listener.local_addr().unwrap();
+    let (frames_tx, mut frames_rx) = mpsc::channel(8);
+    let (send_tx, mut send_rx) = mpsc::channel::<Vec<u8>>(4);
+    let origin_task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_request(&mut stream).await;
+        stream.write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n").await.unwrap();
+        loop {
+            tokio::select! {
+                frame = read_websocket_frame(&mut stream) => { if frames_tx.send(frame).await.is_err() { break; } }
+                Some(frame) = send_rx.recv() => { stream.write_all(&frame).await.unwrap(); }
+            }
+        }
+    });
+    let mut proxy = test_proxy(1024, 64);
+    let mut client = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    client.write_all(format!("GET http://{origin}/socket HTTP/1.1\r\nHost: {origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").as_bytes()).await.unwrap();
+    assert!(
+        read_http_head(&mut client)
+            .await
+            .starts_with("HTTP/1.1 101")
+    );
+    proxy
+        .set_settings(ProxySettings {
+            intercept_requests: true,
+            ..Default::default()
+        })
+        .unwrap();
+    let mut first = websocket_masked_frame(1, b"hel");
+    first[0] &= 0x7f;
+    client.write_all(&first).await.unwrap();
+    client
+        .write_all(&websocket_masked_frame(0, b"lo"))
+        .await
+        .unwrap();
+    client
+        .write_all(&websocket_masked_frame(2, &[0, 255]))
+        .await
+        .unwrap();
+    let mut held = tokio::time::timeout(TIMEOUT, proxy.recv_websocket_intercept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held.payload(), b"hello");
+    let connection_id = held.connection().id;
+    assert_eq!(held.direction(), WebSocketDirection::ToServer);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), frames_rx.recv())
+            .await
+            .is_err()
+    );
+    held.forward(b"edited".to_vec()).unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, frames_rx.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        (true, 1, b"edited".to_vec())
+    );
+    let mut held = tokio::time::timeout(TIMEOUT, proxy.recv_websocket_intercept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held.payload(), &[0, 255]);
+    held.drop_message().unwrap();
+    send_tx
+        .send(websocket_server_frame(2, &[4, 5]))
+        .await
+        .unwrap();
+    let mut held = tokio::time::timeout(TIMEOUT, proxy.recv_websocket_intercept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held.direction(), WebSocketDirection::ToClient);
+    held.forward(vec![6, 7]).unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, read_websocket_frame(&mut client))
+            .await
+            .unwrap(),
+        (true, 2, vec![6, 7])
+    );
+    proxy
+        .send_websocket_message(
+            connection_id,
+            WebSocketDirection::ToServer,
+            WebSocketOpcode::Text,
+            b"replay".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, frames_rx.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        (true, 1, b"replay".to_vec())
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), proxy.recv_websocket_intercept())
+            .await
+            .is_err()
+    );
+    origin_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn websocket_held_message_is_cancelled_when_client_closes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = listener.local_addr().unwrap();
+    let origin_task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_request(&mut stream).await;
+        stream.write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n").await.unwrap();
+        let mut byte = [0];
+        let _ = stream.read(&mut byte).await;
+    });
+    let mut proxy = test_proxy(1024, 64);
+    let mut client = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    client.write_all(format!("GET http://{origin}/socket HTTP/1.1\r\nHost: {origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").as_bytes()).await.unwrap();
+    assert!(
+        read_http_head(&mut client)
+            .await
+            .starts_with("HTTP/1.1 101")
+    );
+    proxy
+        .set_settings(ProxySettings {
+            intercept_requests: true,
+            ..Default::default()
+        })
+        .unwrap();
+    client
+        .write_all(&websocket_masked_frame(1, b"held"))
+        .await
+        .unwrap();
+    let mut held = tokio::time::timeout(TIMEOUT, proxy.recv_websocket_intercept())
+        .await
+        .unwrap()
+        .unwrap();
+    client.shutdown().await.unwrap();
+    tokio::time::timeout(TIMEOUT, async {
+        while !held.is_closed() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        held.forward(b"edit".to_vec()),
+        Err(perseid::proxy::WebSocketInterceptError::Closed)
+    ));
+    origin_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn websocket_replay_on_live_connection_and_close() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = listener.local_addr().unwrap();
+    let (replayed_tx, replayed_rx) = oneshot::channel();
+    let (close_tx, close_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_request(&mut stream).await;
+        stream.write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n").await.unwrap();
+        let (_, _, initial) = read_websocket_frame(&mut stream).await;
+        assert_eq!(initial, b"initial");
+        let replay = read_websocket_frame(&mut stream).await;
+        replayed_tx.send(replay).unwrap();
+        close_rx.await.unwrap();
+        stream
+            .write_all(&websocket_server_frame(8, b""))
+            .await
+            .unwrap();
+    });
+
+    let proxy = test_proxy(1024, 64);
+    let mut client = TcpStream::connect(proxy.local_addr()).await.unwrap();
+    let request = format!(
+        "GET http://{origin}/socket HTTP/1.1\r\nHost: {origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    client.write_all(request.as_bytes()).await.unwrap();
+    assert!(
+        read_http_head(&mut client)
+            .await
+            .starts_with("HTTP/1.1 101")
+    );
+    client
+        .write_all(&websocket_masked_frame(1, b"initial"))
+        .await
+        .unwrap();
+    let Ok(ProxyEvent::WebSocketMessage { connection, .. }) = proxy.recv_timeout(TIMEOUT) else {
+        panic!("missing initial WebSocket capture");
+    };
+    let connection_id = connection.id;
+    proxy
+        .send_websocket_message(
+            connection_id,
+            WebSocketDirection::ToServer,
+            WebSocketOpcode::Binary,
+            vec![0, 255, 1],
+        )
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, replayed_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        (true, 2, vec![0, 255, 1])
+    );
+    proxy
+        .send_websocket_message(
+            connection_id,
+            WebSocketDirection::ToClient,
+            WebSocketOpcode::Text,
+            b"to client".to_vec(),
+        )
+        .unwrap();
+    let frame = tokio::time::timeout(TIMEOUT, read_websocket_frame(&mut client))
+        .await
+        .unwrap();
+    assert_eq!(frame, (true, 1, b"to client".to_vec()));
+
+    let mut captured = Vec::new();
+    while captured.len() < 2 {
+        match proxy.recv_timeout(TIMEOUT).unwrap() {
+            ProxyEvent::WebSocketMessage {
+                direction, payload, ..
+            } => captured.push((direction, payload.data().to_vec())),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+    assert!(captured.contains(&(WebSocketDirection::ToServer, vec![0, 255, 1])));
+    assert!(captured.contains(&(WebSocketDirection::ToClient, b"to client".to_vec())));
+    close_tx.send(()).unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, read_websocket_frame(&mut client))
+            .await
+            .unwrap()
+            .1,
+        8
+    );
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        if matches!(
+            proxy.send_websocket_message(
+                connection_id,
+                WebSocketDirection::ToClient,
+                WebSocketOpcode::Text,
+                vec![]
+            ),
+            Err(perseid::proxy::WebSocketSendError::Closed)
+        ) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "closing connection remained available"
+        );
+        tokio::task::yield_now().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

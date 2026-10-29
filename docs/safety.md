@@ -7,6 +7,11 @@ Perseid is intended for systems you own or are explicitly authorized to test,
 including purpose-built training labs. Intercepted requests may contain
 passwords, session tokens, cookies, or personal data.
 
+The optional Settings cookie jar holds session credentials in application memory
+until exit, including across project switches. It is not saved to projects or
+exported, but captured messages and project files can contain the same secrets.
+Clear the jar when changing engagements, and avoid sharing screenshots of it.
+
 ## Authorized use
 
 Do not point Perseid at third-party systems without permission. The
@@ -27,8 +32,8 @@ aids, not permission to test an arbitrary host.
   it exceeds `--temporary-retention-limit` combined HTTP/WebSocket records or
   `--temporary-retention-bytes` retained body/payload bytes; both default to
   the history settings and can be disabled with `0`. In a saved project,
-  stored history remains until explicitly cleared and can grow until the disk
-  fills.
+   retention defaults to unlimited; opt-in logical record/body limits are under
+   **Proxy > HTTP history > Project storage…**. They do not cap physical disk use.
 - The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
   once by default. Excess connections are closed; excess CONNECT requests get
   a 503 response. Both limits are library configuration, not browser settings.
@@ -80,26 +85,34 @@ Perseid has two project modes:
   use **File > Save Project As…**. **New Project** and **Open Project** ask
   Save/Discard/Cancel before replacing a temporary project that has unsaved
   records or workbench edits; Save opens Save As and only continues after a
-  successful save. A quit prompt is not implemented.
+  successful save. Ordinary quit also prompts for unsaved temporary work and
+  waits for acknowledged saved-workspace writes; failures keep the session open
+  unless explicitly discarded. See [exit guarantees](project-exit-guarantees.md).
 - **Persistent:** **Save Project As…** or **Open Project…** uses one
   user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
   project-scoped workbench state are committed automatically. **Save Project
-  Copy…** creates another file. There is no encryption at rest, and no
-  configurable disk-retention limit; persistent projects are never pruned
-  automatically.
+  Copy…** creates another file. There is no encryption at rest. Saved projects
+  default to unlimited retention; **Project storage…** can opt into oldest-first
+  combined HTTP/WebSocket record-count and retained-body-byte limits. Applying
+  lower limits removes eligible records immediately and persists the policy.
+  In-flight HTTP and each stream's newest record are retained even over budget.
 
 Saved workbench state includes scope, match/replace rules, the selected
 tab/section, filters, message views, Inspector notes and sections, Repeater tabs
 and their last responses, Intruder configuration and results, Decoder panels,
-Comparer items and result-window state, Search state, Sequencer
-samples/settings/analysis, and TLS interception and pass-through hosts. It does
-not include running attacks or sends, held interception messages, pending
+Comparer items and result-window state, Search state and structured result rows,
+Sequencer samples/settings/analysis, and TLS interception and pass-through hosts.
+It does not include running attacks or sends, held interception messages, pending
 network operations, or proxy lifecycle state. Opening a project loads only a
-bounded newest-first history snapshot today; older records remain in the file
-but are not yet pageable or searchable from the UI. If a stored HTTP, WebSocket,
-or workspace snapshot cannot be decoded, the open fails visibly and the
-previously open project stays active. The project does not include
-the local TLS CA certificate or private key.
+bounded newest-first history snapshot; older records remain in the file and can
+be found by Search; **Browse stored history…** pages through all retained HTTP
+records and loads details and notes on demand. The site map covers all retained
+HTTP endpoints using a disposable disk index and bounded pages. Its private
+temporary directory contains sensitive URL/title summaries and is removed on
+normal exit; a crash can leave it in the OS temporary directory. If
+a stored HTTP, WebSocket, or workspace snapshot cannot be decoded, the open fails
+visibly and the previously open project and running proxy stay active. The project does not
+include the local TLS CA certificate or private key.
 
 New project files are created owner-only (`0600`) on Unix; Windows uses the
 user's normal filesystem ACLs. This is access control, not encryption. Project
@@ -107,6 +120,23 @@ files can contain cookies, bearer tokens, credentials, personal data, and
 binary uploads. Do not share them unless you have reviewed and intended to share
 their contents. Clipboard copying is explicit. There is no background upload or
 telemetry.
+
+Retention counts captured records and body/payload bytes, excluding headers,
+indexes, and workbench snapshots. It does not impose a hard physical file-size
+cap. Freed redb pages can be reused without shrinking the file; there is no
+automatic compaction. Save Copy writes retained data to a fresh file and may
+reduce its size, but also copies retained workbench state.
+
+Clear history deletes that stream's captures (and HTTP Inspector notes), not
+independent tool snapshots or the project file. To delete a saved project,
+switch away or quit, then remove the `.perseid` file through your file manager;
+remove copies/backups separately. Unsaved temporary work is discarded on exit.
+Retention, Clear history, and filesystem deletion are not secure erasure.
+
+Schema-v1 files are upgraded to v2 atomically on open. The upgrade preserves
+captures and notes and leaves saved retention unlimited. Back up the closed
+file first if you need compatibility with an older Perseid; newer unsupported
+schemas are rejected. See [Projects and persistence](workbench.md#projects-and-persistence).
 
 Only committed transactions are expected to survive a crash. Capture events can
 be dropped before storage commits; the project status reports capture loss when

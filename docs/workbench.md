@@ -14,7 +14,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | **Target** | A Burp-style site map derived from history, a shared scope list, and an explicit empty scanner-issues view. |
 | **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
 | **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
-| **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
+| **Repeater** | Editable HTTP/HTTPS requests and messages on live WebSocket connections. |
 | **Sequencer** | Token sampling and character- or bit-level randomness analysis. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
 | **Comparer** | Word- or byte-level diffs between any two requests, responses, or loaded messages. |
@@ -38,8 +38,9 @@ from the open project.
 - **Open Project…** opens an existing `.perseid` file. Use the modal folder
   browser to navigate to its directory and select the file, or type a path in
   the **Look in** bar. The toolbar provides up, home, refresh, new-folder,
-  hidden-file, and list/grid controls. If the proxy is running, it stops for
-  the switch and restarts afterward. When the current temporary project has
+  hidden-file, and list/grid controls. Perseid validates the destination in the
+  background before stopping the proxy for a successful switch. A failed open
+  keeps the existing listener running. When the current temporary project has
   unsaved work, Open asks Save/Discard/Cancel first; a cancelled prompt or a
   failed open leaves the current project active.
 - **Save Project As…** transfers the current project into a new file and makes
@@ -49,13 +50,19 @@ from the open project.
   the new project is complete.
 - **Save Project Copy…** writes a consistent copy to a new path and leaves the
   current project active. It also asks before replacing an existing file.
+- **Quit** asks Save/Discard/Cancel for unsaved temporary work. Saved projects
+  wait asynchronously for acknowledged workspace commits and a durable flush;
+  failure or a ten-second acknowledgement timeout keeps the session open with
+  recovery choices. This is not crash recovery or a bounded teardown guarantee;
+  see [project save and normal-exit guarantees](project-exit-guarantees.md).
 
 Saved projects persist HTTP and WebSocket captures plus the workbench state:
 scope and match/replace rules, the selected tab/section, filters, message views,
 Inspector notes and expanded sections, Repeater tabs and their last responses,
 Intruder configuration and result rows, Decoder panels, Comparer items and
-result-window state, Search state, Sequencer samples/analysis/settings, and TLS
-interception and pass-through settings. Active network work is not restored:
+result-window state, Search state and structured result rows, Sequencer
+samples/analysis/settings, and TLS interception and pass-through settings.
+Active network work is not restored:
 running attacks or sends, held interception messages, pending operations, and
 proxy lifecycle state stay in the current session. The local TLS CA certificate
 and private key stay outside the project file.
@@ -65,20 +72,58 @@ it can contain cookies, tokens, credentials, personal data, and binary bodies.
 See [Safety and privacy](safety.md#data-handling) before saving or
 sharing one.
 
-**History is stored on disk in a saved project, but the current UI is still
-bounded:** opening a project loads only the newest snapshot allowed by
-`--history-limit` and `--history-bytes`. Older rows remain in the file but are
-not yet pageable or searchable from the UI. In a temporary project, those same
-flags define the default aggregate retention limits, but the limits can be set
-independently with `--temporary-retention-limit` and
-`--temporary-retention-bytes`: when the temporary store exceeds the configured
-record count or retained-body budget, the oldest records are evicted first and
-the status bar reports the eviction count. The limits are soft: each stream's
-newest record is kept even when it alone exceeds the byte budget, in-flight
-exchanges are kept until they complete, and `0` disables a dimension. Saved
-project files are not pruned automatically. `--capture-limit` still
-caps each stored body, and clearing history deletes stored records from the
-active project.
+### Browse older history
+
+Opening a project loads a bounded newest-first live snapshot controlled by
+`--history-limit` and `--history-bytes`. In **Proxy > HTTP history**, choose
+**Browse stored history…** for all retained HTTP exchanges. **Older**, **Newer**,
+and **Newest** navigate metadata pages of up to 500 rows, newest first. Select
+a row to load request/response details, Pretty/Raw/Hex views, and Inspector
+notes on demand; send it directly to Repeater, Intruder, or Comparer. Pages
+stay in place during capture; **Newest** refreshes to include new arrivals.
+Live-table filters do not apply in this browser. **Search** filters all retained
+HTTP/WebSocket records, including decoded bodies. The site map also covers all
+retained HTTP history; only the live HTTP/WebSocket tables use the bounded snapshot.
+
+### Retention and file size
+
+**Project storage…** in the HTTP history toolbar configures a saved project's
+combined HTTP/WebSocket record count and retained body/payload byte limits.
+Both default to **0 (unlimited)**. **Apply retention limits** immediately removes
+the oldest eligible records and applies the policy to future captures. Limits
+survive reopen, Save As, and Save Copy. Lowering them cannot be undone; save a
+copy first if you need the records. The status bar reports eviction counts, and
+the live caches refresh after committed evictions.
+
+Temporary projects use `--temporary-retention-limit` and
+`--temporary-retention-bytes`, defaulting to the history flags. For both modes,
+zero disables a dimension. Limits are soft: in-flight HTTP exchanges and each
+stream's newest record are kept, even if they exceed a limit. Byte accounting
+excludes headers, indexes, workbench snapshots, and database overhead.
+`--capture-limit` separately caps each captured body.
+
+These are **logical retention limits, not physical file-size limits**. redb can
+reuse freed pages; removing records need not shrink the `.perseid` file. There
+is no automatic compaction command. **Save Project Copy…** writes retained data
+to a fresh file, which may be smaller; it also includes all saved workbench
+state. Neither operation securely erases old disk bytes.
+
+### Migrations and deletion
+
+This development version writes schema v2 and automatically migrates schema-v1
+projects from `0.2.x` under an exclusive file lock. The v1→v2 upgrade is one
+atomic transaction, preserves captures and notes, and defaults saved retention
+to unlimited. Older Perseid versions cannot open the upgraded file; keep a
+filesystem backup before opening if you need to use an older application.
+Unknown newer schemas and incomplete/corrupt files are rejected with an error.
+
+**Clear history** removes that history's captures from the active project;
+HTTP Clear also removes Inspector notes. Independently retained tool snapshots
+are not cleared by history retention or Clear history. To discard temporary
+work, leave it unsaved. To delete a whole saved project, switch to **New Project**
+or quit Perseid, then delete its `.perseid` file using your file manager. Remove
+any copies/backups separately. This does not delete the local CA or securely
+erase disk contents. There is no separate whole-project deletion button.
 
 ## Target and scope
 
@@ -87,9 +132,16 @@ requests by host, folder, and resource; selecting a node filters the
 **Contents** table to that node and everything below it. Query variants share
 the same tree leaf while each method and URL remains its own Contents row.
 Columns cover Host, Method, URL, Params, Status code, Length, MIME type, Title,
-Notes, and Time requested, and every column can be sorted. HTTPS hosts use a
-lock icon; a host captured over both HTTP and HTTPS uses a globe with a small
-lock badge so the tree never presents mixed traffic as a single scheme.
+Notes, and Time requested, and every column can be sorted across the entire
+selected subtree, not just the current page.
+
+The retained-history URL tree is paged: select a host, folder, or resource to
+descend; **↑ Parent** goes back. **More nodes** and **First nodes** navigate wide
+branches in groups of 500. Contents has independent **Next contents**,
+**Previous contents**, and **First contents** controls, also capped at 500 rows.
+Keyboard navigation and **Copy visible URLs** apply to the current Contents
+page. Expand/collapse-all is unavailable for this lazy tree. While an initial
+query is running, a spinner indicates loading.
 
 The filter bar only changes what is displayed. Its defaults match Burp's:
 not-found items, CSS, images, general binary content, 4xx responses, and empty
@@ -100,9 +152,22 @@ Inspector's Notes appear in the table. The **Issues (0)** tab is empty because
 Perseid does not run a scanner, and the crawl-paths view is unavailable because
 Perseid does not crawl or infer unrequested URLs.
 
-The map is built from the currently loaded history snapshot, not from a crawler.
-UI-cache eviction can remove entries from the map without deleting their saved
-project records; clearing history removes the stored records too.
+The map covers **all retained HTTP exchanges**, including endpoints older than
+the live cache after reopening a project. Endpoints group by host, complete
+request path (including query), and method; HTTP/HTTPS variants share a row.
+The greatest capture ID supplies the latest status, title, parameter count,
+scheme, and exchange-specific note; timestamp ties do not change that choice.
+Contents search matches summary fields and notes, not message bodies (use Search
+for those). Selecting an old row loads just that exchange's details, enabling
+the same Inspector, cURL, and tool-send actions without repopulating live history.
+
+Capture commits trigger coalesced background index rebuilds, so new endpoints
+can take a short time to appear. Pause freezes the current summary index while
+capture continues; display filters, scope, search, sorting, and paging still
+work on it. Resume catches up. Retention eviction, Clear history, and project
+switches invalidate even a paused view, including pending results and details.
+Clearing history deletes the underlying records; ordinary UI-cache eviction
+does not remove endpoints from the map. No crawler is involved.
 
 **Target > Issues** is likewise an honest empty state: Perseid has no
 vulnerability scanner and does not import scanner findings.
@@ -150,9 +215,11 @@ is a quick way to verify the path without a browser or CA trust.
   project. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
 - The in-memory history view is bounded by exchange count and retained-body
-  bytes. These limits evict rows from the UI cache; they do not cap the temporary
-  redb project's total RAM storage or prune saved-project files. Older saved
-  records remain on disk even when evicted from the UI cache.
+  bytes. These limits evict rows from the UI cache and do not prune saved-project
+  files. Temporary redb storage has separate aggregate count and body-byte
+  retention limits, which default to the history limits and can be configured
+  independently; older records are evicted when those limits are exceeded.
+  Older saved records remain on disk even when evicted from the UI cache.
 - The status bar shows in-flight requests, held messages, dropped capture events,
   rejected connections, and UI-cache evictions. A dropped-event warning means
   the history may be incomplete even if the client received its response.
@@ -219,8 +286,8 @@ interception for the host if you need its WebSocket messages.
   recording, but enabling or disabling **Proxy > Intercept** does not.
 - `Sec-WebSocket-Extensions` is removed from the forwarded handshake, so the
   origin does not negotiate compression that the history cannot decode.
-- There is no WebSocket message interception, editing, replay, or send-to-tool
-  action yet. WebSocket history has the same count and retained-byte UI-cache
+- Right-click a message and choose **Send to Repeater** to edit and resend it
+  on its existing live connection. WebSocket history has the same count and retained-byte UI-cache
   defaults as HTTP history. Saved projects persist WebSocket records, but the
   UI currently loads only a bounded newest-first snapshot.
 
@@ -252,7 +319,7 @@ project. Clearing history also clears them.
 | --- | --- |
 | **Pretty** | JSON indentation, HTML/XML layout, and one field per URL-encoded form entry; otherwise readable text. |
 | **Raw** | Reconstructed message text with line numbers and syntax highlighting. Binary/control bytes may be displayed lossily. |
-| **Hex** | A bounded byte-offset dump. In history and Repeater, this uses the same decoded body representation as the text views. |
+| **Hex** | A bounded byte-offset dump. In history and Repeater, this uses the same decoded body representation as the text views. Drag across the hex or ASCII columns to select bytes; **Copy selection** copies them as space-separated hexadecimal. |
 
 History and Repeater views decode gzip, deflate, and Brotli bodies for
 inspection. Displayed `Content-Encoding` is removed after successful decoding;
@@ -276,17 +343,30 @@ limits and do not make the whole editor or process a fixed-size allocation.
 
 Click the magnifying glass at the right side of the top toolbar, or press
 `Ctrl`/`Cmd`+`Shift`+`F`, to open the floating **Search** window. Type a term
-and press **Go** or `Enter`. Search covers retained **Proxy history**, including
-decrypted HTTPS exchanges.
+and press **Go** or `Enter`. Search covers every HTTP exchange and WebSocket
+message stored in the active project, including rows older than the loaded
+history snapshot, plus the Repeater tabs and retained Intruder results in the
+current workspace.
 
-Choose which parts of each exchange to examine:
+Choose which tools to search:
+
+- **Proxy history** searches stored HTTP exchanges, including decrypted HTTPS
+  traffic and rows that are not in the loaded history view.
+- **WebSockets** searches stored WebSocket messages and their connection URL.
+- **Repeater** searches each tab's current request editor and retained response.
+- **Intruder** searches each retained Intruder result's rendered request and
+  response.
+
+Choose which parts of each message to examine:
 
 - **Request headers** searches the request line and displayed headers.
 - **Request body** searches the decoded request body.
 - **Response headers** searches the status line and displayed headers.
 - **Response body** searches the decoded response body.
 
-The request and response body locations are on by default, and the headers are
+For WebSocket messages, the connection URL and metadata are treated as headers,
+and the payload is treated as a body, so either body option finds it. The
+request and response body locations are on by default, and the headers are
 included too. Supported gzip, deflate, and Brotli bodies are decoded before
 matching, so searching for readable response text works even when the captured
 wire body was compressed. Unsupported or malformed encodings fall back to the
@@ -297,25 +377,30 @@ The options follow Burp's search model:
 - **Case sensitive** makes literal and regex matching case-sensitive.
 - **Regex** treats the query as a regular expression. Invalid expressions show
   an error instead of running.
-- **Negative match** returns exchanges that do **not** match in any selected
+- **Negative match** returns messages that do **not** match in any selected
   location.
 - **In-scope only** restricts results to the host rules in **Target > Scope**.
   An empty scope includes every host.
-- **Dynamic update** reruns the search as the query, options, or captured
-  history change. Leave it off to run only when you press Go or Enter.
+- **Dynamic update** reruns the search as the query, options, or captured HTTP
+  and WebSocket history change. Leave it off to run only when you press Go or
+  Enter; Repeater and Intruder edits are picked up on the next run.
 
-The results table shows the source, host, URL, status code, response length, and
-request time. Select a row to inspect its request or response below. The detail
-pane has **Pretty**, **Raw**, and **Hex** views and the same Inspector/Notes rail
-as the history detail. Matches in the selected view are highlighted, and the
-detail header reports the match count.
+Stored HTTP and WebSocket history is scanned in a background worker, so the
+window stays responsive and reports progress while older rows are read. Up to
+10,000 results are kept; the status line says when the cap was reached. Results
+from the loaded history cache are shown first and deduplicated against the
+stored scan. Select a row to inspect its request or response below. The detail
+pane has **Pretty**, **Raw**, and **Hex** views and, for HTTP exchanges, the same
+Inspector/Notes rail as the history detail. Matches in the selected view are
+highlighted, and the detail header reports the match count. WebSocket rows show
+one **Message** view.
 
-Search is limited to the currently loaded HTTP history snapshot. In a saved
-project, older rows remain on disk but are not searched yet. WebSocket messages,
-Repeater traffic, and their responses are not included. A persistent project
-saves the query, options, result IDs, selection, and views; on open, stored
-result IDs are checked against the loaded history snapshot and unknown rows are
-dropped.
+A persistent project saves the query, options, structured result rows,
+selection, and views. Rows from Repeater or Intruder are restored even when
+those tools no longer hold the original message; selecting such a row shows
+that its request or response is no longer available. Workspaces saved by older
+versions contained only HTTP result IDs, so unknown IDs are dropped on open as
+before.
 Matching uses the decoded body representation; uncompressed retained bodies
 are searched in full, while decoded compressed previews are bounded by the
 same decoder limits as the message editor.
@@ -351,6 +436,23 @@ The interception editor works on the held body bytes, not a decompressed copy.
 Do not assume a compressed or binary body is safely editable just because its
 history preview was readable.
 
+With interception on, complete WebSocket text and binary messages in both
+directions are held in a separate panel above the HTTP table. Edit text or hex
+bytes and choose **Forward message** or **Drop message**. Messages on each
+direction wait in order; other connections and the opposite direction can
+continue. The panel shows the oldest held WebSocket message. **Forward all**,
+**Drop all**, and turning interception off also apply to this queue; invalid
+drafts remain held for correction. A closed connection is marked in the panel.
+Control frames interleaved with a fragmented message wait for its decision;
+unchanged forwards preserve the original frames, while edited messages are
+reframed and interleaved controls follow the edited message.
+
+The WebSocket message and each edited payload are limited by `--intercept-limit`
+(1 MiB by default). Fragment and control-frame wire overhead is additionally
+limited to 64 KiB. An oversized or malformed held message closes the connection
+rather than forwarding an incomplete message. The bounded interception channel
+applies backpressure. Capture records forwarded messages, not dropped ones.
+
 ## Match/replace rules
 
 Open **Proxy > Match/replace**. A rule chooses request or response, head/body/all,
@@ -379,9 +481,10 @@ Proxy history.
    or place the cursor and use **Add $$** for an empty position (`$$$$`).
    **Clear $$** removes every marker. **Auto $$** marks query values,
    `application/x-www-form-urlencoded` body values, and cookie values.
-3. Edit the payload list on the right, one value per line. Blank lines are
-   ignored. **Deduplicate** keeps the first occurrence. Sniper and Battering ram
-   use one shared set; Pitchfork and Cluster bomb use one set per position.
+3. Edit the payload list on the right, one value per line. **Load from file**
+   appends a UTF-8 text file (up to 16 MiB) to the selected set. Blank lines are
+   ignored, and **Deduplicate** keeps the first occurrence. Sniper and Battering
+   ram use one shared set; Pitchfork and Cluster bomb use one set per position.
 4. Choose an attack and click **Start attack** or press `Ctrl`+`Enter`:
 
    | Attack | Positions per request | Request count |
@@ -443,17 +546,59 @@ or in `--no-proxy` mode and negotiates HTTP/2 over TLS when the origin offers it
 It verifies origin certificates against platform trust anchors, falling back
 to bundled public roots if none are available.
 
-**Repeater bypasses interception, match/replace, and proxy scope enforcement.**
-Its exchanges do not appear in Proxy history. It also has no browser cookie jar
-or automatic session refresh; review copied cookies and tokens before sending.
+**HTTP Repeater bypasses interception, match/replace, and proxy scope enforcement.**
+Its HTTP exchanges do not appear in Proxy history. It does not share the browser's
+cookie database or automatically re-authenticate. The optional application cookie
+jar can reuse cookies observed through the proxy; review copied cookies and tokens.
+
+### Cookie jar
+
+Open **Settings** using the gear beside global Search. The shared cookie jar is
+empty initially and stays in application memory until Perseid exits, including
+when switching projects. It is not saved or exported with a project. Captured
+requests, responses and projects may independently contain cookie values.
+
+Proxy request cookies and response Set-Cookie headers update the jar by default,
+even when history capture is paused. Turn this off in Settings if needed. New
+cookies seen only in browser requests are host-only with path `/`, because the
+request does not include their original domain, path, or expiry attributes.
+Cookies in HTTPS tunnels are visible only when TLS interception is enabled.
+Applying cookies and updating from Repeater/Intruder responses are off by
+default and controlled separately. Add or refresh a cookie manually by entering
+its response URL and a `Set-Cookie` value in the cookie editor. Use **Settings →
+Open cookie jar** to inspect the table, select a cookie to edit or remove, or
+empty the jar. Matching uses the connection URL, not an edited Host header, and
+honors domain, host-only, path, expiration and Secure (HTTPS only). SameSite is
+stored but not enforced because direct requests have no browser site context.
+The jar rejects public-suffix domains, cookies over 4096 bytes, and more than
+512 stored cookies or 32 KiB of cookie names and values. It does not observe
+browser state outside proxied traffic.
+
+When applying cookies, Repeater replaces request cookie names found in the jar
+and preserves unrelated names. Intruder preserves all explicitly supplied cookie
+names, including fuzz payloads, and adds only missing names; to refresh an
+existing Intruder cookie, remove it from the template. Editors and Intruder
+result details display the original request rather than send-time jar changes.
+Parallel requests can race when a server rotates a cookie, so reduce concurrency
+or disable updates for such applications. The jar is not a login macro and will
+not re-authenticate an expired session.
 
 Captured history seeds use the decoded, bounded message representation, so
 compressed, binary, or large bodies can be lossy. Review seed warnings before
 sending. Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
 with up to eight concurrent sends. Request tabs and their most recent responses
-are saved with a persistent project; pending sends are not. WebSocket replay is
-absent.
+are saved with a persistent project; pending sends are not.
+
+For WebSockets, use **Send to Repeater** from WebSockets history, edit text or
+hex, choose a direction, and send repeatedly. The tab shows the original
+connection's open/closed state and captured messages with Pretty/Raw/Hex views.
+It uses that existing connection only; it cannot reopen a closed connection.
+Review and explicitly confirm an incomplete captured prefix before sending.
+Each direction has a queue of 16 messages, each bounded by `--intercept-limit`;
+queue acceptance does not guarantee delivery. Replay is captured in WebSockets
+history but bypasses interception. WebSocket Repeater tabs are live session
+state and are not saved in projects.
 
 Admission is bounded across **queued requests, active sends, and unread results
 together**: at most **32 pending operations** and **64 MiB of retained-data
@@ -503,15 +648,36 @@ reinterpreted automatically. No match produces a notice rather than an empty
 result panel.
 
 <details>
-<summary>Supported hashes (31)</summary>
+<summary>Supported hashes (46)</summary>
 
 BLAKE2B-160/256/384/512, BLAKE2S-128/160/224/256, BLAKE3,
 Keccak-224/256/384/512, MD2, MD4, MD5, RIPEMD-160, SHA-1,
 SHA-224/256/384/512, SHA-512/224, SHA-512/256, SHA3-224/256/384/512,
-SM3, Tiger, and Whirlpool. Output is lowercase hexadecimal. SKEIN, TupleHash,
-and provider-specific OID aliases are not implemented.
+SM3, Tiger, Whirlpool, SKEIN-256 (128/160/224/256-bit output), SKEIN-512
+(128/160/224/256/384/512-bit output), SKEIN-1024 (384/512/1024-bit output),
+TupleHash128-256 and TupleHash256-512. Output is lowercase hexadecimal.
+TupleHash treats the selected bytes as one tuple element (including an empty
+element), uses an empty customization string, and outputs 256 or 512 bits,
+respectively; arbitrary tuples and output lengths are not exposed. The hash menu
+also lists MD, SHA, BLAKE2, RIPEMD-160, SM3 and Whirlpool OID aliases alongside their canonical
+names; selecting an alias uses and saves the canonical algorithm.
+
+Skein and cSHAKE use RustCrypto's maintained `skein` and `cshake` crates,
+licensed MIT OR Apache-2.0. TupleHash framing follows NIST SP 800-185 on top of
+cSHAKE; no older standalone TupleHash dependency is required.
 
 </details>
+
+Right-click a text selection in a message pane and choose **Send selection to
+Decoder**, then append a panel or start a new chain. Pretty selections contain
+the displayed formatted or decoded text; Raw selections also reflect the text
+preview, which can normalize or replace binary bytes. Hex preview selections
+can be copied as hexadecimal; sending one to Decoder currently sends the
+space-separated hexadecimal text, not the selected byte values. From HTTP
+history, right-click an exchange to send the full captured request or response,
+including its original captured body bytes and a
+reconstructed HTTP head. Captures may themselves be truncated. Starting a new
+chain replaces the current panels; appending preserves them.
 
 Text panels are editable; Hex panels are read-only and preview at most 64 KiB.
 Binary results open in Hex. Switching to Text gives a lossy preview, and editing
@@ -519,9 +685,8 @@ it replaces the bytes with UTF-8 text. **Copy** and **Copy output** export all
 retained data as text or hex, not just the visible hex preview.
 
 Manual encode/decode/hash transforms accept at most 8 MiB of input and produce
-at most 16 MiB of output, including preserved selection prefixes/suffixes. There
-is no **Send to Decoder** action from message editors yet. Persistent projects
-restore Decoder panel contents, operation annotations, the last applied
+at most 16 MiB of output, including preserved selection prefixes/suffixes.
+Persistent projects restore Decoder panel contents, operation annotations, the last applied
 operation, Text/Hex view, and selection.
 
 ## Comparer
@@ -635,19 +800,20 @@ separate Space, matching the system green-button behavior.
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
+| WebSocket interception/replay | Message payloads and replay sends are bounded by `--intercept-limit`; interception also caps wire overhead at 64 KiB. The intercept channel is bounded by the connection limit; each live replay direction queues at most 16 messages. |
 | Repeater request/head size | 8 MiB of retained request buffers; 64 KiB heads. The response capture limit must also fit the pending-work budget. |
 | Intruder work | Up to 32 simultaneous requests and one attack at a time; the engine queues up to 64 unread results or 64 MiB. |
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
 | Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
-| Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, are never pruned automatically, and are not encrypted. |
-| Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Older stored records are not pageable/searchable in the UI yet. |
+| Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Files are unencrypted; saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
+| Project history view | Opening loads a bounded newest snapshot. **Browse stored history…** pages all retained HTTP rows and loads details/notes on demand; Search scans all retained HTTP/WebSocket records. The site map pages all retained HTTP endpoints with lazy details; the live WebSocket table remains cache-based. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
 | Sequencer work | At most 10,000 tokens of 16,384 characters; analysis uses 5,000 tokens, 1,024 character positions, and 4,096 bit positions. Capture is limited to the retained history. |
-| Missing tools/protocols | No WebSocket message interception/replay or HTTP/3/QUIC support. |
+| Missing tools/protocols | No WebSocket fuzzing or HTTP/3/QUIC support. |
 
 See [CLI options](getting-started.md#options) to change the UI-cache and
 temporary-retention limits and [Safety and privacy](safety.md) for the

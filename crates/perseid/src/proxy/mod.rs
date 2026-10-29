@@ -46,14 +46,14 @@
 //! - A local certificate page at the listener address (and `http://perseid/`)
 //!   downloads the public CA certificate. Portal requests are not captured.
 //! - WebSocket upgrades over HTTP/1.1 from plain `ws://` connections and
-//!   decrypted `wss://` tunnels. Frames are relayed unchanged while complete
-//!   text and binary messages are published as
+//!   decrypted `wss://` tunnels. Complete text and binary messages can be
+//!   intercepted or replayed on a live connection and are published as
 //!   [`ProxyEvent::WebSocketMessage`]; compression extensions are not
 //!   negotiated, and control frames are omitted.
 //! - Direct Repeater replay with its own runtime and HTTP/HTTPS client. Edited
 //!   requests can target the connection authority independently of a preserved
 //!   virtual `Host` header, and response bodies are bounded by
-//!   [`RepeaterConfig::capture_limit`]. WebSocket replay is not supported yet.
+//!   [`RepeaterConfig::capture_limit`]. WebSocket replay uses the live proxy connection.
 //! - Direct Intruder attacks using the same client. [`AttackType`] implements
 //!   Sniper, Battering ram, Pitchfork, and Cluster bomb with `$$` markers,
 //!   lazy request generation, and bounded result queues. The engine clamps
@@ -72,6 +72,7 @@
 
 mod capture;
 mod config;
+pub mod cookies;
 mod events;
 mod forward;
 mod intercept;
@@ -96,7 +97,10 @@ pub use events::{
     CapturedBody, ExchangeEnd, ExchangeResult, HeaderList, ProxyEvent, RequestInfo, ResponseHead,
     WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
 };
-pub use intercept::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
+pub use intercept::{
+    InterceptError, InterceptItem, InterceptKey, InterceptKind, WebSocketInterceptError,
+    WebSocketInterceptItem,
+};
 pub use intruder::{
     AttackType, Intruder, IntruderConfig, IntruderError, IntruderEvent, IntruderPlan,
     IntruderResult, IntruderStartError, MARKER, MAX_INTRUDER_CONCURRENCY, auto_mark, clear_markers,
@@ -109,9 +113,11 @@ pub use repeater::{
 };
 pub use rules::{MatchReplaceRule, RuleDirection, RuleError, RulePart};
 pub use tls::{CaError, CertificateAuthority, UpstreamTlsError};
+pub use websocket::WebSocketSendError;
 
 pub(crate) use util::display_ip;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
@@ -158,10 +164,13 @@ pub struct Proxy {
     addr: SocketAddr,
     events: Receiver<ProxyEvent>,
     intercepts: mpsc::Receiver<InterceptItem>,
+    websocket_intercepts: mpsc::Receiver<WebSocketInterceptItem>,
     policy: Arc<RwLock<PolicySnapshot>>,
     tls_ca: Arc<RwLock<Option<Arc<CertificateAuthority>>>>,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
+    websocket_connections: websocket::Connections,
+    websocket_send_limit: usize,
     blocked_by_scope: Arc<AtomicU64>,
     rejected_connections: Arc<AtomicU64>,
     rejected_tunnels: Arc<AtomicU64>,
@@ -200,6 +209,8 @@ impl Proxy {
 
         let (tx, events) = std::sync::mpsc::sync_channel(config.event_queue.max(1));
         let (intercept_tx, intercepts) = mpsc::channel(config.max_connections.max(1));
+        let (websocket_intercept_tx, websocket_intercepts) =
+            mpsc::channel(config.max_connections.max(1));
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
 
@@ -210,6 +221,7 @@ impl Proxy {
         let rejected_tunnels = Arc::new(AtomicU64::new(0));
         let connection_slots = Arc::new(Semaphore::new(config.max_connections.max(1)));
         let tunnel_slots = Arc::new(Semaphore::new(config.max_tunnels.max(1)));
+        let websocket_connections = Arc::new(RwLock::new(HashMap::new()));
 
         let upstream_tls = tls::upstream_client_config(&config.tls.extra_roots_pem)?;
         let mut connector = HttpConnector::new();
@@ -249,6 +261,7 @@ impl Proxy {
 
         let tls_ca = Arc::new(RwLock::new(config.tls.authority.clone()));
         let ctx = Arc::new(server::Ctx {
+            cookie_jar: config.cookie_jar.clone(),
             client,
             ws_client,
             tls_ca: tls_ca.clone(),
@@ -261,6 +274,8 @@ impl Proxy {
             intercept_limit: config.intercept_limit,
             policy: policy.clone(),
             intercepts: intercept_tx,
+            websocket_intercepts: websocket_intercept_tx,
+            websocket_connections: websocket_connections.clone(),
             blocked_by_scope: blocked_by_scope.clone(),
             connect_timeout: config.connect_timeout,
             connection_slots,
@@ -315,10 +330,13 @@ impl Proxy {
             addr,
             events,
             intercepts,
+            websocket_intercepts,
             policy,
             tls_ca,
             dropped,
             paused,
+            websocket_connections,
+            websocket_send_limit: config.intercept_limit,
             blocked_by_scope,
             rejected_connections,
             rejected_tunnels,
@@ -367,6 +385,43 @@ impl Proxy {
     /// uses [`Proxy::try_recv_intercept`] from its frame loop.
     pub async fn recv_intercept(&mut self) -> Option<InterceptItem> {
         self.intercepts.recv().await
+    }
+
+    /// Take the next held WebSocket message, if available.
+    pub fn try_recv_websocket_intercept(&mut self) -> Option<WebSocketInterceptItem> {
+        self.websocket_intercepts.try_recv().ok()
+    }
+
+    /// Await the next held WebSocket message.
+    pub async fn recv_websocket_intercept(&mut self) -> Option<WebSocketInterceptItem> {
+        self.websocket_intercepts.recv().await
+    }
+
+    /// Queue a data message for an existing WebSocket connection. A successful
+    /// return means the bounded queue accepted it, not that the peer received it.
+    pub fn send_websocket_message(
+        &self,
+        connection_id: u64,
+        direction: WebSocketDirection,
+        opcode: WebSocketOpcode,
+        payload: Vec<u8>,
+    ) -> Result<(), WebSocketSendError> {
+        websocket::send(
+            &self.websocket_connections,
+            self.websocket_send_limit,
+            connection_id,
+            direction,
+            opcode,
+            payload,
+        )
+    }
+
+    /// Whether a captured WebSocket connection is still available for replay.
+    pub fn websocket_is_open(&self, connection_id: u64) -> bool {
+        self.websocket_connections
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&connection_id)
     }
 
     /// Replace the runtime interception, scope, and match/replace policy.

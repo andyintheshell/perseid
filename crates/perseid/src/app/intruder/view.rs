@@ -47,5 +47,6 @@ impl PerseidApp {
         self.intruder_results(ui);
         self.intruder_payloads(ui);
         self.intruder_editor(ui);
+        self.intruder_payload_file_window(ui.ctx());
     }
 }

@@ -20,7 +20,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::proxy::events::ProxyEvent;
-use crate::proxy::intercept::{InterceptDecision, InterceptItem};
+use crate::proxy::intercept::{InterceptDecision, InterceptItem, WebSocketInterceptItem};
 use crate::proxy::policy::PolicySnapshot;
 use crate::proxy::tls::CertificateAuthority;
 use crate::proxy::util::ProxyBody;
@@ -28,6 +28,7 @@ use crate::proxy::{forward, portal, tunnel};
 
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
+    pub(crate) cookie_jar: Option<crate::proxy::cookies::SharedCookieJar>,
     pub(crate) client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
     /// HTTP/1.1-only client for WebSocket handshakes. Normal HTTPS traffic can
     /// negotiate h2, but WebSocket upgrades are an HTTP/1.1 mechanism.
@@ -47,6 +48,8 @@ pub(crate) struct Ctx {
     pub(crate) intercept_limit: usize,
     pub(crate) policy: Arc<RwLock<PolicySnapshot>>,
     pub(crate) intercepts: mpsc::Sender<InterceptItem>,
+    pub(crate) websocket_intercepts: mpsc::Sender<WebSocketInterceptItem>,
+    pub(crate) websocket_connections: crate::proxy::websocket::Connections,
     pub(crate) blocked_by_scope: Arc<AtomicU64>,
     pub(crate) connect_timeout: Duration,
     pub(crate) connection_slots: Arc<Semaphore>,

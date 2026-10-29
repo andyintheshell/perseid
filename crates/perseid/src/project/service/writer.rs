@@ -13,7 +13,7 @@ use super::super::codec;
 use super::super::schema::ProjectMeta;
 use super::persistence::{
     apply_capture_batch, build_snapshot, clear_http, clear_ws, commit_counters,
-    interrupt_in_flight, open_project, receipt, save_as, write_workspace,
+    interrupt_in_flight, receipt, save_as, write_workspace,
 };
 use super::shared::Shared;
 use super::{Command, ProjectMode, Result, RetentionLimits, new_project_id};
@@ -34,9 +34,13 @@ pub(super) fn run_writer(
     let mut db = initial_db;
     let mut pending: VecDeque<Command> = VecDeque::new();
     let mut last_workspace: Option<Vec<u8>> = None;
+    let mut workspace_error: Option<String> = None;
     let mut retention = match initial_mode {
         ProjectMode::Temporary => Some(temporary_retention),
-        ProjectMode::Persistent { .. } => None,
+        ProjectMode::Persistent { .. } => Some(RetentionLimits::new(
+            meta.retention_records,
+            meta.retention_bytes,
+        )),
     };
     loop {
         let command = match pending.pop_front() {
@@ -46,7 +50,62 @@ pub(super) fn run_writer(
                 Err(_) => break,
             },
         };
+        if matches!(
+            command,
+            Command::SaveAs { .. } | Command::SaveCopy { .. } | Command::Flush { .. }
+        ) && let Some(error) = &workspace_error
+        {
+            reject(
+                command,
+                super::ProjectError::WorkspacePersistence(error.clone()),
+            );
+            continue;
+        }
         match command {
+            Command::WithWorkspace(workspace, command) => {
+                let result = codec::encode_large(&workspace).and_then(|bytes| {
+                    write_workspace(&db, &bytes)?;
+                    last_workspace = Some(bytes);
+                    Ok(())
+                });
+                match result {
+                    Ok(()) => {
+                        workspace_error = None;
+                        pending.push_front(*command);
+                    }
+                    Err(error) => {
+                        workspace_error = Some(error.to_string());
+                        shared.set_status_error(error.to_string());
+                        reject(*command, error);
+                    }
+                }
+            }
+            Command::InstallPrepared(prepared, reply) => {
+                db = prepared.db;
+                meta = prepared.meta;
+                retention = Some(RetentionLimits::new(
+                    meta.retention_records,
+                    meta.retention_bytes,
+                ));
+                shared.set_database(db.clone());
+                shared.install_meta(
+                    &meta,
+                    ProjectMode::Persistent {
+                        path: prepared.path,
+                    },
+                );
+                shared.clear_mappings();
+                last_workspace = None;
+                workspace_error = None;
+                let _ = reply.send(Ok(*prepared.opened));
+            }
+            Command::SetRetention(limits, reply) => {
+                let result = super::persistence::set_retention(&db, &mut meta, limits);
+                if result.is_ok() {
+                    retention = Some(limits);
+                }
+                finish(reply, result, &shared, &meta);
+            }
             Command::Capture(first) => {
                 let mut events = vec![first];
                 let deadline = Instant::now() + CAPTURE_BATCH_WINDOW;
@@ -80,12 +139,23 @@ pub(super) fn run_writer(
                 Ok(bytes) => {
                     if last_workspace.as_deref() != Some(bytes.as_slice()) {
                         match write_workspace(&db, &bytes) {
-                            Ok(()) => last_workspace = Some(bytes),
-                            Err(err) => shared.set_status_error(err.to_string()),
+                            Ok(()) => {
+                                last_workspace = Some(bytes);
+                                workspace_error = None;
+                            }
+                            Err(err) => {
+                                workspace_error = Some(err.to_string());
+                                shared.set_status_error(err.to_string());
+                            }
                         }
+                    } else {
+                        workspace_error = None;
                     }
                 }
-                Err(err) => shared.set_status_error(err.to_string()),
+                Err(err) => {
+                    workspace_error = Some(err.to_string());
+                    shared.set_status_error(err.to_string());
+                }
             },
             Command::ClearHttp(reply) => {
                 absorb_pending_loss(&shared, &mut meta);
@@ -112,9 +182,10 @@ pub(super) fn run_writer(
                 let result = save_as(&mut db, &shared, &mut meta, &path, overwrite);
                 match result {
                     Ok(()) => {
-                        // Saved projects keep every record; retention applies
-                        // only to the in-memory temporary backend.
-                        retention = None;
+                        retention = Some(RetentionLimits::new(
+                            meta.retention_records,
+                            meta.retention_bytes,
+                        ));
                         let _ = reply.send(Ok(()));
                     }
                     Err(err) => {
@@ -146,16 +217,20 @@ pub(super) fn run_writer(
                     }
                 }
             }
+            #[cfg(test)]
             Command::Open {
                 path,
                 ui_limit,
                 ui_bytes,
                 reply,
-            } => match open_project(&db, &path, ui_limit, ui_bytes) {
+            } => match super::persistence::open_project(&path, ui_limit, ui_bytes) {
                 Ok((new_db, new_meta, opened)) => {
                     db = new_db;
                     meta = new_meta;
-                    retention = None;
+                    retention = Some(RetentionLimits::new(
+                        meta.retention_records,
+                        meta.retention_bytes,
+                    ));
                     shared.set_database(db.clone());
                     shared.install_meta(&meta, ProjectMode::Persistent { path });
                     shared.clear_mappings();
@@ -248,5 +323,21 @@ fn absorb_pending_loss(shared: &Shared, meta: &mut ProjectMeta) {
     let pending = shared.pending_loss.swap(0, Ordering::SeqCst);
     if pending > 0 {
         meta.capture_loss_count = meta.capture_loss_count.saturating_add(pending);
+    }
+}
+
+pub(super) fn reject(command: Command, error: super::ProjectError) {
+    match command {
+        Command::WithWorkspace(_, command) => reject(*command, error),
+        Command::SaveAs { reply, .. } | Command::SaveCopy { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        Command::Flush { reply } => {
+            let _ = reply.send(Err(error));
+        }
+        Command::InstallPrepared(_, reply) => {
+            let _ = reply.send(Err(error));
+        }
+        _ => unreachable!("only workspace barriers can be rejected"),
     }
 }

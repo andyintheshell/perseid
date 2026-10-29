@@ -86,6 +86,48 @@ pub(super) fn search_button(ui: &mut egui::Ui, selected: bool) -> egui::Response
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+pub(super) fn settings_button(ui: &mut egui::Ui, selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let fill = if selected {
+            theme::ACCENT_SOFT
+        } else if response.hovered() {
+            theme::ACCENT_WASH
+        } else {
+            Color32::TRANSPARENT
+        };
+        if fill != Color32::TRANSPARENT {
+            ui.painter().rect_filled(rect, 4, fill);
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                4,
+                Stroke::new(1.0, theme::ACCENT_DARK),
+                egui::StrokeKind::Inside,
+            );
+        }
+        paint_gear(
+            ui.painter(),
+            rect.center(),
+            if selected {
+                theme::ACCENT_DARK
+            } else {
+                theme::TEXT_MUTED
+            },
+            if fill == Color32::TRANSPARENT {
+                theme::SURFACE
+            } else {
+                fill
+            },
+        );
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, "Settings")
+    });
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 pub(super) fn section_tab(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
     tab_button(ui, selected, label, SECTION_TAB_STYLE, false)
 }

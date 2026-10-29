@@ -5,8 +5,7 @@ on:
     branches: [main]
   # Do not path-filter pull requests at the workflow level. A workflow-level
   # skip leaves its checks pending, which blocks a PR when that workflow is
-  # required. Detect relevant changes in a job instead; a skipped job completes
-  # successfully.
+  # required. Skip the Rust job instead; a skipped job completes successfully.
   pull_request:
   schedule:
     # Weekly full scan, in addition to every push to main.
@@ -21,46 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Detect Rust changes
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    outputs:
-      rust: ${{ steps.filter.outputs.rust }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
-        with:
-          fetch-depth: 0
-
-      - name: Check changed paths
-        id: filter
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ -z "$BASE_SHA" ]]; then
-            echo "pull request base SHA is missing" >&2
-            exit 1
-          fi
-          # Include this workflow so CodeQL configuration changes exercise the
-          # Rust job.
-          if git diff --quiet "$BASE_SHA"...HEAD -- \
-            crates \
-            Cargo.toml \
-            Cargo.lock \
-            rust-toolchain.toml \
-            .cargo \
-            .github/workflows/codeql.yml; then
-            echo "rust=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-          fi
-
   # Actions and Python scans are cheap enough to keep on every pull request.
   analyze-other:
     name: Analyze (${{ matrix.language }})
@@ -89,12 +48,11 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
 
-  # Rust analysis is the slow part. It still runs on main and on the weekly
-  # schedule, and on pull requests that touch Rust code or its build inputs.
+  # Rust CodeQL findings are reported after merge, weekly, or on manual dispatch,
+  # not before merge. These runs use the full default suite.
   analyze-rust:
     name: Analyze (rust)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:

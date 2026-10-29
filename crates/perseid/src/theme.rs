@@ -18,6 +18,8 @@ use egui::{
 /// too thin for 10-12 pt UI text on a light background. Licensed under the
 /// SIL OFL; see `assets/Selawik-OFL.txt`.
 const UI_FONT: &[u8] = include_bytes!("../assets/Selawik-Regular.ttf");
+/// CJK fallback for request/response text and UI labels (SIL OFL).
+const CJK_FONT: &[u8] = include_bytes!("../assets/NotoSansCJKsc-Regular.otf");
 
 pub const CANVAS: Color32 = Color32::from_rgb(0xf8, 0xf6, 0xf2);
 pub const SURFACE: Color32 = Color32::from_rgb(0xff, 0xfe, 0xfc);
@@ -99,6 +101,17 @@ fn install_fonts(ctx: &egui::Context) {
         .entry(FontFamily::Proportional)
         .or_default()
         .insert(0, "perseid-ui".to_owned());
+    fonts.font_data.insert(
+        "perseid-cjk".to_owned(),
+        Arc::new(FontData::from_static(CJK_FONT)),
+    );
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .push("perseid-cjk".to_owned());
+    }
     ctx.set_fonts(fonts);
 }
 
@@ -157,4 +170,25 @@ fn visuals() -> egui::Visuals {
     widgets.open.corner_radius = CornerRadius::same(4);
 
     visuals
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+
+    #[test]
+    fn message_and_ui_fonts_cover_cjk_text() {
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        let mut output = ctx.run_pass(egui::RawInput::default(), |ctx| {
+            ctx.fonts_mut(|fonts| {
+                for font in [FontId::monospace(12.0), FontId::proportional(12.0)] {
+                    assert!(fonts.has_glyphs(&font, "中文漢字日本語한국어"));
+                    let galley = fonts.layout_no_wrap("中文".to_owned(), font, Color32::BLACK);
+                    assert!(!galley.is_empty());
+                }
+            });
+        });
+        output.textures_delta.clear();
+    }
 }

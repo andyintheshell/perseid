@@ -27,8 +27,8 @@ pub const DEFAULT_MAX_TUNNELS: usize = 64;
 /// Runtime policy shared by interception, scope enforcement, and rewriting.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProxySettings {
-    /// Hold requests for inspection and forwarding: plain HTTP, plus the
-    /// decrypted requests of intercepted CONNECT tunnels.
+    /// Hold HTTP requests and WebSocket messages in both directions, including
+    /// decrypted traffic inside intercepted CONNECT tunnels.
     pub intercept_requests: bool,
     /// Hold responses for inspection and forwarding: plain HTTP, plus the
     /// decrypted responses of intercepted CONNECT tunnels.
@@ -86,11 +86,14 @@ impl fmt::Debug for TlsConfig {
 /// Configuration for [`crate::proxy::Proxy::start`].
 #[derive(Clone)]
 pub struct ProxyConfig {
+    /// Optional shared cookie jar for observing proxied HTTP traffic.
+    pub cookie_jar: Option<super::cookies::SharedCookieJar>,
     /// Address to bind. Keep this on loopback unless you know what you're doing.
     pub listen: SocketAddr,
     /// Per-body capture limit in bytes.
     pub capture_limit: usize,
-    /// Maximum body bytes buffered for interception or body rewriting.
+    /// Maximum body bytes buffered for interception or body rewriting. Also
+    /// limits each intercepted or replayed WebSocket message.
     pub intercept_limit: usize,
     /// Interception, scope, and match/replace policy.
     pub settings: ProxySettings,
@@ -114,6 +117,7 @@ pub struct ProxyConfig {
 impl ProxyConfig {
     pub fn new(listen: SocketAddr) -> Self {
         Self {
+            cookie_jar: None,
             listen,
             ..Self::default()
         }
@@ -123,6 +127,7 @@ impl ProxyConfig {
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
+            cookie_jar: None,
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
             capture_limit: DEFAULT_CAPTURE_LIMIT,
             intercept_limit: DEFAULT_INTERCEPT_LIMIT,

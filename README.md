@@ -21,13 +21,14 @@ browser required.**
 [Feature comparison](docs/burp-parity.md) · [User guide](docs/workbench.md) ·
 [Contribute](CONTRIBUTING.md)
 
-[![Perseid HTTP history with side-by-side request and response views](docs/images/perseid-main.png)](docs/screenshots.md)
+[![Animated demo of Perseid capturing, replaying, fuzzing, decoding, and comparing HTTP traffic](docs/images/perseid-demo.webp)](docs/screenshots.md)
 
 > [!IMPORTANT]
 > **Public alpha: the core manual-testing workflows work today.** Perseid is
 > actively developed, not yet a feature-complete or drop-in Burp replacement.
-> Expect rough edges, and see the [capability matrix](docs/burp-parity.md) for
-> an honest account of what is implemented and what is still planned.
+> The [scoped manual-workflow parity estimate](docs/burp-parity.md#parity-estimate-786)
+> is **78.6%** as of 2026-10-29; see its methodology and capability matrix for
+> limitations and remaining gaps.
 
 ## Why Perseid?
 
@@ -46,8 +47,8 @@ browser required.**
 | Tool | Available today |
 | --- | --- |
 | **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; Burp-style target site map with a host/folder tree, display filters, and sortable Contents table; Pretty, Raw, and Hex message views; Copy as curl for complete captures; gzip, deflate, and Brotli decoding. |
-| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and project-scoped workbench state. Older saved history is stored but not yet pageable in the UI. |
-| **Search** | Search the currently loaded HTTP-history snapshot's request and response heads and decoded bodies, with case, regex, negative, in-scope, and dynamic-update options; highlighted Pretty/Raw/Hex results. Older saved rows are not searched yet. |
+| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and project-scoped workbench state. Browse stored HTTP history in pages or search all retained traffic. |
+| **Search** | Search every stored HTTP exchange and WebSocket message, plus current Repeater tabs and retained Intruder results, with case, regex, negative, in-scope, and dynamic-update options; background scans report progress and highlight Pretty/Raw/Hex matches. |
 | **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
 | **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
 | **WebSocket history** | Capture and inspect text and binary frames for `ws://` and decrypted `wss://` connections; no message editing or replay yet. |
@@ -71,9 +72,11 @@ The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
 macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
 are unsigned; the macOS app is ad-hoc signed but not notarized. See the
 [platform requirements](docs/getting-started.md#requirements) before installing.
-Perseid `0.2.0`, published on crates.io and GitHub Releases, includes the first
-project-persistence support. Install the current crate or download a prebuilt
-package to use projects.
+Perseid `0.3.0` is the latest published crate and GitHub release. Project
+persistence was introduced in `0.2.0`. Feature descriptions in this repository follow
+`main`, which can include changes not yet released. In `0.3.0`,
+M3 is complete for the release scope, with remaining issues moved to M4. See the
+[roadmap](docs/roadmap.md) and [parity matrix](docs/burp-parity.md) for current gaps.
 
 ### Install from crates.io
 
@@ -117,25 +120,36 @@ Perseid is already usable for hands-on HTTP security testing, but there are
 important boundaries:
 
 - **Project persistence is an initial slice.** `.perseid` files save captured
-  HTTP/WebSocket history and the full workbench state, but the UI only loads a
-  bounded newest-first history snapshot; older stored rows are not pageable or
-  searchable yet. Files are not encrypted, migrations and recent-projects are
-  not implemented, and temporary-project contents are lost on exit unless saved.
+  HTTP/WebSocket history and the full workbench state, but the history and
+  site-map tables load only a bounded newest-first snapshot. Search scans all
+  stored HTTP and WebSocket records in the background; **Browse stored history…**
+  pages through older HTTP rows and loads their details and notes. Files are not
+  encrypted, recent-projects are not implemented, and temporary contents are lost
+  on exit unless saved.
   Temporary projects bound captured records and retained body bytes with the
   configurable `--temporary-retention-*` limits (defaulting to `--history-*`)
   and evict the oldest records first. These are soft limits: each stream's
   newest record is kept even when it alone exceeds the byte budget, in-flight
   HTTP exchanges are kept until they complete, `0` disables a dimension, and
   headers, indexes, and database overhead are outside the byte budget. Saved
-  projects are not automatically pruned and can grow until the disk fills. New
+  projects default to unlimited retention; opt-in saved limits are available
+  under **Project storage…**, but do not cap physical file size. Schema-v1
+  projects migrate atomically to v2 on open; back up before upgrading if needed
+  by older versions. Delete a whole saved project via the filesystem after
+  switching away or quitting; deletion is not secure erasure. New
   Project and Open Project ask Save/Discard/Cancel before replacing a temporary
-  project with unsaved work.
+   project with unsaved work. Window close and Quit use the same prompt for
+   temporary captures or meaningful workbench edits. Save waits for Save As and
+   final workspace persistence; cancelled dialogs or failed saves keep the
+   session open. Discard explicitly allows exit; Cancel preserves the session.
+   Quit is blocked during project operations. Forced termination cannot prompt
+   or recover unsaved in-memory contents.
 - **Transient activity is not persisted.** Running attacks and sends, held
   interception decisions, pending network operations, and proxy lifecycle state
   are not restored. The local TLS CA certificate and private key are stored
   separately from project files.
-- **No WebSocket editing or replay yet.** WebSocket frames can be captured and
-  inspected, but not intercepted, modified, or resent.
+- **WebSocket replay requires a live connection.** Messages can be intercepted,
+  edited, and resent, but closed connections cannot be reopened from Repeater.
 - **Not an automated scanner.** There is no crawler, automated vulnerability
   scanner, or bundled browser. Intruder sends requests using user-supplied
   payloads; it does not discover vulnerabilities automatically.

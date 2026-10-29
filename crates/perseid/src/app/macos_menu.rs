@@ -114,7 +114,7 @@ impl PerseidApp {
     pub(super) fn handle_native_menu_action(&mut self, ctx: &egui::Context, event: &str) {
         match event {
             "about" => self.about_open = true,
-            "quit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            "quit" => self.request_quit(),
             "new" => self.request_project_switch(ProjectSwitch::New),
             "open" | "save_as" | "save_copy" => {
                 let kind = match event {
@@ -206,7 +206,7 @@ mod tests {
         });
         out.textures_delta.clear();
         let commands = &out.viewport_output[&egui::ViewportId::ROOT].commands;
-        assert!(commands.contains(&egui::ViewportCommand::Close));
+        assert!(!commands.contains(&egui::ViewportCommand::Close));
         assert!(commands.contains(&egui::ViewportCommand::Fullscreen(true)));
     }
 }

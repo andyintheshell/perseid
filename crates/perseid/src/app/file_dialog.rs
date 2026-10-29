@@ -1,9 +1,8 @@
 //! In-app file browser used by the project open/save dialogs.
 //!
 //! The browser deliberately stays inside egui instead of depending on a
-//! platform file picker. It lists folders and `.perseid` files, supports direct
-//! folder navigation, and keeps the project-file extension consistent with the
-//! rest of the project subsystem.
+//! platform file picker. It supports project files and general file imports,
+//! with direct folder navigation.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -70,6 +69,7 @@ struct FileEntry {
 #[derive(Clone, Debug)]
 pub(super) struct FileDialog {
     mode: FileDialogMode,
+    all_files: bool,
     directory: PathBuf,
     directory_input: String,
     file_name: String,
@@ -94,9 +94,24 @@ impl FileDialog {
         file_name: impl Into<String>,
         mode: FileDialogMode,
     ) -> Self {
+        Self::with_filter(directory, file_name, mode, false)
+    }
+
+    /// Open a browser that shows all regular files, for importing data.
+    pub(super) fn open_any_file(directory: PathBuf) -> Self {
+        Self::with_filter(directory, "", FileDialogMode::Open, true)
+    }
+
+    fn with_filter(
+        directory: PathBuf,
+        file_name: impl Into<String>,
+        mode: FileDialogMode,
+        all_files: bool,
+    ) -> Self {
         let home = home_directory();
         let mut dialog = Self {
             mode,
+            all_files,
             directory: PathBuf::new(),
             directory_input: String::new(),
             file_name: file_name.into(),
@@ -118,6 +133,17 @@ impl FileDialog {
 
     pub(super) fn file_name(&self) -> &str {
         &self.file_name
+    }
+
+    pub(super) fn chosen_path(&self) -> Result<PathBuf, String> {
+        let name = self.file_name.trim();
+        if name.is_empty() {
+            return Err("Enter a file name.".to_string());
+        }
+        if let Some(path) = &self.selected {
+            return Ok(path.clone());
+        }
+        Ok(self.directory.join(name))
     }
 
     #[cfg(test)]
@@ -159,7 +185,7 @@ impl FileDialog {
     }
 
     fn navigate_to(&mut self, directory: PathBuf) {
-        match read_entries(&directory, self.show_hidden) {
+        match read_entries(&directory, self.show_hidden, self.all_files) {
             Ok(entries) => {
                 self.directory = directory;
                 self.directory_input = self.directory.display().to_string();
@@ -190,7 +216,7 @@ impl FileDialog {
     }
 
     fn reload(&mut self) {
-        match read_entries(&self.directory, self.show_hidden) {
+        match read_entries(&self.directory, self.show_hidden, self.all_files) {
             Ok(entries) => {
                 self.entries = entries;
                 self.error = None;
@@ -449,10 +475,18 @@ impl FileDialog {
                 .add_sized(
                     [width, FIELD_HEIGHT],
                     TextEdit::singleline(&mut self.file_name)
-                        .hint_text("project.perseid")
+                        .hint_text(if self.all_files {
+                            "payloads.txt"
+                        } else {
+                            "project.perseid"
+                        })
                         .margin(egui::Margin::symmetric(6, 4)),
                 )
-                .on_hover_text("The .perseid extension is added when omitted");
+                .on_hover_text(if self.all_files {
+                    "Choose a file to load"
+                } else {
+                    "The .perseid extension is added when omitted"
+                });
             if response.changed() {
                 self.selected = None;
                 self.error = None;
@@ -470,11 +504,16 @@ impl FileDialog {
                 egui::Label::new(RichText::new("Files of Type:").color(theme::TEXT)),
             );
             let width = ui.available_width();
+            let file_type = if self.all_files {
+                "All files (*)"
+            } else {
+                "Perseid projects (*.perseid)"
+            };
             egui::ComboBox::from_id_salt("perseid.project.file_type")
-                .selected_text("Perseid projects (*.perseid)")
+                .selected_text(file_type)
                 .width(width)
                 .show_ui(ui, |ui| {
-                    let _ = ui.selectable_label(true, "Perseid projects (*.perseid)");
+                    let _ = ui.selectable_label(true, file_type);
                 });
         });
     }
@@ -498,8 +537,12 @@ impl FileDialog {
                         if self.entries.is_empty() {
                             ui.add_space(6.0);
                             ui.label(
-                                RichText::new("No project files in this folder.")
-                                    .color(theme::TEXT_MUTED),
+                                RichText::new(if self.all_files {
+                                    "No files in this folder."
+                                } else {
+                                    "No project files in this folder."
+                                })
+                                .color(theme::TEXT_MUTED),
                             );
                             return;
                         }
@@ -931,7 +974,11 @@ fn paint_file(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
     );
 }
 
-fn read_entries(directory: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
+fn read_entries(
+    directory: &Path,
+    show_hidden: bool,
+    all_files: bool,
+) -> Result<Vec<FileEntry>, String> {
     let read = fs::read_dir(directory)
         .map_err(|err| format!("Could not open {}: {err}", directory.display()))?;
     let mut entries = Vec::new();
@@ -956,7 +1003,7 @@ fn read_entries(directory: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, S
             }
         };
         let is_dir = metadata.is_dir();
-        if !is_dir && !is_project_file(&path) {
+        if !is_dir && !(metadata.is_file() && (all_files || is_project_file(&path))) {
             continue;
         }
         entries.push(FileEntry { name, path, is_dir });
@@ -1043,6 +1090,26 @@ mod tests {
         let dialog = FileDialog::new(root.path.clone(), "", FileDialogMode::Open);
 
         assert_eq!(names(&dialog), ["a-folder", "z-folder", "session.perseid"]);
+    }
+
+    #[test]
+    fn all_file_browser_lists_payloads_and_preserves_selected_paths() {
+        let root = TempDir::new("all-files");
+        fs::write(root.path.join("words.txt"), b"words").unwrap();
+        fs::write(root.path.join("wordlist"), b"words").unwrap();
+        fs::write(root.path.join(".secret"), b"hidden").unwrap();
+        fs::create_dir(root.path.join("folder")).unwrap();
+        let mut dialog = FileDialog::open_any_file(root.path.clone());
+        assert_eq!(names(&dialog), ["folder", "wordlist", "words.txt"]);
+        assert!(dialog.chosen_path().is_err());
+        dialog.choose_file(root.path.join("words.txt"));
+        assert_eq!(dialog.chosen_path().unwrap(), root.path.join("words.txt"));
+        dialog.set_file_name("wordlist");
+        dialog.selected = None;
+        assert_eq!(dialog.chosen_path().unwrap(), root.path.join("wordlist"));
+        dialog.show_hidden = true;
+        dialog.reload();
+        assert!(names(&dialog).contains(&".secret".to_string()));
     }
 
     #[test]

@@ -30,11 +30,23 @@ pub fn create_memory(meta: &ProjectMeta) -> Result<Database> {
 }
 
 pub fn open_file(path: &Path) -> Result<Database> {
+    // Fail before redb touches the file and include the selected path in the
+    // diagnostic. Never create a missing file as a side effect of Open.
+    let metadata = std::fs::metadata(path).map_err(|err| ProjectError::FileAccess {
+        path: path.to_path_buf(),
+        reason: format!("{err}; check the path and file permissions"),
+    })?;
+    if !metadata.is_file() || metadata.permissions().readonly() {
+        return Err(ProjectError::FileAccess { path: path.to_path_buf(), reason: "select a writable project file (copy read-only projects to a writable location first)".to_string() });
+    }
     let mut builder = Database::builder();
     builder.set_cache_size(DISK_CACHE_BYTES);
     let db = builder.open(path).map_err(|err| match err {
         DatabaseError::DatabaseAlreadyOpen => ProjectError::AlreadyOpen(path.to_path_buf()),
-        other => ProjectError::Database(other),
+        other => ProjectError::FileAccess {
+            path: path.to_path_buf(),
+            reason: format!("{other}; select a valid writable project or restore a backup"),
+        },
     })?;
     Ok(db)
 }
@@ -219,7 +231,8 @@ mod tests {
         std::fs::write(&file.path, b"this is not a redb database").expect("write junk");
 
         let error = open_file(&file.path).expect_err("junk must be rejected");
-        assert!(matches!(error, ProjectError::Database(_)));
+        assert!(matches!(error, ProjectError::FileAccess { .. }));
+        assert!(error.to_string().contains("restore a backup"));
     }
 
     #[test]

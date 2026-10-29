@@ -46,10 +46,10 @@ pub const DEFAULT_TEMPORARY_RETENTION_RECORDS: u64 = 2_000;
 /// Default retained-body cap for a temporary project.
 pub const DEFAULT_TEMPORARY_RETENTION_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Aggregate retention limits for the in-memory project.
+/// Aggregate logical retention limits for a project.
 ///
 /// A zero value disables that dimension. Limits are applied oldest-first after
-/// each capture transaction commits; persistent projects never evict records.
+/// each capture transaction. Saved projects default to unlimited retention.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetentionLimits {
     pub max_records: u64,
@@ -116,6 +116,8 @@ pub struct ProjectStatus {
     pub capture_loss_count: u64,
     pub event_loss_count: u64,
     pub retention_evictions: u64,
+    pub retention: RetentionLimits,
+    pub retained_body_bytes: u64,
     pub last_error: Option<String>,
 }
 
@@ -136,6 +138,15 @@ pub struct OpenedProject {
     pub ws_total: u64,
 }
 
+/// A validated, exclusively opened destination, not yet the active project.
+/// Keeping its handle avoids a validate/close/reopen race during UI switching.
+pub(crate) struct PreparedProject {
+    db: Arc<Database>,
+    meta: ProjectMeta,
+    opened: Box<OpenedProject>,
+    path: PathBuf,
+}
+
 /// A capture after project IDs have been assigned.
 #[derive(Clone, Debug)]
 pub struct CaptureOutcome {
@@ -143,6 +154,9 @@ pub struct CaptureOutcome {
 }
 
 enum Command {
+    WithWorkspace(Box<WorkspaceState>, Box<Command>),
+    InstallPrepared(Box<PreparedProject>, Sender<Result<OpenedProject>>),
+    SetRetention(RetentionLimits, Sender<Result<CommitReceipt>>),
     Capture(ProxyEvent),
     SetWorkspace(Box<WorkspaceState>),
     ClearHttp(Sender<Result<CommitReceipt>>),
@@ -160,6 +174,7 @@ enum Command {
         overwrite: bool,
         reply: Sender<Result<()>>,
     },
+    #[cfg(test)]
     Open {
         path: PathBuf,
         ui_limit: usize,
@@ -184,6 +199,51 @@ pub struct ProjectHandle {
     sender: SyncSender<Command>,
     shared: Arc<Shared>,
     thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// A read-only handle to the current project database.
+///
+/// It keeps the redb database alive independently of the writer thread, so a
+/// background search can read stored rows while captures continue to commit.
+/// Each query and scan batch uses its own short-lived read transaction rather
+/// than pinning one snapshot for the whole search.
+#[derive(Clone)]
+pub(crate) struct ProjectSnapshot {
+    db: Arc<Database>,
+}
+
+impl ProjectSnapshot {
+    pub(crate) fn pruned_ids(&self, http: Vec<u64>, ws: Vec<u64>) -> Result<(Vec<u64>, Vec<u64>)> {
+        queries::pruned_ids(&self.db, http, ws)
+    }
+    pub(crate) fn list_http(
+        &self,
+        before: Option<HistoryCursor>,
+        limit: usize,
+    ) -> Result<Vec<HttpRow>> {
+        queries::list_http(&self.db, before, limit)
+    }
+    pub(crate) fn get_http(&self, id: u64) -> Result<Option<HistoryItem>> {
+        queries::get_http(&self.db, id)
+    }
+
+    pub(crate) fn get_ws(&self, id: u64) -> Result<Option<WebSocketMessageItem>> {
+        queries::get_ws(&self.db, id)
+    }
+
+    pub(crate) fn scan_http(
+        &self,
+        visit: impl FnMut(HistoryItem, usize, usize) -> bool,
+    ) -> Result<()> {
+        queries::scan_http(&self.db, visit)
+    }
+
+    pub(crate) fn scan_ws(
+        &self,
+        visit: impl FnMut(WebSocketMessageItem, usize, usize) -> bool,
+    ) -> Result<()> {
+        queries::scan_ws(&self.db, visit)
+    }
 }
 
 impl ProjectHandle {
@@ -238,6 +298,11 @@ impl ProjectHandle {
 
     pub fn status(&self) -> ProjectStatus {
         self.shared.status()
+    }
+
+    /// Capture the current database for read-only background work.
+    pub(crate) fn database_snapshot(&self) -> Option<ProjectSnapshot> {
+        self.shared.database().map(|db| ProjectSnapshot { db })
     }
 
     /// Assign stable project IDs and enqueue the event for durable storage.
@@ -358,6 +423,7 @@ impl ProjectHandle {
     /// When `overwrite` is false an existing destination is refused. When it
     /// is true the complete replacement is written alongside the destination
     /// first, so a failed save leaves the previous file intact.
+    #[cfg(test)]
     pub fn save_as(&self, path: PathBuf, overwrite: bool) -> Receiver<Result<()>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(
@@ -371,7 +437,53 @@ impl ProjectHandle {
         rx
     }
 
+    /// Admit the required snapshot and save as one nonblocking command.
+    /// Success acknowledges both the workspace commit and the file operation.
+    pub fn save_workspace(
+        &self,
+        workspace: WorkspaceState,
+        path: PathBuf,
+        overwrite: bool,
+        copy: bool,
+    ) -> Receiver<Result<()>> {
+        let (tx, rx) = mpsc::channel();
+        let command = if copy {
+            Command::SaveCopy {
+                path,
+                overwrite,
+                reply: tx,
+            }
+        } else {
+            Command::SaveAs {
+                path,
+                overwrite,
+                reply: tx,
+            }
+        };
+        if let Err(error) = self.sender.try_send(Command::WithWorkspace(
+            Box::new(workspace),
+            Box::new(command),
+        )) {
+            reject_admission(error);
+        }
+        rx
+    }
+
+    /// Acknowledge the required workspace write before the durable flush.
+    /// A rejected admission or failed write cannot produce a successful receipt.
+    pub fn flush_workspace(&self, workspace: WorkspaceState) -> Receiver<Result<CommitReceipt>> {
+        let (tx, rx) = mpsc::channel();
+        if let Err(error) = self.sender.try_send(Command::WithWorkspace(
+            Box::new(workspace),
+            Box::new(Command::Flush { reply: tx }),
+        )) {
+            reject_admission(error);
+        }
+        rx
+    }
+
     /// Write a copy of the current project to `path` without switching to it.
+    #[cfg(test)]
     pub fn save_copy(&self, path: PathBuf, overwrite: bool) -> Receiver<Result<()>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(
@@ -385,6 +497,7 @@ impl ProjectHandle {
         rx
     }
 
+    #[cfg(test)]
     pub fn open(
         &self,
         path: PathBuf,
@@ -404,6 +517,50 @@ impl ProjectHandle {
         rx
     }
 
+    /// Validate on a separate worker while the current proxy and writer keep
+    /// running. The UI quiesces capture only after this succeeds.
+    pub(crate) fn prepare_open(
+        &self,
+        path: PathBuf,
+        ui_limit: usize,
+        ui_bytes: usize,
+    ) -> Receiver<Result<PreparedProject>> {
+        let (tx, rx) = mpsc::channel();
+        let reply = tx.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("perseid-project-open".into())
+            .spawn(move || {
+                let result = persistence::open_project(&path, ui_limit, ui_bytes).map(
+                    |(db, meta, opened)| PreparedProject {
+                        db,
+                        meta,
+                        opened: Box::new(opened),
+                        path,
+                    },
+                );
+                let _ = reply.send(result);
+            })
+        {
+            let _ = tx.send(Err(ProjectError::Io(error)));
+        }
+        rx
+    }
+
+    pub(crate) fn install_prepared(
+        &self,
+        prepared: PreparedProject,
+        workspace: WorkspaceState,
+    ) -> Receiver<Result<OpenedProject>> {
+        let (tx, rx) = mpsc::channel();
+        if let Err(error) = self.sender.try_send(Command::WithWorkspace(
+            Box::new(workspace),
+            Box::new(Command::InstallPrepared(Box::new(prepared), tx)),
+        )) {
+            reject_admission(error);
+        }
+        rx
+    }
+
     pub fn new_project(&self, ui_limit: usize, ui_bytes: usize) -> Receiver<Result<OpenedProject>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(
@@ -417,6 +574,7 @@ impl ProjectHandle {
         rx
     }
 
+    #[cfg(test)]
     pub fn flush(&self) -> Receiver<Result<CommitReceipt>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(Command::Flush { reply: tx }, &rx);
@@ -432,6 +590,12 @@ impl ProjectHandle {
     pub fn clear_ws(&self) -> Receiver<Result<CommitReceipt>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(Command::ClearWs(tx), &rx);
+        rx
+    }
+
+    pub fn set_retention(&self, limits: RetentionLimits) -> Receiver<Result<CommitReceipt>> {
+        let (tx, rx) = mpsc::channel();
+        self.send_control(Command::SetRetention(limits, tx), &rx);
         rx
     }
 
@@ -503,6 +667,15 @@ impl ProjectHandle {
 impl Drop for ProjectHandle {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+fn reject_admission(error: TrySendError<Command>) {
+    match error {
+        TrySendError::Full(command) => writer::reject(command, ProjectError::QueueFull),
+        TrySendError::Disconnected(command) => {
+            writer::reject(command, ProjectError::ServiceUnavailable)
+        }
     }
 }
 

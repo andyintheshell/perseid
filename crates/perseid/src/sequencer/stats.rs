@@ -6,7 +6,7 @@
 //! approximation it uses so the result screen can be honest about the limits
 //! of a small sample.
 
-use std::f64::consts::{FRAC_1_SQRT_2, LN_2, PI};
+use std::f64::consts::{EULER_GAMMA, FRAC_1_SQRT_2, LN_2, PI};
 use std::io::Write;
 
 /// Standard normal cumulative distribution.
@@ -238,7 +238,7 @@ pub(super) fn longest_run_p_value(longest: usize, n: usize) -> Option<f64> {
     if longest == 0 {
         return Some(0.0);
     }
-    let mean = (n as f64).log2() + 0.577_215_664_901_532_9 / LN_2 - 0.5;
+    let mean = (n as f64).log2() + EULER_GAMMA / LN_2 - 0.5;
     let variance = PI * PI / (6.0 * LN_2 * LN_2) + 1.0 / 12.0;
     let z = (longest as f64 - mean) / variance.sqrt();
     Some((2.0 * (1.0 - normal_cdf(z.abs()))).clamp(0.0, 1.0))
@@ -254,7 +254,7 @@ pub(super) fn poker_test(bits: &[bool]) -> Option<(f64, usize)> {
         return None;
     }
     let mut counts = [0usize; 16];
-    for group in bits.chunks_exact(4) {
+    for group in bits.as_chunks::<4>().0 {
         let mut value = 0usize;
         for bit in group {
             value = (value << 1) | usize::from(*bit);
@@ -418,6 +418,9 @@ mod tests {
         let (p, groups) = poker_test(&bits).unwrap();
         assert_eq!(groups, 1_000);
         assert!(p > 0.001, "poker p was {p}");
+        let mut with_remainder = bits.clone();
+        with_remainder.extend([true, false, true]);
+        assert_eq!(poker_test(&with_remainder), Some((p, groups)));
 
         let bytes = vec![0u8; 4_000];
         let (p, count) = byte_frequency_test(&bytes).unwrap();
