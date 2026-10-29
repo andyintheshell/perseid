@@ -18,13 +18,40 @@ implementation, or compatibility with Burp extensions.
 **Status key:** ✅ Working · 🟡 Partial · ➕ Beyond CE · 🛠 Planned ·
 ↔ Deliberate difference · ⛔ Non-goal.
 
+## Parity estimate: 78.6%
+
+As of **2026-10-29**, on main at `10b08c9`, the estimated parity for the
+manual-workflow scope below is **78.6%**. This is a documentation-based
+assessment of the matrix, not a new hands-on audit or a measurement of all Burp
+CE features, reliability, or product maturity.
+
+The calculation gives each of the 14 CE-scope matrix rows equal weight: Working
+earns 1 point, Partial earns 0.5, and Planned or missing earns 0. The eight
+Working rows are HTTP(S) proxy, intercept and edit, message inspection, scope
+and rewrite rules, WebSocket editing and replay, Comparer, Intruder, and memory
+display. The six Partial rows are target site map, HTTP history, WebSocket
+history, Repeater, Decoder, and Sequencer. Thus **(8 + 6 × 0.5) / 14 × 100 =
+78.6%** (rounded to one decimal place). Search and project persistence are
+excluded as Perseid extras; bundled browser and BApp compatibility are deliberate
+differences outside this project's scoped target. Scanner, crawler, and OAST are
+also excluded. These exclusions mean the number must not be read as overall
+Burp CE product parity.
+
+Equal weighting and half credit are judgment calls, not measurements of the
+fraction of each capability implemented. In particular, a Working row denotes a
+usable workflow, not every Burp option: Intruder lacks payload processing, and
+WebSocket replay cannot reopen closed connections. The biggest partial gaps
+include bounded history/site-map views, session-only WebSocket Repeater tabs,
+Decoder hex-selection behavior, and approximate Sequencer analysis. See the
+matrix for details. Recalculate this snapshot when matrix statuses or scope change.
+
 ## Status at a glance
 
 | ✅ Working | 🟡 Partial | 🛠 Planned |
 | --- | --- | --- |
-| HTTP/HTTPS proxy and intercept | Bounded history view and site map | Paging through all saved history |
+| HTTP/HTTPS proxy and intercept | Bounded history view and site map | Paging the live history/site-map tables across all saved history |
 | Scope and match/replace | Repeater, Decoder, and Sequencer | — |
-| Comparer and Intruder | WebSocket capture/history; project persistence | Migrations |
+| Comparer, Intruder, and WebSocket editing/replay | WebSocket history; project persistence | Further project workflow polish |
 | Memory display | — | — |
 
 **➕ Perseid extra:** search across stored HTTP/WebSocket history and current
