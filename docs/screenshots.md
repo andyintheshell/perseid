@@ -145,21 +145,24 @@ Allocator heap in use and peak, not total process RSS. See the
 
 ![Memory window with current, peak, and rolling history](images/perseid-memory.png)
 
-## Recording the demo GIF
+## Recording the demo animation
 
-Run **Actions > Record demo GIF > Run workflow**, selecting the branch to
+Run **Actions > Record demo animation > Run workflow**, selecting the branch to
 record. The workflow builds Perseid on a Linux runner, starts a loopback-only
 synthetic target, and records a real desktop session under Xvfb. The
 [storyboard](demo-gif-script.md) is aimed at first-time users: it follows one
 captured export through Repeater, Intruder, Decoder, and Comparer, using the
 synthetic target's base64 responses. The pointer travels between controls
-instead of jumping. The GIF is downscaled to 1280×820 at 12 fps, quantized, and
-optimized with `gifsicle`; the workflow keeps it under one minute and 2.5 MB so
-it stays practical for the README. Before publishing, the workflow verifies that
-the edited Repeater and Intruder requests reached the local target.
+instead of jumping. The capture is downscaled to 1280×820 at 12 fps and encoded
+as an animated WebP with `img2webp`; the workflow keeps it under two minutes and
+2.5 MB so it stays practical for the README. Before publishing, the workflow
+verifies that the edited Repeater and Intruder requests reached the local
+target.
 
-Download `perseid-demo-gif` from the workflow run and review it before using it.
-The artifact expires after 30 days; copy an approved GIF into the repository if
-it will be embedded in the README. Failed runs upload diagnostic logs and the
-partial recording for seven days. All traffic and values in this workflow are
-synthetic; the workflow does not use local files or data from your machine.
+Download `perseid-demo-webp` from the workflow run and review it before using
+it. The artifact expires after 30 days; copy an approved WebP into the
+repository if it will be embedded in the README. Failed runs upload diagnostic
+logs and the partial recording for seven days. All traffic and values in this
+workflow are synthetic; the workflow does not use local files or data from your
+machine. Animated WebP is supported by current Chrome, Firefox, Safari, and
+Edge, and renders in GitHub Markdown.

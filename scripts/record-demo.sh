@@ -7,10 +7,12 @@ if [[ $# -ne 1 ]]; then
     exit 2
 fi
 : "${DISPLAY:?Run inside an X11 display (for example xvfb-run)}"
-command -v gifsicle >/dev/null || {
-    echo 'gifsicle is required to optimize the demo GIF.' >&2
-    exit 1
-}
+for tool in img2webp webpinfo; do
+    command -v "$tool" >/dev/null || {
+        echo "$tool is required to encode or inspect the demo WebP." >&2
+        exit 1
+    }
+done
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$(mkdir -p "$1" && cd "$1" && pwd)"
 work="$(mktemp -d)"
@@ -244,8 +246,10 @@ sleep 0.8
 click_at "$comparer_tab_x" "$tab_y" 1
 sleep 1.2
 # Both responses are already selected in table 2; select the first in table 1.
-click_at 200 242 1
-sleep 0.5
+# The first row sits just below the table header (y=182 in the 1600x1024
+# capture), not in the empty space below the second row.
+click_at 200 182 1
+sleep 0.8
 click_at 1530 888 1
 sleep 1.5
 move_cursor 800 500
@@ -285,32 +289,34 @@ kill -INT "$record_pid"
 wait "$record_pid" || true
 record_pid=''
 [[ -s "$out/demo-recording.mp4" ]] || { echo 'Recording is empty.' >&2; exit 1; }
-# Downscale and reduce the frame rate before quantizing. The README only needs
-# enough fidelity to follow the pointer and read the main controls; the lossy
-# pass then removes dithering noise that GIF compression handles poorly.
+# Encode an animated WebP straight from the recording. GIF quantization was
+# the main source of size and dithering; WebP keeps text sharp at roughly half
+# the bytes. The intermediate JPEG frames are high quality and let img2webp
+# drop unchanged regions while preserving the pointer and UI text.
+mkdir -p "$work/frames"
 ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" \
-    -vf 'fps=12,scale=1280:820:flags=lanczos,palettegen=max_colors=128:stats_mode=diff' \
-    "$work/palette.png"
-ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" -i "$work/palette.png" \
-    -filter_complex '[0:v]fps=12,scale=1280:820:flags=lanczos[video];[video][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle' \
-    -loop 0 "$work/demo-unoptimized.gif"
-gifsicle --optimize=3 --lossy=80 "$work/demo-unoptimized.gif" -o "$out/perseid-demo.gif"
-[[ -s "$out/perseid-demo.gif" ]] || { echo 'GIF is empty.' >&2; exit 1; }
-dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$out/perseid-demo.gif")"
+    -vf 'fps=12,scale=1280:820:flags=lanczos' -q:v 2 \
+    "$work/frames/frame-%05d.jpg"
+img2webp -loop 0 -mixed -d 83 -q 65 -m 6 -sharp_yuv \
+    -o "$out/perseid-demo.webp" "$work/frames"/frame-*.jpg
+[[ -s "$out/perseid-demo.webp" ]] || { echo 'WebP is empty.' >&2; exit 1; }
+dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$out/perseid-demo.webp")"
 if [[ "$dimensions" != '1280,820' ]]; then
-    echo "Demo GIF must be 1280x820 (got ${dimensions:-unknown})." >&2
+    echo "Demo WebP must be 1280x820 (got ${dimensions:-unknown})." >&2
     exit 1
 fi
-echo "Demo GIF resolution: ${dimensions/,/x}"
-duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$out/perseid-demo.gif")"
-if ! awk -v duration="$duration" 'BEGIN { exit !(duration > 0 && duration < 60) }'; then
-    echo "Demo GIF must be shorter than 60 seconds (got ${duration:-unknown}s)." >&2
+echo "Demo WebP resolution: ${dimensions/,/x}"
+duration_ms="$(webpinfo -summary "$out/perseid-demo.webp" | awk '/Duration:/ { total += $2 } END { print total + 0 }')"
+if ! awk -v duration_ms="$duration_ms" 'BEGIN { exit !(duration_ms > 0 && duration_ms < 120000) }'; then
+    duration="$(awk -v ms="$duration_ms" 'BEGIN { printf "%.3f", ms / 1000 }')"
+    echo "Demo WebP must be shorter than 120 seconds (got ${duration:-unknown}s)." >&2
     exit 1
 fi
-size="$(wc -c < "$out/perseid-demo.gif")"
+duration="$(awk -v ms="$duration_ms" 'BEGIN { printf "%.3f", ms / 1000 }')"
+size="$(wc -c < "$out/perseid-demo.webp")"
 if ((size > 2500000)); then
-    echo "Demo GIF must stay under 2.5 MB for the README (got ${size} bytes)." >&2
+    echo "Demo WebP must stay under 2.5 MB for the README (got ${size} bytes)." >&2
     exit 1
 fi
-echo "Demo GIF duration: ${duration}s"
-echo "Demo GIF size: ${size} bytes"
+echo "Demo WebP duration: ${duration}s"
+echo "Demo WebP size: ${size} bytes"
