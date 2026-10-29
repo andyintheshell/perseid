@@ -564,13 +564,23 @@ reinterpreted automatically. No match produces a notice rather than an empty
 result panel.
 
 <details>
-<summary>Supported hashes (31)</summary>
+<summary>Supported hashes (46)</summary>
 
 BLAKE2B-160/256/384/512, BLAKE2S-128/160/224/256, BLAKE3,
 Keccak-224/256/384/512, MD2, MD4, MD5, RIPEMD-160, SHA-1,
 SHA-224/256/384/512, SHA-512/224, SHA-512/256, SHA3-224/256/384/512,
-SM3, Tiger, and Whirlpool. Output is lowercase hexadecimal. SKEIN, TupleHash,
-and provider-specific OID aliases are not implemented.
+SM3, Tiger, Whirlpool, SKEIN-256 (128/160/224/256-bit output), SKEIN-512
+(128/160/224/256/384/512-bit output), SKEIN-1024 (384/512/1024-bit output),
+TupleHash128-256 and TupleHash256-512. Output is lowercase hexadecimal.
+TupleHash treats the selected bytes as one tuple element (including an empty
+element), uses an empty customization string, and outputs 256 or 512 bits,
+respectively; arbitrary tuples and output lengths are not exposed. The hash menu
+also lists MD, SHA, BLAKE2, RIPEMD-160, SM3 and Whirlpool OID aliases alongside their canonical
+names; selecting an alias uses and saves the canonical algorithm.
+
+Skein and cSHAKE use RustCrypto's maintained `skein` and `cshake` crates,
+licensed MIT OR Apache-2.0. TupleHash framing follows NIST SP 800-185 on top of
+cSHAKE; no older standalone TupleHash dependency is required.
 
 </details>
 

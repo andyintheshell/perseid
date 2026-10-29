@@ -861,6 +861,21 @@ pub enum DecoderHashRecord {
     Tiger,
     Whirlpool,
     Ripemd160,
+    Skein256_128,
+    Skein256_160,
+    Skein256_224,
+    Skein256_256,
+    Skein512_128,
+    Skein512_160,
+    Skein512_224,
+    Skein512_256,
+    Skein512_384,
+    Skein512_512,
+    Skein1024_384,
+    Skein1024_512,
+    Skein1024_1024,
+    TupleHash128,
+    TupleHash256,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

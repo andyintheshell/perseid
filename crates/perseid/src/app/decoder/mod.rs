@@ -83,6 +83,21 @@ fn hash_record(hash: engine::HashAlgorithm) -> DecoderHashRecord {
         engine::HashAlgorithm::Tiger => DecoderHashRecord::Tiger,
         engine::HashAlgorithm::Whirlpool => DecoderHashRecord::Whirlpool,
         engine::HashAlgorithm::Ripemd160 => DecoderHashRecord::Ripemd160,
+        engine::HashAlgorithm::Skein256_128 => DecoderHashRecord::Skein256_128,
+        engine::HashAlgorithm::Skein256_160 => DecoderHashRecord::Skein256_160,
+        engine::HashAlgorithm::Skein256_224 => DecoderHashRecord::Skein256_224,
+        engine::HashAlgorithm::Skein256_256 => DecoderHashRecord::Skein256_256,
+        engine::HashAlgorithm::Skein512_128 => DecoderHashRecord::Skein512_128,
+        engine::HashAlgorithm::Skein512_160 => DecoderHashRecord::Skein512_160,
+        engine::HashAlgorithm::Skein512_224 => DecoderHashRecord::Skein512_224,
+        engine::HashAlgorithm::Skein512_256 => DecoderHashRecord::Skein512_256,
+        engine::HashAlgorithm::Skein512_384 => DecoderHashRecord::Skein512_384,
+        engine::HashAlgorithm::Skein512_512 => DecoderHashRecord::Skein512_512,
+        engine::HashAlgorithm::Skein1024_384 => DecoderHashRecord::Skein1024_384,
+        engine::HashAlgorithm::Skein1024_512 => DecoderHashRecord::Skein1024_512,
+        engine::HashAlgorithm::Skein1024_1024 => DecoderHashRecord::Skein1024_1024,
+        engine::HashAlgorithm::TupleHash128 => DecoderHashRecord::TupleHash128,
+        engine::HashAlgorithm::TupleHash256 => DecoderHashRecord::TupleHash256,
     }
 }
 
@@ -119,6 +134,21 @@ fn hash_from_record(hash: DecoderHashRecord) -> engine::HashAlgorithm {
         DecoderHashRecord::Tiger => engine::HashAlgorithm::Tiger,
         DecoderHashRecord::Whirlpool => engine::HashAlgorithm::Whirlpool,
         DecoderHashRecord::Ripemd160 => engine::HashAlgorithm::Ripemd160,
+        DecoderHashRecord::Skein256_128 => engine::HashAlgorithm::Skein256_128,
+        DecoderHashRecord::Skein256_160 => engine::HashAlgorithm::Skein256_160,
+        DecoderHashRecord::Skein256_224 => engine::HashAlgorithm::Skein256_224,
+        DecoderHashRecord::Skein256_256 => engine::HashAlgorithm::Skein256_256,
+        DecoderHashRecord::Skein512_128 => engine::HashAlgorithm::Skein512_128,
+        DecoderHashRecord::Skein512_160 => engine::HashAlgorithm::Skein512_160,
+        DecoderHashRecord::Skein512_224 => engine::HashAlgorithm::Skein512_224,
+        DecoderHashRecord::Skein512_256 => engine::HashAlgorithm::Skein512_256,
+        DecoderHashRecord::Skein512_384 => engine::HashAlgorithm::Skein512_384,
+        DecoderHashRecord::Skein512_512 => engine::HashAlgorithm::Skein512_512,
+        DecoderHashRecord::Skein1024_384 => engine::HashAlgorithm::Skein1024_384,
+        DecoderHashRecord::Skein1024_512 => engine::HashAlgorithm::Skein1024_512,
+        DecoderHashRecord::Skein1024_1024 => engine::HashAlgorithm::Skein1024_1024,
+        DecoderHashRecord::TupleHash128 => engine::HashAlgorithm::TupleHash128,
+        DecoderHashRecord::TupleHash256 => engine::HashAlgorithm::TupleHash256,
     }
 }
 
@@ -252,5 +282,23 @@ impl PerseidApp {
         }
         self.decoder.next_id = next_id;
         self.decoder.scroll_to_end = false;
+    }
+}
+
+#[cfg(test)]
+mod hash_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn all_hashes_round_trip_through_project_json() {
+        for hash in engine::HashAlgorithm::ALL {
+            let json = serde_json::to_string(&hash_record(hash)).unwrap();
+            let record: DecoderHashRecord = serde_json::from_str(&json).unwrap();
+            assert_eq!(hash_from_record(record), hash);
+        }
+        for &(oid, hash) in engine::HashAlgorithm::OID_ALIASES {
+            assert!(!oid.is_empty());
+            assert_eq!(hash_from_record(hash_record(hash)), hash);
+        }
     }
 }

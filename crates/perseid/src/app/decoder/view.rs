@@ -480,6 +480,17 @@ fn hash_combo(
                             ui.close();
                         }
                     }
+                    ui.separator();
+                    ui.label("OID aliases");
+                    for &(oid, algorithm) in engine::HashAlgorithm::OID_ALIASES {
+                        if ui
+                            .selectable_label(false, format!("{oid} ({})", algorithm.label()))
+                            .clicked()
+                        {
+                            choice = Some(algorithm);
+                            ui.close();
+                        }
+                    }
                 });
         });
     choice
