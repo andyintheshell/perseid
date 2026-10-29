@@ -45,6 +45,7 @@ impl PerseidApp {
                 ui.add_space(2.0);
                 ui.separator();
                 ui.add_space(2.0);
+                let show_invisibles = super::super::super::message_view::invisible_toggle(ui, true);
 
                 egui::Frame::NONE
                     .fill(Color32::WHITE)
@@ -67,6 +68,14 @@ impl PerseidApp {
                             .hint_text("Paste or edit a raw HTTP request, then wrap values in $$")
                             .layouter(&mut layouter)
                             .show(ui);
+                        if show_invisibles {
+                            super::super::super::message_view::paint_invisibles(
+                                ui,
+                                &output.galley,
+                                output.galley_pos,
+                                &font,
+                            );
+                        }
                         if output.response.has_focus()
                             && let Some(range) = output.state.cursor.char_range()
                         {
