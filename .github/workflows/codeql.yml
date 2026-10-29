@@ -5,8 +5,7 @@ on:
     branches: [main]
   # Do not path-filter pull requests at the workflow level. A workflow-level
   # skip leaves its checks pending, which blocks a PR when that workflow is
-  # required. Detect relevant changes in a job instead; a skipped job completes
-  # successfully.
+  # required. Skip the Rust job instead; a skipped job completes successfully.
   pull_request:
   schedule:
     # Weekly full scan, in addition to every push to main.
@@ -21,46 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Detect Rust changes
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    outputs:
-      rust: ${{ steps.filter.outputs.rust }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
-        with:
-          fetch-depth: 0
-
-      - name: Check changed paths
-        id: filter
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ -z "$BASE_SHA" ]]; then
-            echo "pull request base SHA is missing" >&2
-            exit 1
-          fi
-          # Include this workflow so CodeQL configuration changes exercise the
-          # Rust job.
-          if git diff --quiet "$BASE_SHA"...HEAD -- \
-            crates \
-            Cargo.toml \
-            Cargo.lock \
-            rust-toolchain.toml \
-            .cargo \
-            .github/workflows/codeql.yml; then
-            echo "rust=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-          fi
-
   # Actions and Python scans are cheap enough to keep on every pull request.
   analyze-other:
     name: Analyze (${{ matrix.language }})
@@ -89,16 +48,11 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
 
-  # Pull requests run a lighter suite over the whole Rust codebase. The full
-  # default suite runs after every push to main, weekly, and on manual dispatch.
-  # The PR suite excludes path-problem queries (including injection and sensitive
-  # data-flow checks); those findings will only be reported by the full scans.
-  # Expensive diagnostic/summary queries are also excluded where CodeQL permits;
-  # full scans retain diagnostics used to assess extraction quality.
+  # Rust CodeQL findings are reported after merge, weekly, or on manual dispatch,
+  # not before merge. These runs use the full default suite.
   analyze-rust:
     name: Analyze (rust)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
@@ -112,21 +66,7 @@ jobs:
       # CodeQL's Rust extractor requires rustup and cargo on the runner.
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
-      - name: Initialize CodeQL (pull request, reduced)
-        if: github.event_name == 'pull_request'
-        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        with:
-          languages: rust
-          build-mode: none
-          config: |
-            query-filters:
-              - exclude:
-                  kind: path-problem
-              - exclude:
-                  id: /rust\/(diagnostics|diagnostic|summary|telemetry)\//
-
-      - name: Initialize CodeQL (full)
-        if: github.event_name != 'pull_request'
+      - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: rust
