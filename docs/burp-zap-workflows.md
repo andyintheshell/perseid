@@ -3,7 +3,7 @@
 [Documentation](README.md) · [Roadmap](roadmap.md) · [Capability matrix](burp-parity.md) · [Workbench guide](workbench.md)
 
 > **Reading this page:** the implementation snapshot and roadmap implications
-> were last updated **29 October 2026** for `0.3.0` release preparation. The Burp and ZAP research is
+> were last updated **29 October 2026** for the `0.3.0` release. The Burp and ZAP research is
 > qualitative, not a representative usage survey; vendor sources were checked **20 October
 > 2026**. For current status, use the [capability matrix](burp-parity.md) and
 > [roadmap](roadmap.md).

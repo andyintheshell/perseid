@@ -37,9 +37,9 @@ cargo install perseid --locked
 perseid
 ```
 
-Perseid `0.2.1` is published on crates.io and includes persistent projects.
+Perseid `0.3.0` is published on crates.io and includes persistent projects.
 Prebuilt packages are available from GitHub Releases. A source checkout of
-This branch prepares `0.3.0`; it is not yet a published release.
+The `main` branch may include changes newer than the published release.
 
 ### Download a prebuilt binary
 

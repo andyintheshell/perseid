@@ -7,8 +7,8 @@ Perseid is an **early prototype** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
-The latest published release, Perseid `0.2.1`, includes the local
-project-persistence support introduced in `0.2.0`. This branch prepares `0.3.0`,
+The latest published release, Perseid `0.3.0`, includes the local
+project-persistence support introduced in `0.2.0`,
 with M3 complete and remaining issues moved to M4; install
 the published crate or a prebuilt release, or build from source for current
 development.

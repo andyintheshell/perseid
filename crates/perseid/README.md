@@ -26,8 +26,8 @@ browser.
 > See the [capability matrix](https://github.com/andyintheshell/perseid/blob/main/docs/burp-parity.md)
 > for current coverage and limitations.
 
-> **Release:** `0.2.1` is published on crates.io and includes project
-> persistence. This branch prepares `0.3.0` (not yet published), completing the
+> **Release:** `0.3.0` is published on crates.io and includes project
+> persistence, completing the
 > M3 release scope with remaining issues moved to M4. This README may describe
 > features newer than the published release.
 

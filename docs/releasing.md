@@ -5,9 +5,9 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version status:** `v0.2.1` is the latest published crate and GitHub
+**Current version status:** `v0.3.0` is the latest published crate and GitHub
 release; project persistence was introduced in `v0.2.0`. The workspace
-is `0.3.0` for release preparation, not yet a published release. M3 is complete
+version is `0.3.0`. M3 is complete
 for this release scope; remaining M3 issues moved to M4 (see the [roadmap](roadmap.md)).
 
 ## Current release formats
@@ -27,7 +27,7 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
 
-### 0.3.0 notes to carry into the draft
+### 0.3.0 release highlights
 
 - M3 daily-workbench release scope is complete; six remaining issues moved to
   M4, not silently marked implemented. The parity estimate remains 78.6%.

@@ -20,7 +20,7 @@ implementation, or compatibility with Burp extensions.
 
 ## Parity estimate: 78.6%
 
-As of **2026-10-29**, for the `0.3.0` release preparation based on main at
+As of **2026-10-29**, for the `0.3.0` release based on main at
 `d323306`, the estimated parity for the
 manual-workflow scope below is **78.6%**. This is a documentation-based
 assessment of the matrix, not a new hands-on audit or a measurement of all Burp

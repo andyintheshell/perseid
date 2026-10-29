@@ -8,7 +8,7 @@ toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
 definition of done, and deliberate deviations.
 
 **Current focus: Milestone 4, protocols and testing tools.** Milestone 3 is
-complete for the `0.3.0` release preparation; its remaining issues have moved
+complete in the `0.3.0` release; its remaining issues have moved
 to M4, not been implemented or dropped. Proxy core and HTTPS
 milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local

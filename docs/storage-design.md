@@ -11,7 +11,7 @@ shipped in `0.2.0`. See §0 for implementation status and deviations.<br>
 
 ## 0. Review and implementation status
 
-**Reviewed:** 2026-10-29, for `0.3.0` release preparation (schema v2).
+**Reviewed:** 2026-10-29, for the `0.3.0` release (schema v2).
 
 **Verdict:** persistent HTTP paging/details, saved-project logical retention, and atomic v1→v2 migration are implemented. Physical file-size caps and automatic compaction are not. The document was written against the `v0.1.0` release tag, while persistence first shipped in `0.2.0`; §3 is a historical map, not the current source layout. The API snippets in §5 and §10 describe the proposed shape and are not compilable code.
 
@@ -779,7 +779,7 @@ Capture write throughput, p50/p95/p99 transaction/commit time, UI frame-time whi
 - [WebSocket history](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/websocket_history.rs).
 - [Workbench app](https://github.com/andyintheshell/perseid/blob/main/crates/perseid/src/app.rs) — current state ownership and capture drain.
 
-The links above point to current `main` for readable source paths; this snapshot prepares workspace `0.3.0`. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for implementation status and verify paths against current source before implementing follow-up work.
+The links above point to current `main` for readable source paths; this snapshot describes workspace `0.3.0`. The integration map and schema proposal were written against the pinned `v0.1.0` baseline; use §0 for implementation status and verify paths against current source before implementing follow-up work.
 
 ### redb
 
