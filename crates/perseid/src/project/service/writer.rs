@@ -34,6 +34,7 @@ pub(super) fn run_writer(
     let mut db = initial_db;
     let mut pending: VecDeque<Command> = VecDeque::new();
     let mut last_workspace: Option<Vec<u8>> = None;
+    let mut workspace_error: Option<String> = None;
     let mut retention = match initial_mode {
         ProjectMode::Temporary => Some(temporary_retention),
         ProjectMode::Persistent { .. } => Some(RetentionLimits::new(
@@ -49,7 +50,36 @@ pub(super) fn run_writer(
                 Err(_) => break,
             },
         };
+        if matches!(
+            command,
+            Command::SaveAs { .. } | Command::SaveCopy { .. } | Command::Flush { .. }
+        ) && let Some(error) = &workspace_error
+        {
+            reject(
+                command,
+                super::ProjectError::WorkspacePersistence(error.clone()),
+            );
+            continue;
+        }
         match command {
+            Command::WithWorkspace(workspace, command) => {
+                let result = codec::encode_large(&workspace).and_then(|bytes| {
+                    write_workspace(&db, &bytes)?;
+                    last_workspace = Some(bytes);
+                    Ok(())
+                });
+                match result {
+                    Ok(()) => {
+                        workspace_error = None;
+                        pending.push_front(*command);
+                    }
+                    Err(error) => {
+                        workspace_error = Some(error.to_string());
+                        shared.set_status_error(error.to_string());
+                        reject(*command, error);
+                    }
+                }
+            }
             Command::InstallPrepared(prepared, reply) => {
                 db = prepared.db;
                 meta = prepared.meta;
@@ -66,6 +96,7 @@ pub(super) fn run_writer(
                 );
                 shared.clear_mappings();
                 last_workspace = None;
+                workspace_error = None;
                 let _ = reply.send(Ok(*prepared.opened));
             }
             Command::SetRetention(limits, reply) => {
@@ -108,12 +139,23 @@ pub(super) fn run_writer(
                 Ok(bytes) => {
                     if last_workspace.as_deref() != Some(bytes.as_slice()) {
                         match write_workspace(&db, &bytes) {
-                            Ok(()) => last_workspace = Some(bytes),
-                            Err(err) => shared.set_status_error(err.to_string()),
+                            Ok(()) => {
+                                last_workspace = Some(bytes);
+                                workspace_error = None;
+                            }
+                            Err(err) => {
+                                workspace_error = Some(err.to_string());
+                                shared.set_status_error(err.to_string());
+                            }
                         }
+                    } else {
+                        workspace_error = None;
                     }
                 }
-                Err(err) => shared.set_status_error(err.to_string()),
+                Err(err) => {
+                    workspace_error = Some(err.to_string());
+                    shared.set_status_error(err.to_string());
+                }
             },
             Command::ClearHttp(reply) => {
                 absorb_pending_loss(&shared, &mut meta);
@@ -281,5 +323,21 @@ fn absorb_pending_loss(shared: &Shared, meta: &mut ProjectMeta) {
     let pending = shared.pending_loss.swap(0, Ordering::SeqCst);
     if pending > 0 {
         meta.capture_loss_count = meta.capture_loss_count.saturating_add(pending);
+    }
+}
+
+pub(super) fn reject(command: Command, error: super::ProjectError) {
+    match command {
+        Command::WithWorkspace(_, command) => reject(*command, error),
+        Command::SaveAs { reply, .. } | Command::SaveCopy { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        Command::Flush { reply } => {
+            let _ = reply.send(Err(error));
+        }
+        Command::InstallPrepared(_, reply) => {
+            let _ = reply.send(Err(error));
+        }
+        _ => unreachable!("only workspace barriers can be rejected"),
     }
 }

@@ -1,3 +1,4 @@
+use redb::TableHandle;
 use std::time::SystemTime;
 
 use crate::proxy::{
@@ -8,6 +9,168 @@ use crate::proxy::{
 use super::*;
 
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[test]
+fn required_workspace_failure_prevents_save_copy_and_flush_and_can_recover() {
+    let handle = ProjectHandle::temporary().unwrap();
+    let db = handle.current_db().unwrap();
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(schema::WORKSPACE).unwrap();
+    // Deliberately replace the workspace table with an incompatible type.
+    let wrong = redb::TableDefinition::<u64, u64>::new(schema::WORKSPACE.name());
+    drop(tx.open_table(wrong).unwrap());
+    tx.commit().unwrap();
+    let destination = TempProject::new("required-workspace");
+    for copy in [false, true] {
+        assert!(
+            handle
+                .save_workspace(
+                    WorkspaceState::default(),
+                    destination.path.clone(),
+                    false,
+                    copy
+                )
+                .recv_timeout(REPLY_TIMEOUT)
+                .unwrap()
+                .is_err()
+        );
+        assert!(!destination.path.exists());
+        assert_eq!(handle.status().mode, ProjectMode::Temporary);
+    }
+    assert!(
+        handle
+            .flush_workspace(WorkspaceState::default())
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(handle.flush().recv_timeout(REPLY_TIMEOUT).unwrap().is_err());
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(wrong).unwrap();
+    drop(tx.open_table(schema::WORKSPACE).unwrap());
+    tx.commit().unwrap();
+    handle
+        .save_workspace(
+            WorkspaceState::default(),
+            destination.path.clone(),
+            false,
+            false,
+        )
+        .recv_timeout(REPLY_TIMEOUT)
+        .unwrap()
+        .unwrap();
+}
+
+#[test]
+fn periodic_workspace_write_failure_is_sticky_until_a_successful_retry() {
+    let handle = ProjectHandle::temporary().unwrap();
+    let db = handle.current_db().unwrap();
+    let wrong = redb::TableDefinition::<u64, u64>::new(schema::WORKSPACE.name());
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(schema::WORKSPACE).unwrap();
+    drop(tx.open_table(wrong).unwrap());
+    tx.commit().unwrap();
+
+    assert!(handle.set_workspace(WorkspaceState::default()));
+    assert!(matches!(
+        handle.flush().recv_timeout(REPLY_TIMEOUT).unwrap(),
+        Err(ProjectError::WorkspacePersistence(_))
+    ));
+    assert!(handle.status().last_error.is_some());
+    let destination = TempProject::new("periodic-workspace-failure");
+    assert!(
+        handle
+            .save_as(destination.path.clone(), false)
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(
+        handle
+            .save_copy(destination.path.clone(), false)
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(!destination.path.exists());
+
+    let tx = db.begin_write().unwrap();
+    tx.delete_table(wrong).unwrap();
+    drop(tx.open_table(schema::WORKSPACE).unwrap());
+    tx.commit().unwrap();
+    assert!(handle.set_workspace(WorkspaceState::default()));
+    handle.flush().recv_timeout(REPLY_TIMEOUT).unwrap().unwrap();
+    handle
+        .save_copy(destination.path.clone(), false)
+        .recv_timeout(REPLY_TIMEOUT)
+        .unwrap()
+        .unwrap();
+    assert!(destination.path.exists());
+}
+
+#[test]
+fn stopped_writer_returns_errors_for_required_workspace_operations() {
+    let handle = ProjectHandle::temporary().unwrap();
+    handle.shutdown();
+    let destination = TempProject::new("stopped-workspace");
+    assert!(matches!(
+        handle
+            .flush_workspace(WorkspaceState::default())
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap(),
+        Err(ProjectError::ServiceUnavailable)
+    ));
+    for copy in [false, true] {
+        assert!(matches!(
+            handle
+                .save_workspace(
+                    WorkspaceState::default(),
+                    destination.path.clone(),
+                    false,
+                    copy
+                )
+                .recv_timeout(REPLY_TIMEOUT)
+                .unwrap(),
+            Err(ProjectError::ServiceUnavailable)
+        ));
+    }
+    assert!(!destination.path.exists());
+}
+
+#[test]
+fn saturated_queue_rejects_required_workspace_without_enqueuing_a_save() {
+    let mut handle = ProjectHandle::temporary().unwrap();
+    handle.shutdown();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    handle.sender = sender;
+    handle
+        .sender
+        .try_send(Command::SetWorkspace(Box::default()))
+        .ok()
+        .unwrap();
+    let destination = TempProject::new("full-workspace");
+    assert!(
+        handle
+            .save_workspace(
+                WorkspaceState::default(),
+                destination.path.clone(),
+                false,
+                false
+            )
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(
+        handle
+            .flush_workspace(WorkspaceState::default())
+            .recv_timeout(REPLY_TIMEOUT)
+            .unwrap()
+            .is_err()
+    );
+    assert!(!destination.path.exists());
+    drop(receiver);
+}
 
 /// A unique path under the system temporary directory, removed on drop.
 struct TempProject {
