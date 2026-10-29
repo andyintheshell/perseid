@@ -539,8 +539,9 @@ request does not include their original domain, path, or expiry attributes.
 Cookies in HTTPS tunnels are visible only when TLS interception is enabled.
 Applying cookies and updating from Repeater/Intruder responses are off by
 default and controlled separately. Add or refresh a cookie manually by entering
-its response URL and a `Set-Cookie` value; inspect, edit, delete or clear entries
-in Settings. Matching uses the connection URL, not an edited Host header, and
+its response URL and a `Set-Cookie` value in the cookie editor. Use **Settings →
+Open cookie jar** to inspect the table, select a cookie to edit or remove, or
+empty the jar. Matching uses the connection URL, not an edited Host header, and
 honors domain, host-only, path, expiration and Secure (HTTPS only). SameSite is
 stored but not enforced because direct requests have no browser site context.
 The jar rejects public-suffix domains, cookies over 4096 bytes, and more than

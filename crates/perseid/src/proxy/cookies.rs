@@ -197,6 +197,13 @@ impl CookieJar {
         entries
     }
 
+    pub fn expiration_label(&self, domain: &str, path: &str, name: &str) -> String {
+        match self.store.get(domain, path, name).map(|c| &c.expires) {
+            Some(cookie_store::CookieExpiration::AtUtc(date)) => date.date().to_string(),
+            _ => "Session".to_owned(),
+        }
+    }
+
     pub fn edit_source(&self, domain: &str, path: &str, name: &str) -> Option<(String, String)> {
         let c = self.store.get(domain, path, name)?;
         let host = if domain.contains(':') && !domain.starts_with('[') {
@@ -275,6 +282,25 @@ impl CookieJar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expiration_labels_are_readable() {
+        let mut jar = CookieJar::default();
+        jar.insert("https://example.test/", "session=1; Path=/")
+            .unwrap();
+        jar.insert(
+            "https://example.test/",
+            "persistent=1; Path=/; Expires=Wed, 01 Jan 2031 00:00:00 GMT",
+        )
+        .unwrap();
+        assert_eq!(
+            jar.expiration_label("example.test", "/", "session"),
+            "Session"
+        );
+        assert_eq!(
+            jar.expiration_label("example.test", "/", "persistent"),
+            "2031-01-01"
+        );
+    }
     #[test]
     fn proxy_request_updates_known_cookie_and_does_not_broaden_scope() {
         let mut jar = CookieJar::default();
