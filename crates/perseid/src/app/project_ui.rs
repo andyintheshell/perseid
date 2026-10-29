@@ -35,6 +35,12 @@ const NOTICE_LIFETIME: Duration = Duration::from_secs(8);
 const PROJECT_EXTENSION: &str = "perseid";
 const TEMPORARY_LABEL: &str = "Untitled (temporary)";
 
+type SwitchFlush = (
+    ProjectSwitch,
+    WorkspaceState,
+    Receiver<std::result::Result<CommitReceipt, ProjectError>>,
+);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProjectDialogKind {
     Open,
@@ -184,6 +190,9 @@ pub(super) struct ProjectUi {
     quit_flush: Option<Receiver<std::result::Result<CommitReceipt, ProjectError>>>,
     quit_workspace: Option<WorkspaceState>,
     quit_ready: bool,
+    quit_started: Option<Instant>,
+    quit_error: Option<String>,
+    switch_flush: Option<SwitchFlush>,
     pending: Vec<PendingProject>,
     notice: Option<ProjectNotice>,
     last_workspace: Option<WorkspaceState>,
@@ -218,6 +227,9 @@ impl ProjectUi {
             quit_flush: None,
             quit_workspace: None,
             quit_ready: false,
+            quit_started: None,
+            quit_error: None,
+            switch_flush: None,
             pending: Vec::new(),
             notice: None,
             last_workspace: None,
@@ -250,6 +262,7 @@ impl ProjectUi {
 
     pub(super) fn is_busy(&self) -> bool {
         self.quit_flush.is_some()
+            || self.switch_flush.is_some()
             || self.retention_pending.is_some()
             || self.pending.iter().any(PendingProject::is_file_operation)
     }
@@ -1028,7 +1041,19 @@ impl PerseidApp {
         if self.has_unsaved_temporary_work() {
             self.project.ask_before_switch(request);
         } else {
-            self.perform_project_switch(request);
+            self.flush_before_switch(request);
+        }
+    }
+
+    fn flush_before_switch(&mut self, request: ProjectSwitch) {
+        if request == ProjectSwitch::Quit {
+            self.begin_quit_flush();
+            return;
+        }
+        let workspace = self.workspace_snapshot();
+        if let Some(handle) = self.project.handle() {
+            let receiver = handle.flush_workspace(workspace.clone());
+            self.project.switch_flush = Some((request, workspace, receiver));
         }
     }
 
@@ -1041,10 +1066,12 @@ impl PerseidApp {
     }
 
     fn begin_quit_flush(&mut self) {
-        self.sync_workspace(true);
-        self.project.quit_workspace = Some(self.workspace_snapshot());
+        let workspace = self.workspace_snapshot();
+        self.project.quit_workspace = Some(workspace.clone());
+        self.project.quit_error = None;
+        self.project.quit_started = Some(Instant::now());
         if let Some(handle) = self.project.handle() {
-            self.project.quit_flush = Some(handle.flush());
+            self.project.quit_flush = Some(handle.flush_workspace(workspace));
         } else {
             self.project.quit_ready = true;
         }
@@ -1078,6 +1105,7 @@ impl PerseidApp {
                 Err(TryRecvError::Disconnected) => Some(Err(
                     "Project writer stopped before the final save.".to_string(),
                 )),
+                Err(TryRecvError::Empty) if self.project.quit_started.is_some_and(|at| at.elapsed() >= Duration::from_secs(10)) => Some(Err("Final save timed out; the writer may still complete it. The project remains open.".to_string())),
                 Err(TryRecvError::Empty) => None,
             };
             if let Some(result) = result {
@@ -1091,14 +1119,59 @@ impl PerseidApp {
                             self.begin_quit_flush();
                         }
                     }
-                    Err(err) => self
-                        .project
-                        .notify_error(format!("Could not save before quitting: {err}")),
+                    Err(err) => {
+                        self.project.quit_error = Some(err.clone());
+                        self.project
+                            .notify_error(format!("Could not save before quitting: {err}"));
+                    }
                 }
             }
         }
         if self.project.quit_ready {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn quit_recovery_window(&mut self, ctx: &egui::Context) {
+        if let Some(error) = self.project.quit_error.clone() {
+            let mut action = None;
+            egui::Window::new("Could not save before quitting")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(error);
+                    ui.horizontal(|ui| {
+                        if ui.button("Retry").clicked() {
+                            action = Some(0);
+                        }
+                        if ui.button("Save Copy…").clicked() {
+                            action = Some(1);
+                        }
+                        if ui.button("Discard and Quit").clicked() {
+                            action = Some(2);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            action = Some(3);
+                        }
+                    });
+                });
+            match action {
+                Some(0) => self.begin_quit_flush(),
+                Some(1) => {
+                    self.project.quit_error = None;
+                    let current = self.current_project_path();
+                    self.project
+                        .open_dialog(ProjectDialogKind::SaveCopy, current.as_deref());
+                }
+                Some(2) => {
+                    self.project.quit_error = None;
+                    self.project.quit_ready = true;
+                }
+                Some(3) => {
+                    self.project.quit_error = None;
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1109,17 +1182,13 @@ impl PerseidApp {
         }
         // Queue the latest workbench state before the save command. Both use
         // the same writer mailbox, so the snapshot includes it.
-        self.sync_workspace(true);
+        let workspace = self.workspace_snapshot();
         let Some(handle) = self.project.handle() else {
             self.project
                 .notify_error("Persistence is unavailable for this session.");
             return;
         };
-        let receiver = if copy {
-            handle.save_copy(path.clone(), overwrite)
-        } else {
-            handle.save_as(path.clone(), overwrite)
-        };
+        let receiver = handle.save_workspace(workspace, path.clone(), overwrite, copy);
         self.project.pending.push(PendingProject::Save {
             copy,
             path,
@@ -1175,6 +1244,23 @@ impl PerseidApp {
     }
 
     pub(super) fn poll_project(&mut self) {
+        if let Some((request, workspace, receiver)) = self.project.switch_flush.take() {
+            match receiver.try_recv() {
+                Ok(Ok(_)) if workspace == self.workspace_snapshot() => {
+                    self.perform_project_switch(request)
+                }
+                Ok(Ok(_)) => self.flush_before_switch(request),
+                Ok(Err(error)) => self
+                    .project
+                    .notify_error(format!("Could not save before switching: {error}")),
+                Err(TryRecvError::Disconnected) => self
+                    .project
+                    .notify_error("Project writer stopped before switching."),
+                Err(TryRecvError::Empty) => {
+                    self.project.switch_flush = Some((request, workspace, receiver))
+                }
+            }
+        }
         self.poll_retention_cache();
         if let Some(receiver) = &self.project.retention_pending {
             match receiver.try_recv() {
@@ -1203,7 +1289,8 @@ impl PerseidApp {
                         self.sync_workspace(true);
                         let restart_proxy = self.stop_proxy_for_project_switch();
                         if let Some(handle) = self.project.handle() {
-                            let receiver = handle.install_prepared(prepared);
+                            let receiver =
+                                handle.install_prepared(prepared, self.workspace_snapshot());
                             self.project.pending.push(PendingProject::Open {
                                 path,
                                 receiver,
@@ -1230,7 +1317,7 @@ impl PerseidApp {
                         if copy {
                             self.project.clear_switch_after_save();
                         } else if let Some(request) = self.project.take_switch_after_save() {
-                            self.perform_project_switch(request);
+                            self.flush_before_switch(request);
                         }
                     }
                     Err(err) => {
@@ -1462,17 +1549,23 @@ impl PerseidApp {
         }
     }
 
-    /// Stop the writer and make the final workspace durable on exit.
+    /// Best-effort fallback for exits that bypass the cancellable close flow.
     pub(super) fn shutdown_project(&mut self) {
-        self.sync_workspace(true);
+        if self.project.quit_ready {
+            return;
+        }
         if let Some(handle) = self.project.handle() {
-            let receiver = handle.flush();
-            let _ = receiver.recv_timeout(Duration::from_secs(10));
+            let receiver = handle.flush_workspace(self.workspace_snapshot());
+            match receiver.recv_timeout(Duration::from_secs(10)) {
+                Ok(Ok(_)) => {}
+                result => log::error!("Final project persistence was not acknowledged: {result:?}"),
+            }
         }
     }
 
     /// Poll project commands and draw their dialogs. Called once per frame.
     pub(super) fn project_windows(&mut self, ctx: &egui::Context) {
+        self.quit_recovery_window(ctx);
         if self.project.is_busy() || self.project.retention_sweep.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
@@ -2167,10 +2260,10 @@ pub(super) mod tests {
 
         assert!(click_ui_text(&ctx, "File", |ui| app.project_menu(ui)));
         assert!(click_ui_text(&ctx, "New Project", |ui| app.project_menu(ui)));
-        assert!(matches!(
-            app.project.pending.as_slice(),
-            [PendingProject::New { .. }]
-        ));
+        assert!(
+            app.project.switch_flush.is_some()
+                || matches!(app.project.pending.as_slice(), [PendingProject::New { .. }])
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -2209,10 +2302,10 @@ pub(super) mod tests {
         app.request_project_switch(ProjectSwitch::New);
         assert!(click_window_text(&ctx, "Discard", |ctx| app.project_windows(ctx)));
         assert!(app.project.switch_prompt.is_none());
-        assert!(matches!(
-            app.project.pending.as_slice(),
-            [PendingProject::New { .. }]
-        ));
+        assert!(
+            app.project.switch_flush.is_some()
+                || matches!(app.project.pending.as_slice(), [PendingProject::New { .. }])
+        );
         app.project.pending.clear();
 
         app.request_project_switch(ProjectSwitch::New);
@@ -2249,8 +2342,8 @@ pub(super) mod tests {
         assert!(click_window_text(&ctx, "Open", |ctx| app.project_windows(ctx)));
 
         assert!(app.project.dialog.is_none());
-        match app.project.pending.first() {
-            Some(PendingProject::PrepareOpen { path, .. }) => {
+        match app.project.switch_flush.as_ref() {
+            Some((ProjectSwitch::Open(path), _, _)) => {
                 assert_eq!(path, &source);
             }
             _ => panic!("expected a pending open"),
@@ -2763,6 +2856,52 @@ mod switch_tests {
     use super::*;
 
     #[test]
+    fn final_save_timeout_preserves_workspace_and_late_success_cannot_close() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.project.quit_flush = Some(receiver);
+        app.project.quit_started = Some(Instant::now() - Duration::from_secs(11));
+        app.project.quit_workspace = Some(app.workspace_snapshot());
+        let ctx = egui::Context::default();
+        app.handle_close_request(&ctx);
+        assert!(!app.project.quit_ready);
+        assert!(app.project.quit_flush.is_none());
+        assert!(
+            app.project
+                .quit_error
+                .as_ref()
+                .unwrap()
+                .contains("timed out")
+        );
+        assert!(app.scope_enabled);
+        assert!(
+            sender
+                .send(Ok(CommitReceipt {
+                    sequence: 0,
+                    http_count: 0,
+                    ws_count: 0
+                }))
+                .is_err()
+        );
+        app.handle_close_request(&ctx);
+        assert!(!app.project.quit_ready);
+    }
+
+    #[test]
+    fn failed_switch_barrier_preserves_the_current_workspace() {
+        let mut app = PerseidApp::test_app();
+        app.scope_enabled = true;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.project.switch_flush = Some((ProjectSwitch::New, app.workspace_snapshot(), receiver));
+        sender.send(Err(ProjectError::ServiceUnavailable)).unwrap();
+        app.poll_project();
+        assert!(app.project.pending.is_empty());
+        assert!(app.scope_enabled);
+        assert!(app.project.notice().unwrap().1);
+    }
+
+    #[test]
     fn window_close_is_cancelled_until_the_quit_decision_completes() {
         let mut app = PerseidApp::test_app();
         app.scope_enabled = true;
@@ -2892,10 +3031,10 @@ mod switch_tests {
         app.request_project_switch(ProjectSwitch::New);
 
         assert!(app.project.switch_prompt.is_none());
-        assert!(matches!(
-            app.project.pending.as_slice(),
-            [PendingProject::New { .. }]
-        ));
+        assert!(
+            app.project.switch_flush.is_some()
+                || matches!(app.project.pending.as_slice(), [PendingProject::New { .. }])
+        );
     }
 
     #[test]
@@ -2930,10 +3069,10 @@ mod switch_tests {
             .expect("pending project switch");
         app.perform_project_switch(request);
 
-        assert!(matches!(
-            app.project.pending.as_slice(),
-            [PendingProject::New { .. }]
-        ));
+        assert!(
+            app.project.switch_flush.is_some()
+                || matches!(app.project.pending.as_slice(), [PendingProject::New { .. }])
+        );
     }
 
     #[test]
@@ -3002,9 +3141,9 @@ mod switch_tests {
         app.poll_project();
 
         assert!(app.project.switch_after_save.is_none());
-        assert!(matches!(
-            app.project.pending.as_slice(),
-            [PendingProject::New { .. }]
-        ));
+        assert!(
+            app.project.switch_flush.is_some()
+                || matches!(app.project.pending.as_slice(), [PendingProject::New { .. }])
+        );
     }
 }

@@ -82,6 +82,10 @@ pub enum ProjectError {
     AlreadyOpen(PathBuf),
     #[error("the project writer is not available")]
     ServiceUnavailable,
+    #[error("the project writer queue is full; wait and retry")]
+    QueueFull,
+    #[error("required workspace persistence failed: {0}")]
+    WorkspacePersistence(String),
 }
 
 type Result<T> = std::result::Result<T, ProjectError>;

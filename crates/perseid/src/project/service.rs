@@ -154,6 +154,7 @@ pub struct CaptureOutcome {
 }
 
 enum Command {
+    WithWorkspace(Box<WorkspaceState>, Box<Command>),
     InstallPrepared(Box<PreparedProject>, Sender<Result<OpenedProject>>),
     SetRetention(RetentionLimits, Sender<Result<CommitReceipt>>),
     Capture(ProxyEvent),
@@ -422,6 +423,7 @@ impl ProjectHandle {
     /// When `overwrite` is false an existing destination is refused. When it
     /// is true the complete replacement is written alongside the destination
     /// first, so a failed save leaves the previous file intact.
+    #[cfg(test)]
     pub fn save_as(&self, path: PathBuf, overwrite: bool) -> Receiver<Result<()>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(
@@ -435,7 +437,53 @@ impl ProjectHandle {
         rx
     }
 
+    /// Admit the required snapshot and save as one nonblocking command.
+    /// Success acknowledges both the workspace commit and the file operation.
+    pub fn save_workspace(
+        &self,
+        workspace: WorkspaceState,
+        path: PathBuf,
+        overwrite: bool,
+        copy: bool,
+    ) -> Receiver<Result<()>> {
+        let (tx, rx) = mpsc::channel();
+        let command = if copy {
+            Command::SaveCopy {
+                path,
+                overwrite,
+                reply: tx,
+            }
+        } else {
+            Command::SaveAs {
+                path,
+                overwrite,
+                reply: tx,
+            }
+        };
+        if let Err(error) = self.sender.try_send(Command::WithWorkspace(
+            Box::new(workspace),
+            Box::new(command),
+        )) {
+            reject_admission(error);
+        }
+        rx
+    }
+
+    /// Acknowledge the required workspace write before the durable flush.
+    /// A rejected admission or failed write cannot produce a successful receipt.
+    pub fn flush_workspace(&self, workspace: WorkspaceState) -> Receiver<Result<CommitReceipt>> {
+        let (tx, rx) = mpsc::channel();
+        if let Err(error) = self.sender.try_send(Command::WithWorkspace(
+            Box::new(workspace),
+            Box::new(Command::Flush { reply: tx }),
+        )) {
+            reject_admission(error);
+        }
+        rx
+    }
+
     /// Write a copy of the current project to `path` without switching to it.
+    #[cfg(test)]
     pub fn save_copy(&self, path: PathBuf, overwrite: bool) -> Receiver<Result<()>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(
@@ -501,9 +549,15 @@ impl ProjectHandle {
     pub(crate) fn install_prepared(
         &self,
         prepared: PreparedProject,
+        workspace: WorkspaceState,
     ) -> Receiver<Result<OpenedProject>> {
         let (tx, rx) = mpsc::channel();
-        self.send_control(Command::InstallPrepared(Box::new(prepared), tx), &rx);
+        if let Err(error) = self.sender.try_send(Command::WithWorkspace(
+            Box::new(workspace),
+            Box::new(Command::InstallPrepared(Box::new(prepared), tx)),
+        )) {
+            reject_admission(error);
+        }
         rx
     }
 
@@ -520,6 +574,7 @@ impl ProjectHandle {
         rx
     }
 
+    #[cfg(test)]
     pub fn flush(&self) -> Receiver<Result<CommitReceipt>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(Command::Flush { reply: tx }, &rx);
@@ -612,6 +667,15 @@ impl ProjectHandle {
 impl Drop for ProjectHandle {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+fn reject_admission(error: TrySendError<Command>) {
+    match error {
+        TrySendError::Full(command) => writer::reject(command, ProjectError::QueueFull),
+        TrySendError::Disconnected(command) => {
+            writer::reject(command, ProjectError::ServiceUnavailable)
+        }
     }
 }
 
