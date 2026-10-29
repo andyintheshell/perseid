@@ -159,9 +159,11 @@ as an animated WebP with `img2webp`; the workflow keeps it under two minutes and
 verifies that the edited Repeater and Intruder requests reached the local
 target.
 
-Download `perseid-demo-webp` from the workflow run and review it before using
-it. The artifact expires after 30 days; copy an approved WebP into the
-repository if it will be embedded in the README. Failed runs upload diagnostic
+The current approved recording is checked in as
+[`images/perseid-demo.webp`](images/perseid-demo.webp) (1280×820, about 87
+seconds, 1.6 MB) and embedded in the [project README](../README.md). To update
+it, download `perseid-demo-webp` from the workflow run, review it, and replace
+that file. The artifact expires after 30 days. Failed runs upload diagnostic
 logs and the partial recording for seven days. All traffic and values in this
 workflow are synthetic; the workflow does not use local files or data from your
 machine. Animated WebP is supported by current Chrome, Firefox, Safari, and

@@ -23,6 +23,12 @@ browser required.**
 
 [![Perseid HTTP history with side-by-side request and response views](docs/images/perseid-main.png)](docs/screenshots.md)
 
+**Watch the 90-second workflow:** capture a request, replay and edit it in
+Repeater, fuzz it in Intruder, decode the response, and compare two responses in
+Comparer.
+
+[![Animated demo of capture, Repeater, Intruder, Decoder, and Comparer](docs/images/perseid-demo.webp)](docs/demo-gif-script.md)
+
 > [!IMPORTANT]
 > **Public alpha: the core manual-testing workflows work today.** Perseid is
 > actively developed, not yet a feature-complete or drop-in Burp replacement.
