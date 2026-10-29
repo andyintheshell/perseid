@@ -35,6 +35,8 @@ FULL_WINDOW_SCENES = [
     "perseid-comparer.png",
     "perseid-comparer-result.png",
     "perseid-search.png",
+    "perseid-settings.png",
+    "perseid-cookie-jar.png",
 ]
 # Screenshots are captured at 2x (1280x820 points) and saved at native
 # resolution so they stay sharp when GitHub or a HiDPI browser scales them.

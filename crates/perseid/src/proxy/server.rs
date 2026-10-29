@@ -28,6 +28,7 @@ use crate::proxy::{forward, portal, tunnel};
 
 /// Shared per-proxy state handed to every connection task.
 pub(crate) struct Ctx {
+    pub(crate) cookie_jar: Option<crate::proxy::cookies::SharedCookieJar>,
     pub(crate) client: Client<HttpsConnector<HttpConnector>, ProxyBody>,
     /// HTTP/1.1-only client for WebSocket handshakes. Normal HTTPS traffic can
     /// negotiate h2, but WebSocket upgrades are an HTTP/1.1 mechanism.

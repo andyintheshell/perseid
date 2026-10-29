@@ -44,6 +44,7 @@ blake2 = "0.11"
 blake3 = "1"
 brotli-decompressor.workspace = true
 chrono.workspace = true
+cookie_store = { version = "0.22", default-features = false }
 clap.workspace = true
 cshake = "0.2"
 digest = "0.11"
@@ -69,6 +70,7 @@ serde_json = "1"
 md2 = "0.11"
 md4 = "0.11"
 num-bigint = "0.5"
+psl = "2"
 rcgen.workspace = true
 regex.workspace = true
 ripemd = "0.2"
@@ -85,6 +87,7 @@ thiserror.workspace = true
 tiger = "0.3"
 tokio.workspace = true
 uuid = { version = "1", features = ["v4"] }
+url = "2"
 tokio-rustls.workspace = true
 webpki-roots.workspace = true
 whirlpool = "0.11"

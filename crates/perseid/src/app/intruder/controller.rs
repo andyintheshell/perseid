@@ -96,6 +96,7 @@ impl PerseidApp {
         }
         self.intruder_engine = None;
         let config = IntruderConfig {
+            cookie_jar: Some(self.cookie_jar.clone()),
             capture_limit: self.capture_limit,
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),

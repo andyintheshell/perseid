@@ -72,6 +72,7 @@
 
 mod capture;
 mod config;
+pub mod cookies;
 mod events;
 mod forward;
 mod intercept;
@@ -260,6 +261,7 @@ impl Proxy {
 
         let tls_ca = Arc::new(RwLock::new(config.tls.authority.clone()));
         let ctx = Arc::new(server::Ctx {
+            cookie_jar: config.cookie_jar.clone(),
             client,
             ws_client,
             tls_ca: tls_ca.clone(),
