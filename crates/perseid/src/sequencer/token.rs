@@ -150,7 +150,7 @@ fn decode_hex(token: &str) -> Option<Vec<u8>> {
     }
     let bytes = digits.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let high = (pair[0] as char).to_digit(16)?;
         let low = (pair[1] as char).to_digit(16)?;
         decoded.push(((high << 4) | low) as u8);
@@ -217,6 +217,14 @@ mod tests {
         assert!(error.contains("token 1"));
         let error = decode_tokens(&tokens, TokenFormat::Base64).unwrap_err();
         assert!(error.contains("token 1"));
+    }
+
+    #[test]
+    fn hex_decoding_requires_complete_valid_pairs() {
+        assert_eq!(decode_hex("0X00fF"), Some(vec![0, 255]));
+        assert_eq!(decode_hex("abc"), None);
+        assert_eq!(decode_hex("abxz"), None);
+        assert_eq!(decode_hex("0x"), None);
     }
 
     #[test]
