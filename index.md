@@ -1,6 +1,6 @@
 # Perseid screenshot gallery
 
-Generated from `b9e8af2d4dfe1ab20245cc50ca356cf291d2d76b` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/40949640628) (attempt 1).
+Generated from `19bf17c642b10b5d4298f7243e593a7fe2fa9df4` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/40951374339) (attempt 1).
 
 ## Proxy - HTTP history
 
@@ -73,6 +73,10 @@ Generated from `b9e8af2d4dfe1ab20245cc50ca356cf291d2d76b` by the [Screenshots wo
 ## Search
 
 ![Search](perseid-search.png)
+
+## Settings
+
+![Settings](perseid-settings.png)
 
 ## Memory usage
 
