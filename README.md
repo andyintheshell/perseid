@@ -140,8 +140,8 @@ important boundaries:
   interception decisions, pending network operations, and proxy lifecycle state
   are not restored. The local TLS CA certificate and private key are stored
   separately from project files.
-- **No WebSocket editing or replay yet.** WebSocket frames can be captured and
-  inspected, but not intercepted, modified, or resent.
+- **WebSocket replay requires a live connection.** Messages can be intercepted,
+  edited, and resent, but closed connections cannot be reopened from Repeater.
 - **Not an automated scanner.** There is no crawler, automated vulnerability
   scanner, or bundled browser. Intruder sends requests using user-supplied
   payloads; it does not discover vulnerabilities automatically.

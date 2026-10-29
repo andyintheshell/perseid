@@ -246,7 +246,7 @@ are logical limits, not a physical file-size cap or secure erasure. Projects
 are not encrypted. Schema-v1 projects migrate atomically to v2 on open; older
 applications cannot reopen upgraded files. To remove a saved project, switch
 away or quit, then delete its `.perseid` file and any copies using your file manager.
-WebSocket messages can be captured and inspected, but not edited or replayed;
+WebSocket messages can be intercepted, edited, and replayed on live connections;
 HTTP/3/QUIC is absent. Sequencer capture is regex-based and its statistical
 results are indicative. See [limits and persistence](workbench.md#limits-and-persistence)
 and the [capability matrix](burp-parity.md) before relying on a particular

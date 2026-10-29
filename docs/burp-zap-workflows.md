@@ -46,7 +46,7 @@ and captured body bytes differ.
 | **Core HTTP loop** | Capture, interception, replay, payload testing, comparison, local transforms, and search across stored history are available. | Maintain the loop; finish full-history paging. |
 | **Projects and evidence** | Captures and workspace state persist in local project files; HTTP history supports Copy as curl. | Add recent projects, a quit prompt, and useful export formats. |
 | **Sessions** | A browser keeps its own cookies; replay can reuse captured headers. | Add a small cookie and session-handling slice. |
-| **WebSockets** | Message capture and inspection work. | Add message interception and replay. |
+| **WebSockets** | Message capture, interception, editing, and live-connection replay work. | Consider new-connection replay and fuzzing. |
 | **Automation** | No scanner, crawler, or automation API. | Scanner and crawler are non-goals; extensions and automation are post-parity. |
 
 ## Perseid implementation snapshot
@@ -61,9 +61,9 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
 | Proxy capture and HTTP history | **Working**: live history uses a bounded snapshot; the stored HTTP browser pages all retained rows and loads details/notes on demand. Search scans all stored HTTP and WebSocket records. Temporary and opt-in saved retention evict oldest eligible captures. | Maintain; selective item deletion |
-| Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. Large, streaming, and binary bodies are limited; WebSocket messages are captured in history but cannot be held or edited. | Maintain |
+| Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. WebSocket messages can be held and edited as text or hex. Large, streaming, and binary HTTP bodies are limited. | Maintain |
 | Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map has a Burp-style host/folder tree, display filters, and Contents table but is derived from the bounded history snapshot. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve with full-history queries |
-| Repeater / manual request editor | **Working** for HTTP/HTTPS: editable request tabs seeded from history, target and virtual-host control, direct replay, and Pretty/Raw/Hex responses. Persistent projects save request tabs and their last responses. WebSocket replay is absent; direct sends bypass proxy scope and rewriting. | Maintain; WebSocket in M4 |
+| Repeater / manual request editor | **Working** for HTTP/HTTPS and live WebSocket connections: editable tabs seeded from history, replay, and Pretty/Raw/Hex inspection. Persistent projects save HTTP tabs and their last responses; WebSocket tabs are session-only. Direct HTTP sends bypass proxy scope and rewriting. | Maintain |
 | Intruder / fuzzer | **Working** for HTTP/HTTPS: editable `$$` positions, shared or per-position payload sets with file loading, four attack modes, up to 32 concurrent requests, and Pretty/Raw/Hex results. Persistent projects save the request and payload configuration and result rows. No payload processing; enforced scope is checked before and during attacks. | Maintain; add payload processing |
 | Decoder / encoder | **Partial**: local transforms work with stacked Text/Hex panels; eight codecs, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms. HTTP history sends full captured messages and message panes send selections. Hex selections currently send displayed hexadecimal text, not binary bytes. Persistent projects save panel contents, operation annotations, view, and selection. 8 MiB input / 16 MiB output caps. | Maintain |
 | Comparer / diff | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. Persistent projects save inputs, selections, and result-window state; the diff is recomputed on open. | Maintain |
@@ -75,7 +75,7 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 | --- | --- | --- |
 | Persistence and search | **Partial**: temporary projects are RAM-only; saved projects autosave to a user-selected `.perseid` file. Saved retention defaults to unlimited but supports opt-in logical limits; no physical disk cap or encryption. Schema v1 upgrades atomically to v2. Search covers all retained HTTP/WebSocket history and tool results; older HTTP rows are pageable. Clear history deletes captures; whole files are deleted through the filesystem when closed. | **M3 — in progress** |
 | Authentication and session handling | **Partial**: an external browser keeps its own cookies while proxying; Perseid has no cookie jar, login macro, token refresh, per-user context, or session rules. | **P1 — add to M3/M4** |
-| WebSocket testing | **Partial**: bounded message-level history for plain `ws://` and decrypted `wss://`, with filtering and Pretty/Raw/Hex inspection. Saved projects retain messages, but the UI loads a bounded snapshot. No interception, editing, replay, or fuzzing. | **P1 — M4** |
+| WebSocket testing | **Partial**: bounded history, interception, text/hex editing, and live-connection replay for plain `ws://` and decrypted `wss://`. Saved projects retain messages, but the UI loads a bounded snapshot. No new-connection replay or fuzzing. | **P1 — M4** |
 | Evidence capture and reporting | **Partial**: saved projects retain captured exchanges and project-scoped workbench state; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
 | Sequencer / token analysis | **Partial**: manual and live regex token sampling; character- and bit-level randomness tests; effective-entropy chart and per-analysis settings. No parameter-aware capture; statistics are bounded approximations. | Maintain |
 
@@ -112,7 +112,7 @@ The remaining M3 work should build around that loop rather than repeat it:
 paging the history and site-map tables through the full saved history, a
 recent-project list and quit prompt, and byte-preserving Hex transfers to
 Decoder. Comparer now closes the "change one thing and compare" loop with a shared item list and paired
-diff views. WebSocket message replay remains in M4; project files already
+diff views. WebSocket replay uses live connections; project files already
 preserve Repeater request tabs and responses, Intruder results, and the other
 project-scoped workspace state.
 

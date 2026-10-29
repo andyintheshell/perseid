@@ -27,8 +27,8 @@ pub const DEFAULT_MAX_TUNNELS: usize = 64;
 /// Runtime policy shared by interception, scope enforcement, and rewriting.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProxySettings {
-    /// Hold requests for inspection and forwarding: plain HTTP, plus the
-    /// decrypted requests of intercepted CONNECT tunnels.
+    /// Hold HTTP requests and WebSocket messages in both directions, including
+    /// decrypted traffic inside intercepted CONNECT tunnels.
     pub intercept_requests: bool,
     /// Hold responses for inspection and forwarding: plain HTTP, plus the
     /// decrypted responses of intercepted CONNECT tunnels.
@@ -90,7 +90,8 @@ pub struct ProxyConfig {
     pub listen: SocketAddr,
     /// Per-body capture limit in bytes.
     pub capture_limit: usize,
-    /// Maximum body bytes buffered for interception or body rewriting.
+    /// Maximum body bytes buffered for interception or body rewriting. Also
+    /// limits each intercepted or replayed WebSocket message.
     pub intercept_limit: usize,
     /// Interception, scope, and match/replace policy.
     pub settings: ProxySettings,

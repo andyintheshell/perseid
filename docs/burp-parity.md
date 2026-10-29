@@ -23,7 +23,7 @@ implementation, or compatibility with Burp extensions.
 | ✅ Working | 🟡 Partial | 🛠 Planned |
 | --- | --- | --- |
 | HTTP/HTTPS proxy and intercept | Bounded history view and site map | Paging through all saved history |
-| Scope and match/replace | Repeater, Decoder, and Sequencer | WebSocket edit and replay |
+| Scope and match/replace | Repeater, Decoder, and Sequencer | — |
 | Comparer and Intruder | WebSocket capture/history; project persistence | Migrations |
 | Memory display | — | — |
 
@@ -50,8 +50,9 @@ Decoder, Comparer, and Sequencer.
 | **Target site map** | 🟡 Partial | Burp-style URL view: host/folder/resource tree, per-node Contents table with Host, Method, URL, Params, Status, Length, MIME, Title, Notes, and Time; sorting, search, context-menu sends, and Burp's default display filters (not found, CSS, images, binary, 4xx, empty folders). Pause freezes the derived view. Derived from the loaded history snapshot; not a crawler. Crawl paths, scanner Issues, parameter discovery, and unrequested-URL inference are unavailable. Cache eviction can hide entries without deleting saved records; clearing history removes the records. |
 | **HTTP history** | 🟡 Partial | The live table uses a bounded newest-first snapshot; **Browse stored history…** pages through retained HTTP rows and loads details/notes on demand. Search scans the full retained store. Complete captures can be copied as curl. Selective per-item deletion remains unavailable. |
 | **Search** | ➕ Beyond CE | Search all stored HTTP and WebSocket history plus current Repeater tabs and retained Intruder results, with case, regex, negative-match, in-scope, and live-update filters; stored scans run in the background with progress and stop when superseded. Results highlight in Pretty/Raw/Hex. Query, options, structured result rows, selection, and views persist with a project; old HTTP-only workspaces drop IDs missing from the loaded snapshot. |
-| **WebSocket history** | 🟡 Partial | Capture complete text and binary messages for `ws://` and decrypted `wss://`; saved projects retain them, but the UI loads a bounded snapshot. No message interception, editing, or replay. |
-| **Repeater** | 🟡 Partial | Editable HTTP/HTTPS request tabs, history seeding, target/virtual-host control, and response views. Persistent projects save request tabs and their last responses. No WebSocket replay. Direct sends bypass proxy scope, interception, and rewrite rules. |
+| **WebSocket history** | 🟡 Partial | Capture, intercept, edit, forward and drop text/binary messages for `ws://` and decrypted `wss://`. Saved projects retain history, but the UI loads a bounded snapshot. |
+| **WebSocket editing and replay** | ✅ Working | Hold and edit text or binary messages in both directions; replay captured messages repeatedly on the existing live connection. Reopening closed connections and fuzzing are not supported. |
+| **Repeater** | 🟡 Partial | Editable HTTP/HTTPS requests and live-connection WebSocket replay with text/hex editing and message views. HTTP tabs persist; WebSocket tabs are session-only and cannot reopen closed connections. Direct HTTP sends bypass proxy scope, interception, and rewrite rules. |
 | **Decoder** | 🟡 Partial | Stacked Text/Hex panels, common encode/decode operations, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms. Projects save panel contents, operation annotations, view, and selection. History can send full captured messages, and message panes can send selections to Decoder. Hex selections currently send displayed hexadecimal text rather than the selected binary bytes. |
 | **Comparer** | ✅ Working | Shared item list, word- and byte-level differences, Text/Hex views, difference navigation, and synchronized scrolling. Persistent projects save input items, selections, and result-window state; the diff is recomputed on open. |
 | **Intruder** | ✅ Working | `$$` positions; editable or file-loaded payloads; Sniper, Battering ram, Pitchfork, and Cluster bomb; up to 32 concurrent requests with scope checks. Projects save request/payload configuration and result rows. No payload processing. |
@@ -86,7 +87,7 @@ For usage details, limits, and safety behavior, see the
 | **M1 — Proxy core** | ✅ Complete: HTTP/1.1 proxy, interception, scope, and match/replace. |
 | **M2 — HTTPS** | ✅ Complete: local CA lifecycle, TLS interception, and pass-through. |
 | **M3 — Daily workbench** | 🟡 In progress: Repeater, Decoder, Comparer, Search across stored HTTP/WebSocket history plus current Repeater/Intruder results, and local project files are available; paging the history/site-map tables across the full saved history and project workflow polish remain. |
-| **M4 — Protocols and testing tools** | 🟡 In progress: HTTP/2, WebSocket capture/history, Intruder, and Sequencer are available; WebSocket editing/replay remains. |
+| **M4 — Protocols and testing tools** | 🟡 In progress: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. |
 | **M5 — Parity hardening** | 🟡 In progress: release packages are published; clean-install testing, crash recovery, accessibility, and broader parity audits remain. |
 
 ## When does a capability count as parity?

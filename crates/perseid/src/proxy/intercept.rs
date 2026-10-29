@@ -8,7 +8,9 @@ use std::time::SystemTime;
 
 use tokio::sync::oneshot;
 
-use crate::proxy::events::RequestInfo;
+use crate::proxy::events::{
+    RequestInfo, WebSocketConnectionInfo, WebSocketDirection, WebSocketOpcode,
+};
 use crate::proxy::message::{parse_request_head, parse_response_head};
 
 #[derive(Debug)]
@@ -223,10 +225,206 @@ pub enum InterceptError {
     BodyUnavailable,
 }
 
+/// A complete WebSocket message waiting for a forwarding decision.
+///
+/// Dropping the item without deciding aborts the held message. Edits are
+/// bounded independently of the capture limit and text must remain UTF-8.
+#[derive(Debug)]
+pub struct WebSocketInterceptItem {
+    id: u64,
+    timestamp: SystemTime,
+    connection: WebSocketConnectionInfo,
+    direction: WebSocketDirection,
+    opcode: WebSocketOpcode,
+    payload: Vec<u8>,
+    limit: usize,
+    responder: Option<oneshot::Sender<WebSocketInterceptDecision>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum WebSocketInterceptDecision {
+    Forward(Vec<u8>),
+    Drop,
+}
+
+impl WebSocketInterceptItem {
+    pub(crate) fn new(
+        id: u64,
+        connection: WebSocketConnectionInfo,
+        direction: WebSocketDirection,
+        opcode: WebSocketOpcode,
+        payload: Vec<u8>,
+        limit: usize,
+        responder: oneshot::Sender<WebSocketInterceptDecision>,
+    ) -> Self {
+        Self {
+            id,
+            timestamp: SystemTime::now(),
+            connection,
+            direction,
+            opcode,
+            payload,
+            limit,
+            responder: Some(responder),
+        }
+    }
+    /// Unique identifier for this held message.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+    /// Time at which the message was held.
+    pub fn timestamp(&self) -> SystemTime {
+        self.timestamp
+    }
+    /// Connection on which the message was received.
+    pub fn connection(&self) -> &WebSocketConnectionInfo {
+        &self.connection
+    }
+    /// Direction in which the message was travelling.
+    pub fn direction(&self) -> WebSocketDirection {
+        self.direction
+    }
+    /// Text or binary message type.
+    pub fn opcode(&self) -> WebSocketOpcode {
+        self.opcode
+    }
+    /// Original, complete unmasked message payload.
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    /// Whether the relay is no longer waiting for a decision.
+    pub fn is_closed(&self) -> bool {
+        self.responder
+            .as_ref()
+            .is_none_or(oneshot::Sender::is_closed)
+    }
+
+    /// Forward the supplied payload, preserving the original message type.
+    pub fn forward(&mut self, payload: Vec<u8>) -> Result<(), WebSocketInterceptError> {
+        if payload.len() > self.limit {
+            return Err(WebSocketInterceptError::TooLarge);
+        }
+        if self.opcode == WebSocketOpcode::Text && std::str::from_utf8(&payload).is_err() {
+            return Err(WebSocketInterceptError::InvalidText);
+        }
+        self.resolve(WebSocketInterceptDecision::Forward(payload))
+    }
+
+    /// Drop this message without forwarding it.
+    pub fn drop_message(&mut self) -> Result<(), WebSocketInterceptError> {
+        self.resolve(WebSocketInterceptDecision::Drop)
+    }
+
+    fn resolve(
+        &mut self,
+        decision: WebSocketInterceptDecision,
+    ) -> Result<(), WebSocketInterceptError> {
+        self.responder
+            .take()
+            .ok_or(WebSocketInterceptError::AlreadyResolved)?
+            .send(decision)
+            .map_err(|_| WebSocketInterceptError::Closed)
+    }
+}
+
+/// Why a WebSocket interception decision could not be applied.
+#[derive(Debug, thiserror::Error)]
+pub enum WebSocketInterceptError {
+    #[error("this message was already forwarded or dropped")]
+    AlreadyResolved,
+    #[error("the WebSocket connection is no longer waiting for this message")]
+    Closed,
+    #[error("WebSocket message exceeds the interception limit")]
+    TooLarge,
+    #[error("WebSocket text messages must be UTF-8")]
+    InvalidText,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::proxy::events::RequestInfo;
+
+    fn websocket_item(
+        opcode: WebSocketOpcode,
+        limit: usize,
+    ) -> (
+        WebSocketInterceptItem,
+        oneshot::Receiver<WebSocketInterceptDecision>,
+    ) {
+        let (tx, rx) = oneshot::channel();
+        (
+            WebSocketInterceptItem::new(
+                1,
+                WebSocketConnectionInfo {
+                    id: 7,
+                    url: "ws://example.com/".into(),
+                    host: "example.com".into(),
+                    tls: false,
+                    listener_port: 8080,
+                    protocol: None,
+                },
+                WebSocketDirection::ToServer,
+                opcode,
+                b"original".to_vec(),
+                limit,
+                tx,
+            ),
+            rx,
+        )
+    }
+
+    #[test]
+    fn websocket_edits_are_bounded_and_invalid_edits_leave_item_pending() {
+        let (mut item, mut rx) = websocket_item(WebSocketOpcode::Text, 4);
+        assert!(matches!(
+            item.forward(vec![0; 5]),
+            Err(WebSocketInterceptError::TooLarge)
+        ));
+        assert!(matches!(
+            item.forward(vec![255]),
+            Err(WebSocketInterceptError::InvalidText)
+        ));
+        assert!(matches!(
+            rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        item.forward(b"edit".to_vec()).unwrap();
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            WebSocketInterceptDecision::Forward(b"edit".to_vec())
+        );
+        assert!(matches!(
+            item.drop_message(),
+            Err(WebSocketInterceptError::AlreadyResolved)
+        ));
+    }
+
+    #[test]
+    fn websocket_binary_drop_and_closed_decisions() {
+        let (mut item, mut rx) = websocket_item(WebSocketOpcode::Binary, 2);
+        item.forward(vec![0, 255]).unwrap();
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            WebSocketInterceptDecision::Forward(vec![0, 255])
+        );
+        let (mut item, mut rx) = websocket_item(WebSocketOpcode::Binary, 2);
+        item.drop_message().unwrap();
+        assert_eq!(rx.try_recv().unwrap(), WebSocketInterceptDecision::Drop);
+        let (mut item, rx) = websocket_item(WebSocketOpcode::Binary, 2);
+        drop(rx);
+        assert!(matches!(
+            item.drop_message(),
+            Err(WebSocketInterceptError::Closed)
+        ));
+        let (item, mut rx) = websocket_item(WebSocketOpcode::Binary, 2);
+        drop(item);
+        assert!(matches!(
+            rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+    }
 
     fn request_info() -> RequestInfo {
         RequestInfo {

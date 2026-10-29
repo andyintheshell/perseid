@@ -263,6 +263,7 @@ impl PerseidApp {
         }
 
         let mut clicked = None;
+        let mut send_to_repeater = None;
         table_frame(ui, |ui| {
             let mut table = TableBuilder::new(ui)
                 .striped(true)
@@ -389,12 +390,24 @@ impl PerseidApp {
                         if response.clicked() {
                             clicked = Some(id);
                         }
+                        response.context_menu(|ui| {
+                            if ui.button("Send to Repeater").clicked() {
+                                send_to_repeater = Some(id);
+                                ui.close();
+                            }
+                        });
                     });
                 });
         });
 
         if let Some(id) = clicked {
             self.select_websocket_id(id);
+        }
+        if let Some(item) = send_to_repeater
+            .and_then(|id| self.websocket_history.get(id))
+            .cloned()
+        {
+            self.send_websocket_to_repeater(&item);
         }
     }
 

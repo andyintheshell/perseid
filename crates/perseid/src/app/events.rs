@@ -26,6 +26,7 @@ impl PerseidApp {
         let mut selected_changed = false;
         let mut received_intercept = false;
         let mut intercept_items = Vec::new();
+        let mut websocket_intercept_items = Vec::new();
         let mut queue_drained = false;
         let stopped;
         {
@@ -47,6 +48,10 @@ impl PerseidApp {
                 // Give the project first refusal: it assigns stable IDs and
                 // queues the normalized event for the writer. The UI applies
                 // the returned event so its rows and the file agree.
+                let live_connection = match &event {
+                    ProxyEvent::WebSocketMessage { connection, .. } => Some(connection.id),
+                    _ => None,
+                };
                 let event = match self.project.handle() {
                     Some(handle) => {
                         let outcome = handle.capture(&event);
@@ -61,6 +66,9 @@ impl PerseidApp {
                 selected_changed |= selected == Some(id) || websocket_selected == Some(id);
                 match event {
                     ProxyEvent::WebSocketMessage { .. } => {
+                        if let Some(connection_id) = live_connection {
+                            self.websocket_live_ids.insert(id, connection_id);
+                        }
                         self.websocket_history.apply(event);
                     }
                     event => {
@@ -95,6 +103,13 @@ impl PerseidApp {
                 intercept_items.push(item);
                 received_intercept = true;
             }
+            for _ in 0..MAX_EVENTS_PER_FRAME {
+                let Some(item) = proxy.try_recv_websocket_intercept() else {
+                    break;
+                };
+                websocket_intercept_items.push(item);
+                received_intercept = true;
+            }
             // Drain what the proxy queued before declaring it stopped, then
             // resolve any exchange whose terminal event never made it through.
             if !was_stopped && !proxy.is_running() {
@@ -102,6 +117,8 @@ impl PerseidApp {
             }
             stopped = was_stopped && queue_drained;
         }
+        self.websocket_live_ids
+            .retain(|id, _| self.websocket_history.get(*id).is_some());
         if stopped {
             self.proxy = None;
             self.proxy_error = Some("the proxy stopped unexpectedly".to_string());
@@ -115,6 +132,9 @@ impl PerseidApp {
         } else {
             for item in intercept_items {
                 self.receive_intercept_item(item);
+            }
+            for item in websocket_intercept_items {
+                self.receive_websocket_intercept_item(item);
             }
         }
         if selected_changed {

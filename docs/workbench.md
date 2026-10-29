@@ -14,7 +14,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | **Target** | A Burp-style site map derived from history, a shared scope list, and an explicit empty scanner-issues view. |
 | **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
 | **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
-| **Repeater** | Editable HTTP/HTTPS requests sent directly to their targets. |
+| **Repeater** | Editable HTTP/HTTPS requests and messages on live WebSocket connections. |
 | **Sequencer** | Token sampling and character- or bit-level randomness analysis. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
 | **Comparer** | Word- or byte-level diffs between any two requests, responses, or loaded messages. |
@@ -261,8 +261,8 @@ interception for the host if you need its WebSocket messages.
   recording, but enabling or disabling **Proxy > Intercept** does not.
 - `Sec-WebSocket-Extensions` is removed from the forwarded handshake, so the
   origin does not negotiate compression that the history cannot decode.
-- There is no WebSocket message interception, editing, replay, or send-to-tool
-  action yet. WebSocket history has the same count and retained-byte UI-cache
+- Right-click a message and choose **Send to Repeater** to edit and resend it
+  on its existing live connection. WebSocket history has the same count and retained-byte UI-cache
   defaults as HTTP history. Saved projects persist WebSocket records, but the
   UI currently loads only a bounded newest-first snapshot.
 
@@ -411,6 +411,23 @@ The interception editor works on the held body bytes, not a decompressed copy.
 Do not assume a compressed or binary body is safely editable just because its
 history preview was readable.
 
+With interception on, complete WebSocket text and binary messages in both
+directions are held in a separate panel above the HTTP table. Edit text or hex
+bytes and choose **Forward message** or **Drop message**. Messages on each
+direction wait in order; other connections and the opposite direction can
+continue. The panel shows the oldest held WebSocket message. **Forward all**,
+**Drop all**, and turning interception off also apply to this queue; invalid
+drafts remain held for correction. A closed connection is marked in the panel.
+Control frames interleaved with a fragmented message wait for its decision;
+unchanged forwards preserve the original frames, while edited messages are
+reframed and interleaved controls follow the edited message.
+
+The WebSocket message and each edited payload are limited by `--intercept-limit`
+(1 MiB by default). Fragment and control-frame wire overhead is additionally
+limited to 64 KiB. An oversized or malformed held message closes the connection
+rather than forwarding an incomplete message. The bounded interception channel
+applies backpressure. Capture records forwarded messages, not dropped ones.
+
 ## Match/replace rules
 
 Open **Proxy > Match/replace**. A rule chooses request or response, head/body/all,
@@ -504,8 +521,8 @@ or in `--no-proxy` mode and negotiates HTTP/2 over TLS when the origin offers it
 It verifies origin certificates against platform trust anchors, falling back
 to bundled public roots if none are available.
 
-**Repeater bypasses interception, match/replace, and proxy scope enforcement.**
-Its exchanges do not appear in Proxy history. It also has no browser cookie jar
+**HTTP Repeater bypasses interception, match/replace, and proxy scope enforcement.**
+Its HTTP exchanges do not appear in Proxy history. It also has no browser cookie jar
 or automatic session refresh; review copied cookies and tokens before sending.
 
 Captured history seeds use the decoded, bounded message representation, so
@@ -513,8 +530,17 @@ compressed, binary, or large bodies can be lossy. Review seed warnings before
 sending. Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
 with up to eight concurrent sends. Request tabs and their most recent responses
-are saved with a persistent project; pending sends are not. WebSocket replay is
-absent.
+are saved with a persistent project; pending sends are not.
+
+For WebSockets, use **Send to Repeater** from WebSockets history, edit text or
+hex, choose a direction, and send repeatedly. The tab shows the original
+connection's open/closed state and captured messages with Pretty/Raw/Hex views.
+It uses that existing connection only; it cannot reopen a closed connection.
+Review and explicitly confirm an incomplete captured prefix before sending.
+Each direction has a queue of 16 messages, each bounded by `--intercept-limit`;
+queue acceptance does not guarantee delivery. Replay is captured in WebSockets
+history but bypasses interception. WebSocket Repeater tabs are live session
+state and are not saved in projects.
 
 Admission is bounded across **queued requests, active sends, and unread results
 together**: at most **32 pending operations** and **64 MiB of retained-data
@@ -716,6 +742,7 @@ separate Space, matching the system green-button behavior.
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
+| WebSocket interception/replay | Message payloads and replay sends are bounded by `--intercept-limit`; interception also caps wire overhead at 64 KiB. The intercept channel is bounded by the connection limit; each live replay direction queues at most 16 messages. |
 | Repeater request/head size | 8 MiB of retained request buffers; 64 KiB heads. The response capture limit must also fit the pending-work budget. |
 | Intruder work | Up to 32 simultaneous requests and one attack at a time; the engine queues up to 64 unread results or 64 MiB. |
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
@@ -728,7 +755,7 @@ separate Space, matching the system green-button behavior.
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |
 | Sequencer work | At most 10,000 tokens of 16,384 characters; analysis uses 5,000 tokens, 1,024 character positions, and 4,096 bit positions. Capture is limited to the retained history. |
-| Missing tools/protocols | No WebSocket message interception/replay or HTTP/3/QUIC support. |
+| Missing tools/protocols | No WebSocket fuzzing or HTTP/3/QUIC support. |
 
 See [CLI options](getting-started.md#options) to change the UI-cache and
 temporary-retention limits and [Safety and privacy](safety.md) for the
