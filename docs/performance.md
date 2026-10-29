@@ -53,8 +53,12 @@ WebSocket messages, and retained HTTP body/WebSocket payload bytes. By default
 both mirror the history settings, so the same numbers bound the UI cache and
 the temporary store; `--temporary-retention-limit` and
 `--temporary-retention-bytes` change them independently, and `0` disables a
-dimension. Persistent project files retain records on disk until cleared and
-have no automatic total-store retention cap. The M0 workload retained only
+dimension. Saved projects default to unlimited retention, with opt-in combined
+record/body limits under **Project storage…**. Limits exclude headers and
+workbench data and do not cap physical file size; freed redb pages can be reused
+without shrinking the file. The stored HTTP browser reads at most 500 metadata
+rows per page and hydrates only the selected detail on a background worker.
+These additions have not been included in the historical M0 benchmark. That workload retained only
 125 KiB, so the UI-cache budget did not bind in the measurements above.
 
 This UI-cache budget counts retained request/response bodies, not headers,

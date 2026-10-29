@@ -23,6 +23,7 @@ mod curl;
 mod decoder;
 mod events;
 mod file_dialog;
+mod history_browser;
 mod history_filter;
 mod input;
 mod inspector;

@@ -75,9 +75,18 @@ impl PerseidApp {
             .selected
             .and_then(|id| self.history.get(id))
             .filter(|item| !item.is_tunnel())
+            .cloned()
         else {
             return;
         };
+        self.send_history_to_comparer(&item, pane);
+    }
+
+    pub(super) fn send_history_to_comparer(
+        &mut self,
+        item: &crate::history::HistoryItem,
+        pane: MessagePane,
+    ) {
         let target = match pane {
             MessagePane::Request => 0,
             MessagePane::Response => 1,

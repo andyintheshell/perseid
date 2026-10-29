@@ -46,10 +46,10 @@ pub const DEFAULT_TEMPORARY_RETENTION_RECORDS: u64 = 2_000;
 /// Default retained-body cap for a temporary project.
 pub const DEFAULT_TEMPORARY_RETENTION_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Aggregate retention limits for the in-memory project.
+/// Aggregate logical retention limits for a project.
 ///
 /// A zero value disables that dimension. Limits are applied oldest-first after
-/// each capture transaction commits; persistent projects never evict records.
+/// each capture transaction. Saved projects default to unlimited retention.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetentionLimits {
     pub max_records: u64,
@@ -116,6 +116,8 @@ pub struct ProjectStatus {
     pub capture_loss_count: u64,
     pub event_loss_count: u64,
     pub retention_evictions: u64,
+    pub retention: RetentionLimits,
+    pub retained_body_bytes: u64,
     pub last_error: Option<String>,
 }
 
@@ -136,6 +138,15 @@ pub struct OpenedProject {
     pub ws_total: u64,
 }
 
+/// A validated, exclusively opened destination, not yet the active project.
+/// Keeping its handle avoids a validate/close/reopen race during UI switching.
+pub(crate) struct PreparedProject {
+    db: Arc<Database>,
+    meta: ProjectMeta,
+    opened: Box<OpenedProject>,
+    path: PathBuf,
+}
+
 /// A capture after project IDs have been assigned.
 #[derive(Clone, Debug)]
 pub struct CaptureOutcome {
@@ -143,6 +154,8 @@ pub struct CaptureOutcome {
 }
 
 enum Command {
+    InstallPrepared(Box<PreparedProject>, Sender<Result<OpenedProject>>),
+    SetRetention(RetentionLimits, Sender<Result<CommitReceipt>>),
     Capture(ProxyEvent),
     SetWorkspace(Box<WorkspaceState>),
     ClearHttp(Sender<Result<CommitReceipt>>),
@@ -160,6 +173,7 @@ enum Command {
         overwrite: bool,
         reply: Sender<Result<()>>,
     },
+    #[cfg(test)]
     Open {
         path: PathBuf,
         ui_limit: usize,
@@ -198,6 +212,16 @@ pub(crate) struct ProjectSnapshot {
 }
 
 impl ProjectSnapshot {
+    pub(crate) fn pruned_ids(&self, http: Vec<u64>, ws: Vec<u64>) -> Result<(Vec<u64>, Vec<u64>)> {
+        queries::pruned_ids(&self.db, http, ws)
+    }
+    pub(crate) fn list_http(
+        &self,
+        before: Option<HistoryCursor>,
+        limit: usize,
+    ) -> Result<Vec<HttpRow>> {
+        queries::list_http(&self.db, before, limit)
+    }
     pub(crate) fn get_http(&self, id: u64) -> Result<Option<HistoryItem>> {
         queries::get_http(&self.db, id)
     }
@@ -425,6 +449,7 @@ impl ProjectHandle {
         rx
     }
 
+    #[cfg(test)]
     pub fn open(
         &self,
         path: PathBuf,
@@ -441,6 +466,44 @@ impl ProjectHandle {
             },
             &rx,
         );
+        rx
+    }
+
+    /// Validate on a separate worker while the current proxy and writer keep
+    /// running. The UI quiesces capture only after this succeeds.
+    pub(crate) fn prepare_open(
+        &self,
+        path: PathBuf,
+        ui_limit: usize,
+        ui_bytes: usize,
+    ) -> Receiver<Result<PreparedProject>> {
+        let (tx, rx) = mpsc::channel();
+        let reply = tx.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("perseid-project-open".into())
+            .spawn(move || {
+                let result = persistence::open_project(&path, ui_limit, ui_bytes).map(
+                    |(db, meta, opened)| PreparedProject {
+                        db,
+                        meta,
+                        opened: Box::new(opened),
+                        path,
+                    },
+                );
+                let _ = reply.send(result);
+            })
+        {
+            let _ = tx.send(Err(ProjectError::Io(error)));
+        }
+        rx
+    }
+
+    pub(crate) fn install_prepared(
+        &self,
+        prepared: PreparedProject,
+    ) -> Receiver<Result<OpenedProject>> {
+        let (tx, rx) = mpsc::channel();
+        self.send_control(Command::InstallPrepared(Box::new(prepared), tx), &rx);
         rx
     }
 
@@ -472,6 +535,12 @@ impl ProjectHandle {
     pub fn clear_ws(&self) -> Receiver<Result<CommitReceipt>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(Command::ClearWs(tx), &rx);
+        rx
+    }
+
+    pub fn set_retention(&self, limits: RetentionLimits) -> Receiver<Result<CommitReceipt>> {
+        let (tx, rx) = mpsc::channel();
+        self.send_control(Command::SetRetention(limits, tx), &rx);
         rx
     }
 

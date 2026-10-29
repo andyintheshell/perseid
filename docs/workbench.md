@@ -38,8 +38,9 @@ from the open project.
 - **Open Project…** opens an existing `.perseid` file. Use the modal folder
   browser to navigate to its directory and select the file, or type a path in
   the **Look in** bar. The toolbar provides up, home, refresh, new-folder,
-  hidden-file, and list/grid controls. If the proxy is running, it stops for
-  the switch and restarts afterward. When the current temporary project has
+  hidden-file, and list/grid controls. Perseid validates the destination in the
+  background before stopping the proxy for a successful switch. A failed open
+  keeps the existing listener running. When the current temporary project has
   unsaved work, Open asks Save/Discard/Cancel first; a cancelled prompt or a
   failed open leaves the current project active.
 - **Save Project As…** transfers the current project into a new file and makes
@@ -66,21 +67,58 @@ it can contain cookies, tokens, credentials, personal data, and binary bodies.
 See [Safety and privacy](safety.md#data-handling) before saving or
 sharing one.
 
-**History is stored on disk in a saved project, but the history tables are
-still bounded:** opening a project loads only the newest snapshot allowed by
-`--history-limit` and `--history-bytes`. Older rows remain in the file and are
-found by **Search**, but the history and site-map tables do not page through
-them yet. In a temporary project, those same
-flags define the default aggregate retention limits, but the limits can be set
-independently with `--temporary-retention-limit` and
-`--temporary-retention-bytes`: when the temporary store exceeds the configured
-record count or retained-body budget, the oldest records are evicted first and
-the status bar reports the eviction count. The limits are soft: each stream's
-newest record is kept even when it alone exceeds the byte budget, in-flight
-exchanges are kept until they complete, and `0` disables a dimension. Saved
-project files are not pruned automatically. `--capture-limit` still
-caps each stored body, and clearing history deletes stored records from the
-active project.
+### Browse older history
+
+Opening a project loads a bounded newest-first live snapshot controlled by
+`--history-limit` and `--history-bytes`. In **Proxy > HTTP history**, choose
+**Browse stored history…** for all retained HTTP exchanges. **Older**, **Newer**,
+and **Newest** navigate metadata pages of up to 500 rows, newest first. Select
+a row to load request/response details, Pretty/Raw/Hex views, and Inspector
+notes on demand; send it directly to Repeater, Intruder, or Comparer. Pages
+stay in place during capture; **Newest** refreshes to include new arrivals.
+Live-table filters do not apply in this browser. **Search** filters all retained
+HTTP/WebSocket records, including decoded bodies. The site map and live
+WebSocket table still use the bounded snapshot.
+
+### Retention and file size
+
+**Project storage…** in the HTTP history toolbar configures a saved project's
+combined HTTP/WebSocket record count and retained body/payload byte limits.
+Both default to **0 (unlimited)**. **Apply retention limits** immediately removes
+the oldest eligible records and applies the policy to future captures. Limits
+survive reopen, Save As, and Save Copy. Lowering them cannot be undone; save a
+copy first if you need the records. The status bar reports eviction counts, and
+the live caches refresh after committed evictions.
+
+Temporary projects use `--temporary-retention-limit` and
+`--temporary-retention-bytes`, defaulting to the history flags. For both modes,
+zero disables a dimension. Limits are soft: in-flight HTTP exchanges and each
+stream's newest record are kept, even if they exceed a limit. Byte accounting
+excludes headers, indexes, workbench snapshots, and database overhead.
+`--capture-limit` separately caps each captured body.
+
+These are **logical retention limits, not physical file-size limits**. redb can
+reuse freed pages; removing records need not shrink the `.perseid` file. There
+is no automatic compaction command. **Save Project Copy…** writes retained data
+to a fresh file, which may be smaller; it also includes all saved workbench
+state. Neither operation securely erases old disk bytes.
+
+### Migrations and deletion
+
+This development version writes schema v2 and automatically migrates schema-v1
+projects from `0.2.x` under an exclusive file lock. The v1→v2 upgrade is one
+atomic transaction, preserves captures and notes, and defaults saved retention
+to unlimited. Older Perseid versions cannot open the upgraded file; keep a
+filesystem backup before opening if you need to use an older application.
+Unknown newer schemas and incomplete/corrupt files are rejected with an error.
+
+**Clear history** removes that history's captures from the active project;
+HTTP Clear also removes Inspector notes. Independently retained tool snapshots
+are not cleared by history retention or Clear history. To discard temporary
+work, leave it unsaved. To delete a whole saved project, switch to **New Project**
+or quit Perseid, then delete its `.perseid` file using your file manager. Remove
+any copies/backups separately. This does not delete the local CA or securely
+erase disk contents. There is no separate whole-project deletion button.
 
 ## Target and scope
 
@@ -684,8 +722,8 @@ separate Space, matching the system green-button behavior.
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
 | Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
-| Persistent project | One local `.perseid` redb file; captured records and project-scoped workbench state auto-save. Files are plaintext, are never pruned automatically, and are not encrypted. |
-| Project history view | Opening loads the newest snapshot up to `--history-limit` and `--history-bytes`. Search scans all stored HTTP/WebSocket records in the background, but the history and site-map tables still do not page through older stored rows. |
+| Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Files are unencrypted; saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
+| Project history view | Opening loads a bounded newest snapshot. **Browse stored history…** pages all retained HTTP rows and loads details/notes on demand; Search scans all retained HTTP/WebSocket records. The site map and live WebSocket table remain cache-based. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |

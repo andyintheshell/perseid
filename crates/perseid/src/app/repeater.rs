@@ -195,9 +195,14 @@ impl PerseidApp {
             .selected
             .and_then(|id| self.history.get(id))
             .filter(|item| !item.is_tunnel())
+            .cloned()
         else {
             return;
         };
+        self.send_history_to_repeater(&item);
+    }
+
+    pub(super) fn send_history_to_repeater(&mut self, item: &crate::history::HistoryItem) {
         let id = self.repeater_next_tab;
         self.repeater_next_tab += 1;
         self.repeater_tabs.push(RepeaterTab::from_history(id, item));
