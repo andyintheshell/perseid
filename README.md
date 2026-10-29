@@ -26,8 +26,9 @@ browser required.**
 > [!IMPORTANT]
 > **Public alpha: the core manual-testing workflows work today.** Perseid is
 > actively developed, not yet a feature-complete or drop-in Burp replacement.
-> Expect rough edges, and see the [capability matrix](docs/burp-parity.md) for
-> an honest account of what is implemented and what is still planned.
+> The [scoped manual-workflow parity estimate](docs/burp-parity.md#parity-estimate-786)
+> is **78.6%** as of 2026-10-29; see its methodology and capability matrix for
+> limitations and remaining gaps.
 
 ## Why Perseid?
 
