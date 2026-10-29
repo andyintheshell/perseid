@@ -7,6 +7,10 @@ if [[ $# -ne 1 ]]; then
     exit 2
 fi
 : "${DISPLAY:?Run inside an X11 display (for example xvfb-run)}"
+command -v gifsicle >/dev/null || {
+    echo 'gifsicle is required to optimize the demo GIF.' >&2
+    exit 1
+}
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$(mkdir -p "$1" && cd "$1" && pwd)"
 work="$(mktemp -d)"
@@ -108,30 +112,55 @@ click_at() {
     sleep 0.2
     xdotool click --clearmodifiers "$button"
 }
+open_history_menu() {
+    move_cursor 520 "$1"
+    sleep 0.3
+    xdotool click --clearmodifiers 3
+    sleep 0.8
+}
+
+# Stable physical positions in the 1600x1024 window. The history rows are
+# 27 px apart starting at 218; menu item offsets were measured against the
+# context menu opened from a row.
+proxy_tab_x=153
+comparer_tab_x=660
+tab_y=63
+row_2=245
+row_3=272
+row_5=326
+menu_repeater=25
+menu_intruder=58
+menu_response_decoder=130
+menu_response_comparer=213
+# A submenu starts level with its parent menu item. Both use the same 24 px
+# button height and 4 px spacing, so the second item is 35 px below it.
+submenu_second_item=35
 
 # Give first-time viewers a beat to orient on Proxy > HTTP history, then show
 # real requests appearing in the table as they pass through the local proxy.
 move_cursor 438 185
 sleep 0.5
-for path in '/api/catalog' '/api/products?id=1' '/api/products?id=2'; do
+for path in \
+    '/api/catalog' \
+    '/api/export?id=1' \
+    '/api/export?id=2' \
+    '/api/products?id=1' \
+    '/api/products?id=2'; do
     curl -fsS --max-time 10 --noproxy '' --proxy http://127.0.0.1:18080 \
         "http://127.0.0.1:18090$path" >/dev/null
-    sleep 0.9
+    sleep 0.7
 done
-sleep 1
+sleep 0.8
 
-# Select the third exchange (the product with id=2) and hold on its request and
-# response details before opening the context menu and sending it to Repeater.
-click_at 438 273 1
-sleep 1.5
-xdotool click --clearmodifiers 3
-sleep 0.6
-click_at 512 292 1
-sleep 2.5
+# Repeater: replay a captured product request with a different id.
+click_at 438 "$row_5" 1
+sleep 1.2
+open_history_menu "$row_5"
+click_at 550 $((row_5 + menu_repeater)) 1
+sleep 1.3
 
-# Change only the product id in the captured request, then replay it.
 click_at 225 256 1
-sleep 1
+sleep 0.8
 xdotool key --clearmodifiers Home
 for _ in {1..21}; do
     xdotool key --clearmodifiers Right
@@ -139,40 +168,137 @@ for _ in {1..21}; do
 done
 xdotool key --clearmodifiers Delete
 xdotool type --clearmodifiers --delay 80 '42'
-sleep 0.5
+sleep 0.4
 click_at 60 140 1
-sleep 4
+sleep 2.2
+# Hold on the JSON response, including its base64 receipt field.
+move_cursor 1180 470
+sleep 2.2
 
-# Finish with the successful JSON response in view rather than a bare editor.
-move_cursor 1190 510
-sleep 3
+# Back to history, then run a three-payload Intruder attack against the export
+# endpoint. Auto $$ marks only the query value.
+click_at "$proxy_tab_x" "$tab_y" 1
+sleep 1.0
+click_at 438 "$row_3" 1
+sleep 0.9
+open_history_menu "$row_3"
+click_at 550 $((row_3 + menu_intruder)) 1
+sleep 1.3
 
-# Confirm that a real direct Repeater send, not only the initial proxy traffic,
-# reached the synthetic target. Fail instead of publishing a misleading demo.
+click_at 280 149 1
+sleep 1.1
+click_at 1350 420 1
+sleep 0.4
+xdotool type --clearmodifiers --delay 60 '1'
+xdotool key --clearmodifiers Return
+xdotool type --clearmodifiers --delay 60 '2'
+xdotool key --clearmodifiers Return
+xdotool type --clearmodifiers --delay 60 '42'
+sleep 0.5
+click_at 344 109 1
+sleep 3.0
+# Select the id=42 result and show its base64 response body.
+click_at 100 780 1
+sleep 0.8
+click_at 1052 759 1
+sleep 1.0
+move_cursor 1200 870
+sleep 2.3
+
+# Decoder: transfer the id=1 export response, select its base64 body, and let
+# Smart decode pick the transform.
+click_at "$proxy_tab_x" "$tab_y" 1
+sleep 1.0
+click_at 438 "$row_2" 1
+sleep 0.9
+open_history_menu "$row_2"
+click_at 550 $((row_2 + menu_response_decoder)) 1
+sleep 0.8
+click_at 780 $((row_2 + menu_response_decoder + submenu_second_item)) 1
+sleep 1.5
+
+click_at 500 200 1
+sleep 0.5
+xdotool key --clearmodifiers ctrl+End
+sleep 0.2
+xdotool key --clearmodifiers shift+Home
+sleep 0.3
+click_at 1450 339 1
+sleep 1.5
+move_cursor 700 610
+sleep 2.2
+
+# Comparer: send two export responses, then compare the pair word by word.
+click_at "$proxy_tab_x" "$tab_y" 1
+sleep 1.0
+click_at 438 "$row_2" 1
+sleep 0.9
+open_history_menu "$row_2"
+click_at 550 $((row_2 + menu_response_comparer)) 1
+sleep 0.8
+click_at 438 "$row_3" 1
+sleep 0.8
+open_history_menu "$row_3"
+click_at 550 $((row_3 + menu_response_comparer)) 1
+sleep 0.8
+click_at "$comparer_tab_x" "$tab_y" 1
+sleep 1.2
+# Both responses are already selected in table 2; select the first in table 1.
+click_at 200 242 1
+sleep 0.5
+click_at 1530 888 1
+sleep 1.5
+move_cursor 800 500
+sleep 3.5
+
+# Confirm that the real UI actions, not only the initial proxy traffic, reached
+# the synthetic target. Fail instead of publishing a misleading demo.
 python3 - "$DEMO_REQUEST_LOG" <<'PY'
+import collections
 import json
 import sys
+
 with open(sys.argv[1], encoding="utf-8") as stream:
     paths = [json.loads(line)["path"] for line in stream]
-expected = ["/api/catalog", "/api/products?id=1", "/api/products?id=2", "/api/products?id=42"]
-if paths != expected:
-    raise SystemExit(f"Unexpected demo traffic: {paths!r}; expected {expected!r}")
+initial = [
+    "/api/catalog",
+    "/api/export?id=1",
+    "/api/export?id=2",
+    "/api/products?id=1",
+    "/api/products?id=2",
+]
+expected = collections.Counter(initial + [
+    "/api/products?id=42",
+    "/api/export?id=1",
+    "/api/export?id=2",
+    "/api/export?id=42",
+])
+actual = collections.Counter(paths)
+if paths[:len(initial)] != initial or actual != expected:
+    raise SystemExit(
+        f"Unexpected demo traffic: {paths!r}; expected prefix {initial!r} "
+        f"and counts {dict(expected)!r}"
+    )
 PY
 
 kill -INT "$record_pid"
 wait "$record_pid" || true
 record_pid=''
 [[ -s "$out/demo-recording.mp4" ]] || { echo 'Recording is empty.' >&2; exit 1; }
-# Convert the recording to a full-resolution, smoothly animated looping GIF.
+# Downscale and reduce the frame rate before quantizing. The README only needs
+# enough fidelity to follow the pointer and read the main controls; the lossy
+# pass then removes dithering noise that GIF compression handles poorly.
 ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" \
-    -vf 'fps=15,scale=1600:-1:flags=lanczos,palettegen=stats_mode=diff' "$work/palette.png"
+    -vf 'fps=12,scale=1280:820:flags=lanczos,palettegen=max_colors=128:stats_mode=diff' \
+    "$work/palette.png"
 ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" -i "$work/palette.png" \
-    -filter_complex '[0:v]fps=15,scale=1600:-1:flags=lanczos[video];[video][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle' \
-    -loop 0 "$out/perseid-demo.gif"
+    -filter_complex '[0:v]fps=12,scale=1280:820:flags=lanczos[video];[video][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle' \
+    -loop 0 "$work/demo-unoptimized.gif"
+gifsicle --optimize=3 --lossy=80 "$work/demo-unoptimized.gif" -o "$out/perseid-demo.gif"
 [[ -s "$out/perseid-demo.gif" ]] || { echo 'GIF is empty.' >&2; exit 1; }
 dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$out/perseid-demo.gif")"
-if [[ "$dimensions" != '1600,1024' ]]; then
-    echo "Demo GIF must be 1600x1024 (got ${dimensions:-unknown})." >&2
+if [[ "$dimensions" != '1280,820' ]]; then
+    echo "Demo GIF must be 1280x820 (got ${dimensions:-unknown})." >&2
     exit 1
 fi
 echo "Demo GIF resolution: ${dimensions/,/x}"
@@ -181,4 +307,10 @@ if ! awk -v duration="$duration" 'BEGIN { exit !(duration > 0 && duration < 60) 
     echo "Demo GIF must be shorter than 60 seconds (got ${duration:-unknown}s)." >&2
     exit 1
 fi
+size="$(wc -c < "$out/perseid-demo.gif")"
+if ((size > 2500000)); then
+    echo "Demo GIF must stay under 2.5 MB for the README (got ${size} bytes)." >&2
+    exit 1
+fi
 echo "Demo GIF duration: ${duration}s"
+echo "Demo GIF size: ${size} bytes"

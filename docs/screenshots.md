@@ -150,11 +150,13 @@ Allocator heap in use and peak, not total process RSS. See the
 Run **Actions > Record demo GIF > Run workflow**, selecting the branch to
 record. The workflow builds Perseid on a Linux runner, starts a loopback-only
 synthetic target, and records a real desktop session under Xvfb. The
-[storyboard](demo-gif-script.md) is aimed at first-time users: it shows traffic
-appearing in HTTP history, inspection, then an edited Repeater send and its
-response. The pointer travels between controls instead of jumping. The GIF is
-captured at 1600×1024 and is kept under one minute; the workflow verifies that
-the edited request reached the local target before it produces the GIF.
+[storyboard](demo-gif-script.md) is aimed at first-time users: it follows one
+captured export through Repeater, Intruder, Decoder, and Comparer, using the
+synthetic target's base64 responses. The pointer travels between controls
+instead of jumping. The GIF is downscaled to 1280×820 at 12 fps, quantized, and
+optimized with `gifsicle`; the workflow keeps it under one minute and 2.5 MB so
+it stays practical for the README. Before publishing, the workflow verifies that
+the edited Repeater and Intruder requests reached the local target.
 
 Download `perseid-demo-gif` from the workflow run and review it before using it.
 The artifact expires after 30 days; copy an approved GIF into the repository if
