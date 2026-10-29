@@ -82,8 +82,7 @@ promise.
   running attacks or sends, held interception messages, and CA material do not
   persist. WebSocket message interception/replay remains unimplemented. History
   and message selections can be sent to Decoder; Hex selections currently send
-  their displayed hexadecimal text rather than binary bytes. SKEIN, TupleHash,
-  and OID aliases remain unimplemented.*
+  their displayed hexadecimal text rather than binary bytes.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
