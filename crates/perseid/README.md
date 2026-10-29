@@ -38,10 +38,10 @@ The `perseid` package provides both the desktop application and the
 - Temporary and persistent projects using a single local `.perseid` file, with automatic saving of captured traffic and supported workbench inputs.
 - HTTPS interception with a local certificate authority, explicit trust setup, and per-host TLS pass-through.
 - Interception controls, Repeater, Intruder, Decoder, Comparer, scope rules, and match/replace.
-- WebSocket history for `ws://` and decrypted `wss://` traffic.
+- WebSocket history, message interception, and live-connection replay for `ws://` and decrypted `wss://` traffic.
 - Bounded capture/history resources and a live memory indicator.
 
-WebSocket editing/replay and automated scanning are not implemented. Project
+WebSocket replay cannot reopen closed connections; automated scanning is not implemented. Project
 persistence has no encryption. The UI opens a bounded newest-first live snapshot;
 **Browse stored history…** pages through all retained HTTP exchanges with lazy
 details and notes. Schema-v1 projects migrate atomically to v2 on open; back up

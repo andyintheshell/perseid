@@ -15,7 +15,7 @@ illustrate the UI, not platform support or performance guarantees.
 
 [History](#proxy--http-history) · [Projects](#projects) · [Search](#search) ·
 [WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
-[Intruder](#intruder) · [Repeater](#repeater) · [Sequencer](#sequencer) ·
+[Intruder](#intruder) · [Repeater](#repeater) · [WebSocket Repeater](#repeater--websockets) · [Sequencer](#sequencer) ·
 [Sequencer result](#sequencer-result) · [Decoder](#decoder) · [Comparer](#comparer) ·
 [Comparer result](#comparer-result) · [Memory](#memory-usage)
 
@@ -101,6 +101,13 @@ responses from a finished Sniper attack.
 Replay edited requests directly to a target, independently of the proxy listener.
 
 ![Repeater request and response](images/perseid-repeater.png)
+
+## Repeater > WebSockets
+
+Edit a message and inspect the connection history alongside it. Replay uses the
+original live connection; this offline synthetic scene shows it as closed.
+
+![WebSocket Repeater with a message editor and connection history](images/perseid-repeater-websockets.png)
 
 ## Sequencer
 

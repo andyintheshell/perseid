@@ -263,6 +263,7 @@ impl PerseidApp {
         }
 
         let mut clicked = None;
+        let mut send_to_repeater = None;
         table_frame(ui, |ui| {
             let mut table = TableBuilder::new(ui)
                 .striped(true)
@@ -389,12 +390,24 @@ impl PerseidApp {
                         if response.clicked() {
                             clicked = Some(id);
                         }
+                        response.context_menu(|ui| {
+                            if ui.button("Send to Repeater").clicked() {
+                                send_to_repeater = Some(id);
+                                ui.close();
+                            }
+                        });
                     });
                 });
         });
 
         if let Some(id) = clicked {
             self.select_websocket_id(id);
+        }
+        if let Some(item) = send_to_repeater
+            .and_then(|id| self.websocket_history.get(id))
+            .cloned()
+        {
+            self.send_websocket_to_repeater(&item);
         }
     }
 
@@ -1025,6 +1038,45 @@ mod decoder_transfer_tests {
         ] {
             frame(ctx, app, vec![event]).drop_without_applying_deltas();
         }
+    }
+
+    #[test]
+    fn websocket_history_context_menu_opens_repeater() {
+        let mut app = PerseidApp::test_app();
+        app.main_tab = MainTab::Proxy;
+        app.proxy_section = ProxySection::WebSocketsHistory;
+        app.websocket_history.apply(ProxyEvent::WebSocketMessage {
+            id: 42,
+            timestamp: SystemTime::UNIX_EPOCH,
+            connection: crate::proxy::WebSocketConnectionInfo {
+                id: 7,
+                url: "ws://example.test/socket".into(),
+                host: "example.test".into(),
+                tls: false,
+                listener_port: 8080,
+                protocol: None,
+            },
+            direction: crate::proxy::WebSocketDirection::ToServer,
+            opcode: crate::proxy::WebSocketOpcode::Text,
+            payload: CapturedBody::from_bytes(b"hello".to_vec()),
+        });
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+        click(
+            &ctx,
+            &mut app,
+            "ws://example.test/socket",
+            egui::PointerButton::Secondary,
+        );
+        click(
+            &ctx,
+            &mut app,
+            "Send to Repeater",
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(app.main_tab, MainTab::Repeater);
+        assert!(app.repeater_workspace().is_empty());
     }
 
     #[test]

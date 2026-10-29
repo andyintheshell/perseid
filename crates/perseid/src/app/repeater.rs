@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::proxy::{
     DEFAULT_REPEATER_TIMEOUT, Repeater, RepeaterConfig, RepeaterError, RepeaterRequest,
-    RepeaterResult, split_raw_request,
+    RepeaterResult, WebSocketDirection, WebSocketOpcode, split_raw_request,
 };
 use egui::TextEdit;
 
@@ -38,6 +38,18 @@ pub(super) struct RepeaterTab {
     pending_since: Option<Instant>,
     error: Option<String>,
     response_view: MessageView,
+    websocket: Option<WebSocketReplay>,
+}
+
+struct WebSocketReplay {
+    connection_id: u64,
+    live_connection_id: Option<u64>,
+    url: String,
+    direction: WebSocketDirection,
+    opcode: WebSocketOpcode,
+    draft: String,
+    selected_message: Option<u64>,
+    truncated: bool,
 }
 
 struct RepeaterReply {
@@ -109,6 +121,7 @@ impl RepeaterTab {
             pending_since: None,
             error: None,
             response_view: MessageView::Pretty,
+            websocket: None,
         }
     }
 
@@ -147,6 +160,7 @@ impl RepeaterTab {
             pending_since: None,
             error: None,
             response_view: MessageView::Pretty,
+            websocket: None,
         }
     }
 
@@ -206,6 +220,42 @@ impl PerseidApp {
         let id = self.repeater_next_tab;
         self.repeater_next_tab += 1;
         self.repeater_tabs.push(RepeaterTab::from_history(id, item));
+        self.repeater_active = self.repeater_tabs.len() - 1;
+        self.main_tab = MainTab::Repeater;
+    }
+
+    pub(super) fn send_websocket_to_repeater(
+        &mut self,
+        item: &crate::websocket_history::WebSocketMessageItem,
+    ) {
+        let id = self.repeater_next_tab;
+        self.repeater_next_tab += 1;
+        let mut tab = RepeaterTab::new(id);
+        tab.title = format!("WS #{}", item.number);
+        let draft = match item.opcode {
+            WebSocketOpcode::Text => String::from_utf8_lossy(item.payload.data()).into_owned(),
+            WebSocketOpcode::Binary => item
+                .payload
+                .data()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        tab.websocket = Some(WebSocketReplay {
+            connection_id: item.connection.id,
+            live_connection_id: self.websocket_live_ids.get(&item.id).copied(),
+            url: item.connection.url.clone(),
+            direction: item.direction,
+            opcode: item.opcode,
+            draft,
+            selected_message: Some(item.id),
+            truncated: item.payload.is_truncated()
+                || !item.payload.is_complete()
+                || (item.opcode == WebSocketOpcode::Text
+                    && std::str::from_utf8(item.payload.data()).is_err()),
+        });
+        self.repeater_tabs.push(tab);
         self.repeater_active = self.repeater_tabs.len() - 1;
         self.main_tab = MainTab::Repeater;
     }
@@ -286,6 +336,10 @@ impl PerseidApp {
         }
 
         self.repeater_active = self.repeater_active.min(self.repeater_tabs.len() - 1);
+        if self.repeater_tabs[self.repeater_active].websocket.is_some() {
+            self.websocket_repeater_view(ui);
+            return;
+        }
         self.repeater_toolbar(ui);
         self.repeater_editor(ui);
     }
@@ -498,6 +552,199 @@ impl PerseidApp {
             });
     }
 
+    fn websocket_repeater_view(&mut self, ui: &mut egui::Ui) {
+        let index = self.repeater_active;
+        let connection_id = self.repeater_tabs[index]
+            .websocket
+            .as_ref()
+            .unwrap()
+            .connection_id;
+        let open = self.proxy.as_ref().is_some_and(|proxy| {
+            self.repeater_tabs[index]
+                .websocket
+                .as_ref()
+                .unwrap()
+                .live_connection_id
+                .is_some_and(|id| proxy.websocket_is_open(id))
+        });
+        if open {
+            ui.ctx().request_repaint_after(Duration::from_millis(250));
+        }
+        let mut send = false;
+        let send_limit = self.intercept_limit;
+        egui::Panel::top(REPEATER_TOOLBAR_ID).show(ui, |ui| {
+            let tab = &mut self.repeater_tabs[index];
+            let ws = tab.websocket.as_mut().unwrap();
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(open && !ws.truncated, egui::Button::new("Send"))
+                    .on_hover_text("Queue this message on the existing connection (Ctrl+Enter)")
+                    .clicked()
+                {
+                    send = true;
+                }
+                egui::ComboBox::from_id_salt(("ws.direction", tab.id))
+                    .selected_text(view::websocket_direction_text(ws.direction))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut ws.direction,
+                            WebSocketDirection::ToServer,
+                            "To server",
+                        );
+                        ui.selectable_value(
+                            &mut ws.direction,
+                            WebSocketDirection::ToClient,
+                            "To client",
+                        );
+                    });
+                ui.label(format!("WebSocket {} · {}", ws.connection_id, ws.url));
+                ui.colored_label(
+                    if open { theme::GREEN } else { theme::RED },
+                    if open { "Open" } else { "Closed" },
+                );
+                ui.label(
+                    RichText::new("Live tab · not saved in project")
+                        .small()
+                        .color(theme::TEXT_MUTED),
+                );
+            });
+            if ws.truncated {
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        theme::AMBER,
+                        "Capture is incomplete. Review the draft before sending.",
+                    );
+                    if ui.button("Use captured prefix").clicked() {
+                        ws.truncated = false;
+                    }
+                });
+            }
+            if let Some(error) = &tab.error {
+                ui.colored_label(theme::RED, error);
+            } else if let Some(note) = &tab.note {
+                ui.label(note);
+            }
+        });
+
+        egui::Panel::left(REPEATER_REQUEST_ID)
+            .resizable(true)
+            .default_size((ui.available_width() * 0.5).max(260.0))
+            .min_size(180.0)
+            .show(ui, |ui| {
+                let ws = self.repeater_tabs[index].websocket.as_mut().unwrap();
+                ui.label(match ws.opcode {
+                    WebSocketOpcode::Text => "Text message",
+                    WebSocketOpcode::Binary => "Binary message (hex bytes)",
+                });
+                ui.add(
+                    egui::TextEdit::multiline(&mut ws.draft)
+                        .char_limit(match ws.opcode {
+                            WebSocketOpcode::Text => send_limit,
+                            WebSocketOpcode::Binary => send_limit.saturating_mul(3),
+                        })
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(20),
+                );
+            });
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui.heading("Connection history");
+            let selected = &mut self.repeater_tabs[index]
+                .websocket
+                .as_mut()
+                .unwrap()
+                .selected_message;
+            egui::ScrollArea::vertical()
+                .id_salt(("ws.repeater.history", index))
+                .max_height(160.0)
+                .show(ui, |ui| {
+                    for item in self
+                        .websocket_history
+                        .iter()
+                        .filter(|item| item.connection.id == connection_id)
+                    {
+                        let label = format!(
+                            "#{}  {}  {}  {}",
+                            item.number,
+                            view::websocket_direction_text(item.direction),
+                            view::websocket_opcode_text(item.opcode),
+                            view::human_bytes(item.payload.total_len())
+                        );
+                        if ui
+                            .selectable_label(*selected == Some(item.id), label)
+                            .clicked()
+                        {
+                            *selected = Some(item.id);
+                        }
+                    }
+                });
+            ui.separator();
+            let tab = &mut self.repeater_tabs[index];
+            if let Some(item) = tab
+                .websocket
+                .as_ref()
+                .unwrap()
+                .selected_message
+                .and_then(|id| self.websocket_history.get(id))
+            {
+                super::message_view::message_tabs(ui, &mut tab.response_view);
+                let views = view::websocket_message_views(item);
+                message_text(
+                    ui,
+                    tab.id,
+                    MessagePane::Response,
+                    tab.response_view,
+                    super::message_view::message_view_text(&views, tab.response_view),
+                );
+            } else {
+                empty_state(
+                    ui,
+                    "No message selected",
+                    "Select a message from the connection history.",
+                );
+            }
+        });
+        if send {
+            self.send_websocket_repeater();
+        }
+    }
+
+    fn send_websocket_repeater(&mut self) {
+        let tab = &mut self.repeater_tabs[self.repeater_active];
+        let ws = tab.websocket.as_ref().unwrap();
+        let payload = if ws.truncated {
+            Err("Confirm the incomplete captured message before sending".to_string())
+        } else {
+            match ws.opcode {
+                WebSocketOpcode::Text => Ok(ws.draft.as_bytes().to_vec()),
+                WebSocketOpcode::Binary => parse_hex_bytes(&ws.draft),
+            }
+        };
+        let result = payload.and_then(|payload| {
+            self.proxy
+                .as_ref()
+                .ok_or_else(|| "Proxy is stopped".to_string())?
+                .send_websocket_message(
+                    ws.live_connection_id
+                        .ok_or_else(|| "WebSocket connection is not open".to_string())?,
+                    ws.direction,
+                    ws.opcode,
+                    payload,
+                )
+                .map_err(|err| err.to_string())
+        });
+        match result {
+            Ok(()) => {
+                tab.error = None;
+                tab.note = Some("Queued; delivery is not guaranteed.".to_string());
+            }
+            Err(error) => {
+                tab.note = None;
+                tab.error = Some(error);
+            }
+        }
+    }
+
     fn new_repeater_tab(&mut self) {
         let id = self.repeater_next_tab;
         self.repeater_next_tab += 1;
@@ -535,6 +782,14 @@ impl PerseidApp {
 
     pub(super) fn send_active_repeater(&mut self) {
         let index = self.repeater_active;
+        if self
+            .repeater_tabs
+            .get(index)
+            .is_some_and(|tab| tab.websocket.is_some())
+        {
+            self.send_websocket_repeater();
+            return;
+        }
         let Some(tab) = self.repeater_tabs.get(index) else {
             return;
         };
@@ -590,6 +845,30 @@ impl PerseidApp {
             }
         }
     }
+}
+
+pub(super) fn parse_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
+    let digits: String = text
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect();
+    if !digits.is_ascii() || !digits.len().is_multiple_of(2) {
+        return Err("Enter an even number of hexadecimal digits".to_string());
+    }
+    digits
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| {
+            let digit = |byte: u8| {
+                (byte as char)
+                    .to_digit(16)
+                    .ok_or_else(|| "Invalid hexadecimal digit".to_string())
+            };
+            Ok(((digit(pair[0])? << 4) | digit(pair[1])?) as u8)
+        })
+        .collect()
 }
 
 fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
@@ -736,9 +1015,18 @@ fn repeater_status_text(status: u16, reason: &str) -> String {
 }
 
 impl PerseidApp {
+    pub(super) fn persisted_repeater_active(&self) -> usize {
+        self.repeater_tabs
+            .iter()
+            .take(self.repeater_active)
+            .filter(|tab| tab.websocket.is_none())
+            .count()
+    }
+
     pub(super) fn repeater_workspace(&self) -> Vec<RepeaterWorkspace> {
         self.repeater_tabs
             .iter()
+            .filter(|tab| tab.websocket.is_none())
             .map(|tab| RepeaterWorkspace {
                 id: tab.id,
                 title: tab.title.clone(),
@@ -820,6 +1108,97 @@ mod tests {
     use crate::history::{HistoryItem, Phase};
     use crate::proxy::{CapturedBody, RequestInfo};
     use std::time::SystemTime;
+
+    #[test]
+    fn binary_replay_hex_is_strict_and_preserves_bytes() {
+        assert_eq!(parse_hex_bytes("00 ff\nA5").unwrap(), vec![0, 255, 165]);
+        assert!(parse_hex_bytes("0").is_err());
+        assert!(parse_hex_bytes("gg").is_err());
+        assert!(parse_hex_bytes("é").is_err());
+    }
+
+    #[test]
+    fn websocket_replay_seeds_binary_and_is_not_persisted_as_http() {
+        let item = crate::websocket_history::WebSocketMessageItem {
+            id: 42,
+            number: 3,
+            timestamp: SystemTime::now(),
+            connection: crate::proxy::WebSocketConnectionInfo {
+                id: 7,
+                url: "ws://example.com/".into(),
+                host: "example.com".into(),
+                tls: false,
+                listener_port: 8080,
+                protocol: None,
+            },
+            direction: WebSocketDirection::ToServer,
+            opcode: WebSocketOpcode::Binary,
+            payload: CapturedBody::from_bytes(vec![0, 255]),
+        };
+        let mut app = PerseidApp::test_app();
+        app.websocket_live_ids.insert(item.id, 123);
+        app.send_websocket_to_repeater(&item);
+        let ws = app
+            .repeater_tabs
+            .last()
+            .unwrap()
+            .websocket
+            .as_ref()
+            .unwrap();
+        assert_eq!(ws.draft, "00 ff");
+        assert_eq!(ws.connection_id, 7);
+        assert_eq!(ws.live_connection_id, Some(123));
+        assert!(!ws.truncated);
+        assert!(app.repeater_workspace().is_empty());
+        app.websocket_history
+            .apply(crate::proxy::ProxyEvent::WebSocketMessage {
+                id: item.id,
+                timestamp: item.timestamp,
+                connection: item.connection.clone(),
+                direction: item.direction,
+                opcode: item.opcode,
+                payload: item.payload.clone(),
+            });
+        let ctx = egui::Context::default();
+        for selected in [Some(item.id), None] {
+            app.repeater_tabs[app.repeater_active]
+                .websocket
+                .as_mut()
+                .unwrap()
+                .selected_message = selected;
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.websocket_repeater_view(ui)
+            })
+            .drop_without_applying_deltas();
+        }
+        app.send_active_repeater();
+        assert_eq!(
+            app.repeater_tabs.last().unwrap().error.as_deref(),
+            Some("Proxy is stopped")
+        );
+        let ws = app.repeater_tabs[app.repeater_active]
+            .websocket
+            .as_mut()
+            .unwrap();
+        ws.truncated = true;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.websocket_repeater_view(ui)
+        })
+        .drop_without_applying_deltas();
+        app.send_active_repeater();
+        assert_eq!(
+            app.repeater_tabs[app.repeater_active].error.as_deref(),
+            Some("Confirm the incomplete captured message before sending")
+        );
+        let ws = app.repeater_tabs[app.repeater_active]
+            .websocket
+            .as_mut()
+            .unwrap();
+        ws.truncated = false;
+        ws.draft = "gg".into();
+        app.send_active_repeater();
+        assert!(app.repeater_tabs[app.repeater_active].error.is_some());
+    }
 
     fn history_item(
         number: u64,

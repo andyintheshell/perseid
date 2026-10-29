@@ -1242,6 +1242,7 @@ impl PerseidApp {
 
         self.history.load(opened.http);
         self.websocket_history.load(opened.ws);
+        self.websocket_live_ids.clear();
         self.selected = None;
         self.detail = None;
         self.websocket_selected = None;
@@ -1281,7 +1282,7 @@ impl PerseidApp {
             websocket_filter: self.websocket_filter.clone(),
             selected_http_id: self.selected,
             selected_websocket_id: self.websocket_selected,
-            repeater_active: self.repeater_active,
+            repeater_active: self.persisted_repeater_active(),
         }
     }
 

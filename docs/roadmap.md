@@ -85,7 +85,7 @@ promise.
   interception/pass-through hosts. The
   Comparer diff and Sequencer analysis are recomputed on open. Live capture,
   running attacks or sends, held interception messages, and CA material do not
-  persist. WebSocket message interception/replay remains unimplemented. History
+  persist. Live WebSocket Repeater tabs are also session-only. History
   and message selections can be sent to Decoder; Hex selections currently send
   their displayed hexadecimal text rather than binary bytes.*
 
@@ -97,7 +97,7 @@ promise.
   Sequencer landed ahead of this milestone. WebSockets support plain `ws://`,
   decrypted `wss://`, complete text/binary message reassembly, masking removal,
   a bounded UI history snapshot, and Pretty/Raw/Hex inspection. WebSocket
-  message interception, editing, and replay remain. Intruder supports `$$`
+  message interception, editing, and live-connection replay are available. Intruder supports `$$`
   positions, editable and file-loaded payload sets, all four attack modes, up
   to 32 concurrent requests, live result inspection, and
   enforced-scope checks for every generated request. Payload processing rules

@@ -16,6 +16,7 @@ impl PerseidApp {
 
     pub(super) fn clear_websocket_history(&mut self) {
         self.websocket_history.clear();
+        self.websocket_live_ids.clear();
         self.websocket_selected = None;
         self.websocket_detail = None;
         self.search.clear_websocket_source();

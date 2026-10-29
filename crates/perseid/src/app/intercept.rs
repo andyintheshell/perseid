@@ -9,7 +9,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::proxy::{InterceptError, InterceptItem, InterceptKey, InterceptKind};
+use crate::proxy::{
+    InterceptError, InterceptItem, InterceptKey, InterceptKind, WebSocketInterceptError,
+    WebSocketInterceptItem, WebSocketOpcode,
+};
 use egui::{Align, Label};
 use egui_extras::{Column, TableBuilder};
 
@@ -22,6 +25,50 @@ const INTERCEPT_EDITOR_ID: &str = "perseid.proxy.intercept.editor";
 /// Keep interception message editor state separate from history entries, which
 /// can use the same exchange id.
 const INTERCEPT_MESSAGE_ID: u64 = 1 << 63;
+
+pub(super) struct WebSocketInterceptEntry {
+    item: WebSocketInterceptItem,
+    draft: String,
+    error: Option<String>,
+}
+
+impl WebSocketInterceptEntry {
+    fn new(item: WebSocketInterceptItem) -> Self {
+        let draft = match item.opcode() {
+            WebSocketOpcode::Text => String::from_utf8_lossy(item.payload()).into_owned(),
+            WebSocketOpcode::Binary => item
+                .payload()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        Self {
+            item,
+            draft,
+            error: None,
+        }
+    }
+
+    fn decide(&mut self, forward: bool) -> Result<(), String> {
+        let result = if forward {
+            let payload = match self.item.opcode() {
+                WebSocketOpcode::Text => self.draft.as_bytes().to_vec(),
+                WebSocketOpcode::Binary => super::repeater::parse_hex_bytes(&self.draft)?,
+            };
+            self.item.forward(payload)
+        } else {
+            self.item.drop_message()
+        };
+        match result {
+            Ok(())
+            | Err(WebSocketInterceptError::Closed | WebSocketInterceptError::AlreadyResolved) => {
+                Ok(())
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
 
 /// One held message together with the user's in-progress edits.
 pub(super) struct InterceptEntry {
@@ -170,6 +217,7 @@ impl PerseidApp {
         self.apply_proxy_settings();
         if was_enabled && !enabled {
             self.decide_intercept(true, true);
+            self.decide_websocket_intercepts(true, true);
         }
     }
 
@@ -178,6 +226,7 @@ impl PerseidApp {
     /// exchange, which is the intended behavior for a stopped proxy.
     pub(super) fn clear_intercept_queue(&mut self) {
         self.intercept_queue.clear();
+        self.websocket_intercept_queue.clear();
         self.intercept_selected.clear();
         self.intercept_active = None;
         self.intercept_anchor = None;
@@ -191,6 +240,92 @@ impl PerseidApp {
         self.intercept_queue.push_back(InterceptEntry::new(item));
         if !self.intercept_enabled {
             self.decide_intercept(true, true);
+        }
+    }
+
+    pub(super) fn receive_websocket_intercept_item(&mut self, item: WebSocketInterceptItem) {
+        self.websocket_intercept_queue
+            .push_back(WebSocketInterceptEntry::new(item));
+        if !self.intercept_enabled {
+            self.decide_websocket_intercepts(true, true);
+        }
+    }
+
+    fn decide_websocket_intercepts(&mut self, forward: bool, all: bool) {
+        let count = if all {
+            self.websocket_intercept_queue.len()
+        } else {
+            self.websocket_intercept_queue.len().min(1)
+        };
+        for _ in 0..count {
+            let Some(mut entry) = self.websocket_intercept_queue.pop_front() else {
+                break;
+            };
+            if let Err(error) = entry.decide(forward) {
+                entry.error = Some(error);
+                self.websocket_intercept_queue.push_back(entry);
+            }
+        }
+    }
+
+    fn websocket_intercept_panel(&mut self, ui: &mut egui::Ui) {
+        if self.websocket_intercept_queue.is_empty() {
+            return;
+        }
+        let mut forward = false;
+        let mut drop_message = false;
+        let limit = self.intercept_limit;
+        egui::Panel::top("perseid.proxy.intercept.websocket")
+            .resizable(true)
+            .default_size(220.0)
+            .show(ui, |ui| {
+                let count = self.websocket_intercept_queue.len();
+                let entry = self.websocket_intercept_queue.front_mut().unwrap();
+                ui.horizontal(|ui| {
+                    ui.strong(format!("WebSocket · {count} held"));
+                    if entry.item.is_closed() {
+                        ui.colored_label(theme::RED, "Connection closed");
+                    }
+                    ui.label(format!(
+                        "{} · {} · {}",
+                        entry.item.connection().url,
+                        view::websocket_direction_text(entry.item.direction()),
+                        view::websocket_opcode_text(entry.item.opcode())
+                    ));
+                    if ui.button("Forward message").clicked() {
+                        forward = true;
+                    }
+                    if ui.button("Drop message").clicked() {
+                        drop_message = true;
+                    }
+                });
+                ui.label(match entry.item.opcode() {
+                    WebSocketOpcode::Text => "Edit text",
+                    WebSocketOpcode::Binary => "Edit hexadecimal bytes",
+                });
+                if let Some(error) = &entry.error {
+                    ui.colored_label(theme::RED, error);
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("ws.intercept.editor")
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut entry.draft)
+                                .char_limit(match entry.item.opcode() {
+                                    WebSocketOpcode::Text => limit,
+                                    WebSocketOpcode::Binary => limit.saturating_mul(3),
+                                })
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(5),
+                        );
+                    });
+            });
+        if forward {
+            self.decide_websocket_intercepts(true, false);
+        }
+        if drop_message {
+            self.decide_websocket_intercepts(false, false);
         }
     }
 
@@ -241,6 +376,7 @@ impl PerseidApp {
         let mut forward_all = false;
         let mut drop_all = false;
         let pending = self.intercept_queue.len();
+        let websocket_pending = self.websocket_intercept_queue.len();
         let target_count = if self.intercept_selected.is_empty() {
             usize::from(self.intercept_active.is_some())
         } else {
@@ -306,7 +442,7 @@ impl PerseidApp {
                     }
 
                     ui.add_space(4.0);
-                    let can_decide = pending > 0;
+                    let can_decide = pending + websocket_pending > 0;
                     if ui
                         .add_enabled(can_decide, egui::Button::new("Forward"))
                         .on_hover_text(if target_count > 1 {
@@ -333,7 +469,7 @@ impl PerseidApp {
                     }
                     ui.separator();
                     if ui
-                        .add_enabled(pending > 0, egui::Button::new("Forward all"))
+                        .add_enabled(can_decide, egui::Button::new("Forward all"))
                         .on_hover_text("Forward every held message in table order")
                         .on_disabled_hover_text("No intercepted message is held")
                         .clicked()
@@ -341,7 +477,7 @@ impl PerseidApp {
                         forward_all = true;
                     }
                     if ui
-                        .add_enabled(pending > 0, egui::Button::new("Drop all"))
+                        .add_enabled(can_decide, egui::Button::new("Drop all"))
                         .on_hover_text("Drop every held message")
                         .on_disabled_hover_text("No intercepted message is held")
                         .clicked()
@@ -349,11 +485,11 @@ impl PerseidApp {
                         drop_all = true;
                     }
 
-                    if pending > 0 {
+                    if pending + websocket_pending > 0 {
                         ui.with_layout(
                             egui::Layout::right_to_left(egui::Align::Center),
                             |ui| {
-                                ui.colored_label(theme::AMBER, format!("{pending} held"));
+                                ui.colored_label(theme::AMBER, format!("{} held", pending + websocket_pending));
                             },
                         );
                     }
@@ -363,6 +499,7 @@ impl PerseidApp {
                 }
             });
 
+        self.websocket_intercept_panel(ui);
         let pending = self.intercept_queue.len();
         if pending > 0 {
             egui::Panel::bottom(INTERCEPT_EDITOR_ID)
@@ -380,16 +517,26 @@ impl PerseidApp {
         // Decide after the editor has processed this frame's input so a click
         // on Forward cannot forward the draft from before the last keystroke.
         if forward_selected {
-            self.decide_intercept(true, false);
+            if self.intercept_queue.is_empty() {
+                self.decide_websocket_intercepts(true, false);
+            } else {
+                self.decide_intercept(true, false);
+            }
         }
         if drop_selected {
-            self.decide_intercept(false, false);
+            if self.intercept_queue.is_empty() {
+                self.decide_websocket_intercepts(false, false);
+            } else {
+                self.decide_intercept(false, false);
+            }
         }
         if forward_all {
             self.decide_intercept(true, true);
+            self.decide_websocket_intercepts(true, true);
         }
         if drop_all {
             self.decide_intercept(false, true);
+            self.decide_websocket_intercepts(false, true);
         }
 
         let mut clicked = None;
@@ -549,6 +696,8 @@ impl PerseidApp {
                     });
                 });
         });
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(250));
     }
 
     fn active_intercept_index(&self) -> Option<usize> {
@@ -808,6 +957,43 @@ fn status_color(status: u16) -> Color32 {
 mod tests {
     use super::*;
     use crate::proxy::RequestInfo;
+
+    #[test]
+    fn websocket_intercept_drafts_validate_and_release_when_disabled() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let item = WebSocketInterceptItem::new(
+            1,
+            crate::proxy::WebSocketConnectionInfo {
+                id: 7,
+                url: "ws://example.com/".into(),
+                host: "example.com".into(),
+                tls: false,
+                listener_port: 8080,
+                protocol: None,
+            },
+            crate::proxy::WebSocketDirection::ToServer,
+            WebSocketOpcode::Binary,
+            vec![0, 255],
+            2,
+            tx,
+        );
+        let mut app = PerseidApp::test_app();
+        app.intercept_enabled = true;
+        app.receive_websocket_intercept_item(item);
+        assert_eq!(app.websocket_intercept_queue[0].draft, "00 ff");
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| app.intercept_view(ui))
+            .drop_without_applying_deltas();
+        app.websocket_intercept_queue[0].draft = "0".into();
+        app.decide_websocket_intercepts(true, false);
+        assert!(app.websocket_intercept_queue[0].error.is_some());
+        ctx.run_ui(egui::RawInput::default(), |ui| app.intercept_view(ui))
+            .drop_without_applying_deltas();
+        app.websocket_intercept_queue[0].draft = "fe 01".into();
+        app.set_intercept_enabled(false);
+        assert!(app.websocket_intercept_queue.is_empty());
+        assert_eq!(format!("{:?}", rx.try_recv().unwrap()), "Forward([254, 1])");
+    }
 
     fn request_info() -> RequestInfo {
         RequestInfo {

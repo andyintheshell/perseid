@@ -352,7 +352,7 @@ impl PerseidApp {
                 ui.colored_label(theme::BLUE, format!("{in_flight} in flight"));
             }
 
-            let pending = self.intercept_queue.len();
+            let pending = self.intercept_queue.len() + self.websocket_intercept_queue.len();
             if pending > 0 {
                 ui.separator();
                 ui.colored_label(theme::AMBER, format!("{pending} awaiting intercept"));
