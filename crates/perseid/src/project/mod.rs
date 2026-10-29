@@ -7,6 +7,7 @@
 
 mod backend;
 mod codec;
+mod migrations;
 mod queries;
 mod records;
 mod schema;
@@ -15,6 +16,7 @@ mod transfer;
 
 use std::path::PathBuf;
 
+pub(crate) use queries::{HistoryCursor, HttpRow};
 pub use records::{
     BodyWorkspace, CapturePartRecord, CompareModeRecord, ComparerWorkspace, DecoderCodecRecord,
     DecoderColorTagRecord, DecoderHashRecord, DecoderOperationRecord, DecoderPanelWorkspace,
@@ -30,14 +32,16 @@ pub use records::{
     SequencerWorkspace, SideTabRecord, TargetSectionRecord, TextSelectionWorkspace, TlsWorkspace,
     UiWorkspace, WorkspaceState,
 };
-pub(crate) use service::ProjectSnapshot;
 pub use service::{
     CommitReceipt, OpenedProject, ProjectHandle, ProjectMode, ProjectStatus, RetentionLimits,
 };
+pub(crate) use service::{PreparedProject, ProjectSnapshot};
 
 /// Errors returned by the project subsystem.
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
+    #[error("could not open {}: {reason}", .path.display())]
+    FileAccess { path: PathBuf, reason: String },
     #[error("could not access the project file: {0}")]
     Io(#[from] std::io::Error),
     #[error("database error: {0}")]
@@ -56,7 +60,7 @@ pub enum ProjectError {
     Encoding(#[from] serde_json::Error),
     #[error("project record is too large ({size} bytes, limit {limit})")]
     RecordTooLarge { size: usize, limit: usize },
-    #[error("this is not a valid Perseid project: {0}")]
+    #[error("this is not a valid Perseid project: {0}; select another project or restore a backup")]
     InvalidProject(String),
     #[error("could not load the {component}: {source}")]
     Snapshot {
@@ -64,7 +68,9 @@ pub enum ProjectError {
         #[source]
         source: Box<ProjectError>,
     },
-    #[error("the project was created by a newer version (schema {found}, supported {supported})")]
+    #[error(
+        "the project was created by a newer version (schema {found}, supported {supported}); upgrade Perseid to open it"
+    )]
     FutureSchema { found: u64, supported: u64 },
     #[error("the project uses an unsupported record version ({found}, supported {supported})")]
     UnsupportedRecord { found: u16, supported: u16 },
@@ -72,7 +78,7 @@ pub enum ProjectError {
     IncompleteProject(PathBuf),
     #[error("a file already exists at {}", .0.display())]
     DestinationExists(PathBuf),
-    #[error("the project is already open for writing: {}", .0.display())]
+    #[error("the project is already open for writing: {}; close it in the other application before retrying", .0.display())]
     AlreadyOpen(PathBuf),
     #[error("the project writer is not available")]
     ServiceUnavailable,

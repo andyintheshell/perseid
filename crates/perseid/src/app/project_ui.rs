@@ -99,6 +99,10 @@ struct ProjectNotice {
 }
 
 enum PendingProject {
+    PrepareOpen {
+        path: PathBuf,
+        receiver: Receiver<std::result::Result<crate::project::PreparedProject, ProjectError>>,
+    },
     Save {
         copy: bool,
         path: PathBuf,
@@ -125,12 +129,16 @@ impl PendingProject {
     fn is_file_operation(&self) -> bool {
         matches!(
             self,
-            Self::Save { .. } | Self::Open { .. } | Self::New { .. }
+            Self::Save { .. } | Self::PrepareOpen { .. } | Self::Open { .. } | Self::New { .. }
         )
     }
 }
 
 enum ProjectCompletion {
+    Prepared {
+        path: PathBuf,
+        result: std::result::Result<crate::project::PreparedProject, ProjectError>,
+    },
     Saved {
         copy: bool,
         path: PathBuf,
@@ -158,7 +166,15 @@ enum ProjectDialogAction {
 }
 
 /// UI state for the current project.
+mod retention;
+use retention::RetentionSweep;
+
 pub(super) struct ProjectUi {
+    retention_seen: (u64, u64),
+    retention_sweep: Option<RetentionSweep>,
+    pub(super) history_browser: super::history_browser::HistoryBrowser,
+    storage_limits: Option<RetentionLimits>,
+    retention_pending: Option<Receiver<std::result::Result<CommitReceipt, ProjectError>>>,
     handle: Option<ProjectHandle>,
     dialog: Option<ProjectDialog>,
     dialog_icon: Option<egui::TextureHandle>,
@@ -185,6 +201,11 @@ impl ProjectUi {
             }
         };
         let mut ui = Self {
+            retention_seen: (0, 0),
+            retention_sweep: None,
+            history_browser: Default::default(),
+            storage_limits: None,
+            retention_pending: None,
             handle,
             dialog: None,
             dialog_icon: None,
@@ -221,7 +242,8 @@ impl ProjectUi {
     }
 
     pub(super) fn is_busy(&self) -> bool {
-        self.pending.iter().any(PendingProject::is_file_operation)
+        self.retention_pending.is_some()
+            || self.pending.iter().any(PendingProject::is_file_operation)
     }
 
     fn notify(&mut self, text: impl Into<String>) {
@@ -241,6 +263,7 @@ impl ProjectUi {
     }
 
     pub(super) fn clear_http_history(&mut self) {
+        self.history_browser = Default::default();
         let Some(handle) = self.handle() else {
             return;
         };
@@ -620,6 +643,18 @@ impl ProjectUi {
         let mut keep = Vec::with_capacity(self.pending.len());
         for pending in self.pending.drain(..) {
             match pending {
+                PendingProject::PrepareOpen { path, receiver } => match receiver.try_recv() {
+                    Ok(result) => completed.push(ProjectCompletion::Prepared { path, result }),
+                    Err(TryRecvError::Empty) => {
+                        keep.push(PendingProject::PrepareOpen { path, receiver })
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        completed.push(ProjectCompletion::Prepared {
+                            path,
+                            result: Err(ProjectError::ServiceUnavailable),
+                        })
+                    }
+                },
                 PendingProject::Save {
                     copy,
                     path,
@@ -860,6 +895,47 @@ fn target_section_from_record(section: TargetSectionRecord) -> TargetSection {
 }
 
 impl PerseidApp {
+    pub(super) fn open_project_storage(&mut self) {
+        if let Some(status) = self.project.status() {
+            self.project.storage_limits = Some(status.retention);
+        }
+    }
+
+    fn project_storage_window(&mut self, ctx: &egui::Context) {
+        let Some(mut limits) = self.project.storage_limits else {
+            return;
+        };
+        let Some(status) = self.project.status() else {
+            return;
+        };
+        let mut open = true;
+        let mut apply = false;
+        let saved = matches!(status.mode, ProjectMode::Persistent { .. });
+        egui::Window::new("Project storage")
+            .open(&mut open).collapsible(false).resizable(false).default_width(480.0)
+            .show(ctx, |ui| {
+                ui.label(format!("{} HTTP exchanges, {} WebSocket messages, {} retained body bytes", status.http_count, status.ws_count, status.retained_body_bytes));
+                if !saved { ui.label("Save this project first to configure saved-project retention. Temporary retention is configured by startup options."); }
+                ui.add_enabled_ui(saved && !self.project.is_busy(), |ui| {
+                    ui.horizontal(|ui| { ui.label("Maximum records (HTTP + WebSocket)"); ui.add(egui::DragValue::new(&mut limits.max_records).range(0..=u64::MAX)); });
+                    ui.horizontal(|ui| { ui.label("Maximum retained body bytes"); ui.add(egui::DragValue::new(&mut limits.max_body_bytes).range(0..=u64::MAX)); });
+                    ui.label("Zero means unlimited. Apply removes oldest eligible records immediately and cannot be undone. Save a copy before lowering limits.");
+                    ui.weak("In-flight HTTP exchanges and the newest record of each stream are kept even when limits are exceeded. Limits exclude headers and workbench data, and do not cap physical file size.");
+                    if ui.button("Apply retention limits").clicked() { apply = true; }
+                });
+                ui.separator();
+                ui.weak("Clear history removes captures, not the project file or tool snapshots. To remove a project: switch away or quit, then delete its .perseid file in your file manager. Projects are not encrypted. Deletion is not secure erasure.");
+            });
+        if apply && let Some(handle) = self.project.handle() {
+            self.project.retention_pending = Some(handle.set_retention(limits));
+            open = false;
+        }
+        self.project.storage_limits = open.then_some(limits);
+        if self.project.retention_pending.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+    }
+
     /// The File menu: project lifecycle commands live above Quit.
     #[cfg(any(not(target_os = "macos"), test))]
     pub(super) fn project_menu(&mut self, ui: &mut egui::Ui) {
@@ -992,19 +1068,17 @@ impl PerseidApp {
             return;
         }
         self.sync_workspace(true);
-        let restart_proxy = self.stop_proxy_for_project_switch();
         let Some(handle) = self.project.handle() else {
             self.project
                 .notify_error("Persistence is unavailable for this session.");
             return;
         };
-        let receiver = handle.open(path.clone(), self.project.ui_limit, self.project.ui_bytes);
+        let receiver =
+            handle.prepare_open(path.clone(), self.project.ui_limit, self.project.ui_bytes);
         self.project.notify(format!("Opening {}…", path.display()));
-        self.project.pending.push(PendingProject::Open {
-            path,
-            receiver,
-            restart_proxy,
-        });
+        self.project
+            .pending
+            .push(PendingProject::PrepareOpen { path, receiver });
     }
 
     fn begin_new_project(&mut self) {
@@ -1027,8 +1101,46 @@ impl PerseidApp {
     }
 
     pub(super) fn poll_project(&mut self) {
+        self.poll_retention_cache();
+        if let Some(receiver) = &self.project.retention_pending {
+            match receiver.try_recv() {
+                Ok(Ok(_)) => {
+                    self.project.retention_pending = None;
+                    self.project.history_browser = Default::default();
+                    self.project.notify("Saved retention limits. Oldest eligible records were removed; use Browse stored history to see retained records.");
+                }
+                Ok(Err(err)) => {
+                    self.project.retention_pending = None;
+                    self.project
+                        .notify_error(format!("Could not set retention: {err}"));
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.project.retention_pending = None;
+                    self.project
+                        .notify_error("Project writer stopped before saving retention limits.");
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         for completion in self.project.poll() {
             match completion {
+                ProjectCompletion::Prepared { path, result } => match result {
+                    Ok(prepared) => {
+                        self.sync_workspace(true);
+                        let restart_proxy = self.stop_proxy_for_project_switch();
+                        if let Some(handle) = self.project.handle() {
+                            let receiver = handle.install_prepared(prepared);
+                            self.project.pending.push(PendingProject::Open {
+                                path,
+                                receiver,
+                                restart_proxy,
+                            });
+                        }
+                    }
+                    Err(err) => self
+                        .project
+                        .notify_error(format!("Could not open the project: {err}")),
+                },
                 ProjectCompletion::Saved { copy, path, result } => match result {
                     Ok(()) => {
                         self.project.notify(if copy {
@@ -1119,6 +1231,10 @@ impl PerseidApp {
     }
 
     fn apply_opened_project(&mut self, opened: OpenedProject, path: Option<&Path>) {
+        self.project.retention_sweep = None;
+        self.project.retention_seen = (0, 0);
+        self.project.history_browser = Default::default();
+        self.project.storage_limits = None;
         let http_total = opened.http_total;
         let ws_total = opened.ws_total;
         let http_loaded = opened.http.len() as u64;
@@ -1142,7 +1258,7 @@ impl PerseidApp {
         let truncated = http_loaded < http_total || ws_loaded < ws_total;
         if truncated {
             self.project.notify(format!(
-                "Loaded the newest {} of {http_total} exchanges and {ws_loaded} of {ws_total} WebSocket messages; older records remain in the project but are not shown yet.",
+                "Loaded the newest {} of {http_total} exchanges and {ws_loaded} of {ws_total} WebSocket messages; use Browse stored history or Search for older records.",
                 http_loaded
             ));
         } else if let Some(path) = path {
@@ -1282,6 +1398,11 @@ impl PerseidApp {
 
     /// Poll project commands and draw their dialogs. Called once per frame.
     pub(super) fn project_windows(&mut self, ctx: &egui::Context) {
+        if self.project.is_busy() || self.project.retention_sweep.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+        self.stored_history_window(ctx);
+        self.project_storage_window(ctx);
         if let Some(action) = self.project.switch_prompt(ctx) {
             match action {
                 ProjectSwitchAction::Save => self.project.begin_switch_save(),
@@ -1382,7 +1503,7 @@ impl PerseidApp {
                     format!("{} old records evicted", status.retention_evictions),
                 )
                 .on_hover_text(
-                    "Temporary-project retention removed the oldest captured records to stay within the configured limits.",
+                    "Project retention removed the oldest captured records to stay within the configured logical limits. This does not securely erase disk bytes.",
                 );
             }
         }
@@ -1398,7 +1519,7 @@ impl PerseidApp {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::project::{
         BodyWorkspace, CapturePartRecord, CompareModeRecord, ComparerWorkspace, DecoderCodecRecord,
@@ -1697,7 +1818,7 @@ mod tests {
 
     /// Click the first widget whose label matches. Returns false when the
     /// label is not rendered.
-    fn click_window_text(
+    pub(in crate::app) fn click_window_text(
         ctx: &egui::Context,
         label: &str,
         mut run: impl FnMut(&egui::Context),
@@ -2054,7 +2175,7 @@ mod tests {
 
         assert!(app.project.dialog.is_none());
         match app.project.pending.first() {
-            Some(PendingProject::Open { path, .. }) => {
+            Some(PendingProject::PrepareOpen { path, .. }) => {
                 assert_eq!(path, &source);
             }
             _ => panic!("expected a pending open"),
@@ -2387,6 +2508,111 @@ mod tests {
         let (text, error) = app.project.notice().expect("notice");
         assert!(!error);
         assert!(text.contains("Started a new temporary project"));
+    }
+
+    #[test]
+    fn failed_opens_keep_the_same_running_listener_workspace_and_project() {
+        let mut app = PerseidApp::test_app();
+        app.scope.insert("keep.example".into());
+        app.start_proxy(app.notify.clone());
+        let address = app.proxy.as_ref().unwrap().local_addr();
+        let generation = app.project.status().unwrap().generation;
+        let locked = temp_path("ui-locked");
+        let corrupt = temp_path("ui-corrupt");
+        let missing = temp_path("ui-missing");
+        let holder = ProjectHandle::temporary().unwrap();
+        wait_for(holder.save_as(locked.clone(), false));
+        std::fs::write(&corrupt, b"not a redb file").unwrap();
+        for path in [&missing, &locked, &corrupt] {
+            app.begin_open_project(path.clone());
+            poll_until_idle(&mut app);
+            assert_eq!(app.project.status().unwrap().generation, generation);
+            let proxy = app.proxy.as_ref().unwrap();
+            assert!(proxy.is_running());
+            assert_eq!(
+                proxy.local_addr(),
+                address,
+                "failed open restarted the listener"
+            );
+            assert!(std::net::TcpStream::connect(address).is_ok());
+            assert!(app.scope.contains("keep.example"));
+            assert!(app.project.notice().unwrap().1);
+            app.project.handle().unwrap().capture(&started_event(10));
+            app.project.handle().unwrap().capture(&finished_event(10));
+            wait_for(app.project.handle().unwrap().flush());
+        }
+        assert_eq!(app.project.status().unwrap().http_count, 3);
+        assert!(!missing.exists());
+        app.shutdown_project();
+        drop(holder);
+        std::fs::remove_file(locked).unwrap();
+        std::fs::remove_file(corrupt).unwrap();
+    }
+
+    #[test]
+    fn validated_open_switches_workspace_and_restarts_a_running_proxy() {
+        let path = temp_path("ui-validated-open");
+        let source = ProjectHandle::temporary().unwrap();
+        source.capture(&started_event(1));
+        source.capture(&finished_event(1));
+        wait_for(source.save_copy(path.clone(), false));
+        let mut app = PerseidApp::test_app();
+        app.scope.insert("old.example".into());
+        app.start_proxy(app.notify.clone());
+        let generation = app.project.status().unwrap().generation;
+        app.begin_open_project(path.clone());
+        poll_until_idle(&mut app);
+        assert!(app.project.status().unwrap().generation > generation);
+        assert_eq!(app.current_project_path(), Some(path.clone()));
+        assert!(app.scope.is_empty());
+        assert_eq!(app.history.len(), 1);
+        assert!(app.proxy.as_ref().unwrap().is_running());
+        app.shutdown_project();
+        drop(app);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn storage_window_applies_saved_limits_and_reports_retained_counts() {
+        let ctx = egui::Context::default();
+        let path = temp_path("ui-retention");
+        let mut app = PerseidApp::test_app();
+        let handle = app.project.handle().unwrap();
+        wait_for(handle.save_as(path.clone(), false));
+        for id in 1..=3 {
+            for event in [started_event(id), finished_event(id)] {
+                app.history.apply(handle.capture(&event).event.unwrap());
+            }
+        }
+        wait_for(handle.flush());
+        app.selected = Some(1);
+        app.history.apply(started_event(99)); // not yet committed
+        app.open_project_storage();
+        app.project.storage_limits = Some(RetentionLimits::new(1, 0));
+        assert!(click_window_text(&ctx, "Apply retention limits", |ctx| app
+            .project_windows(ctx)));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while app.project.retention_pending.is_some()
+            || app.project.retention_sweep.is_some()
+            || app.project.retention_seen.1 != 2
+        {
+            app.poll_project();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let status = app.project.status().unwrap();
+        assert_eq!(status.retention, RetentionLimits::new(1, 0));
+        assert_eq!(status.http_count, 1);
+        assert_eq!(status.retention_evictions, 2);
+        assert!(app.history.get(1).is_none());
+        assert!(app.history.get(2).is_none());
+        assert!(app.history.get(3).is_some());
+        assert!(app.history.get(99).is_some());
+        assert!(app.selected.is_none());
+        assert_eq!(app.history.in_flight(), 1);
+        app.shutdown_project();
+        drop(app);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

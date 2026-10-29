@@ -23,10 +23,14 @@ impl PerseidApp {
             .selected
             .and_then(|id| self.history.get(id))
             .filter(|item| !item.is_tunnel())
+            .cloned()
         else {
             return;
         };
+        self.send_history_to_intruder(&item);
+    }
 
+    pub(in crate::app) fn send_history_to_intruder(&mut self, item: &crate::history::HistoryItem) {
         if self.intruder.running
             && let Some(engine) = &self.intruder_engine
         {

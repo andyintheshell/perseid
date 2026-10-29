@@ -3,12 +3,10 @@
 //! Every function opens a short-lived redb read transaction. Callers must not
 //! retain a transaction for the lifetime of a UI panel or search window.
 //!
-//! The paged row/cursor queries are the storage side of history paging. The
-//! current history and site-map tables load a bounded newest-first snapshot
-//! and fetch details by ID; Search uses [`scan_http`] and [`scan_ws`] to read
-//! every stored capture in short-lived batches. Wiring the tables themselves
-//! to these accessors is the next step, so keep them even while the initial UI
-//! only uses the snapshot helpers.
+//! The stored HTTP browser pages metadata and fetches selected details by ID.
+//! The live history and site-map tables use a bounded newest-first snapshot;
+//! Search uses [`scan_http`] and [`scan_ws`] to read every stored capture in
+//! short-lived batches.
 
 #![allow(dead_code)]
 
@@ -24,6 +22,32 @@ use super::codec;
 use super::records::{HttpExchangeRecord, WsConnectionRecord, WsMessageRecord};
 use super::schema;
 use super::{ProjectError, Result};
+
+/// Check only the bounded UI cache, never hydrate bodies or scan the store.
+/// IDs not yet committed are excluded so queued captures stay visible.
+pub(crate) fn pruned_ids(
+    db: &Database,
+    http: Vec<u64>,
+    ws: Vec<u64>,
+) -> Result<(Vec<u64>, Vec<u64>)> {
+    let tx = db.begin_read()?;
+    let meta = schema::read_meta(&tx)?;
+    let http_table = tx.open_table(schema::HTTP_EXCHANGES)?;
+    let ws_table = tx.open_table(schema::WS_MESSAGES)?;
+    let mut removed_http = Vec::new();
+    let mut removed_ws = Vec::new();
+    for id in http {
+        if id < meta.next_http_id && http_table.get(id)?.is_none() {
+            removed_http.push(id);
+        }
+    }
+    for id in ws {
+        if id < meta.next_ws_id && ws_table.get(id)?.is_none() {
+            removed_ws.push(id);
+        }
+    }
+    Ok((removed_http, removed_ws))
+}
 
 /// Lightweight row returned by paged history queries.
 #[derive(Clone, Debug)]

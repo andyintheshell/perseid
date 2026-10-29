@@ -368,6 +368,22 @@ fn enforce_retention(
     Ok(())
 }
 
+pub(super) fn set_retention(
+    db: &Database,
+    meta: &mut ProjectMeta,
+    limits: RetentionLimits,
+) -> Result<CommitReceipt> {
+    let mut next = meta.clone();
+    next.retention_records = limits.max_records;
+    next.retention_bytes = limits.max_body_bytes;
+    let tx = begin_write(db)?;
+    enforce_retention(&tx, &mut next, limits)?;
+    schema::write_counters(&mut tx.open_table(schema::META)?, &next)?;
+    tx.commit()?;
+    *meta = next;
+    Ok(receipt(meta))
+}
+
 /// The oldest entry of a time index that is not the stream's newest record and
 /// whose record is still evictable.
 fn oldest_evictable(
@@ -671,7 +687,6 @@ pub(super) fn save_as(
 }
 
 pub(super) fn open_project(
-    _current: &Database,
     path: &Path,
     ui_limit: usize,
     ui_bytes: usize,
@@ -697,17 +712,14 @@ pub(super) fn open_project(
             )));
         }
     }
-    if meta.schema_version < schema::SCHEMA_VERSION {
-        return Err(ProjectError::InvalidProject(format!(
-            "schema {} requires migration; automatic migration is not available yet",
-            meta.schema_version
-        )));
-    }
+    super::super::migrations::migrate(&db, &mut meta)?;
     interrupt_in_flight(
         &db,
         &mut meta,
         "application terminated before exchange completed",
     )?;
+    let limits = RetentionLimits::new(meta.retention_records, meta.retention_bytes);
+    set_retention(&db, &mut meta, limits)?;
     let db = Arc::new(db);
     let opened = build_snapshot(&db, ui_limit, ui_bytes)?;
     Ok((db, meta, opened))

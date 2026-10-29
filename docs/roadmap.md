@@ -12,11 +12,11 @@ milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
 project-persistence workflow are available. Search scans all stored HTTP and
 WebSocket history as well as current Repeater and Intruder results. The remaining
-M3 work is paging the history and site-map tables through all saved history,
-recent-project and quit prompts, and
-persistent disk-retention controls. Temporary capture retention is bounded by
-configurable aggregate count and retained-body limits; saved files still have
-no automatic disk cap. HTTP/2,
+M3 follow-ups include full-store site-map/WebSocket table views and
+recent-project and quit prompts. Stored HTTP paging, lazy details/notes,
+saved-project logical retention, and atomic v1→v2 migration are available.
+Temporary and opt-in saved retention use combined count/body limits; physical
+file size is not capped. HTTP/2,
 WebSocket history, Intruder, and Sequencer arrived ahead of the protocol
 milestone. This is a sequence of capabilities, not a schedule or release
 promise.
@@ -64,12 +64,17 @@ promise.
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
   project-scoped workbench state are written automatically. On open, the history
   and site-map tables load only a bounded newest-first history snapshot; older
-  records remain on disk and are found by Search but are not yet pageable.
+   records are reachable through the paged **Browse stored history…** HTTP
+   browser with lazy details and notes, and through full-store Search.
   Temporary storage evicts the oldest
   captures when it exceeds the configurable aggregate count or retained-body
   limits. New Project and Open Project ask Save/Discard/Cancel when the current
   temporary project has unsaved work; a recent-project list and quit prompt are
-  not implemented, and schema migrations are not implemented.
+   not implemented. Saved projects now support opt-in combined record/body
+   retention, defaulting to unlimited, and atomic v1→v2 schema migration.
+   Retention is logical: it does not cap or compact physical files. Whole-project
+   deletion uses the filesystem after switching away or quitting; files are
+   unencrypted and deletion is not secure erasure.
   Search scans every stored HTTP exchange and WebSocket message in the
   background with case, regex, negative-match, in-scope, and live-update filters,
   and also matches current Repeater tabs and retained Intruder results.

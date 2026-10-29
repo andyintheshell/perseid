@@ -1,7 +1,7 @@
 //! On-disk schema for a `.perseid` project.
 //!
 //! A project is a normal `redb` database. The constants in this module are the
-//! schema-v1 contract: changing a table name, key encoding or value encoding
+//! schema contract: changing a table name, key encoding or value encoding
 //! requires a migration and a new schema version.
 
 use redb::{
@@ -12,7 +12,7 @@ use super::{ProjectError, Result};
 
 /// Marker stored in the metadata table. A redb file without it is not ours.
 pub const APPLICATION_ID: &str = "perseid-project";
-pub const SCHEMA_VERSION: u64 = 1;
+pub const SCHEMA_VERSION: u64 = 2;
 pub const RECORD_VERSION: u16 = 1;
 
 pub const META: TableDefinition<'static, &str, &[u8]> = TableDefinition::new("meta");
@@ -59,6 +59,8 @@ pub const KEY_WS_COUNT: &str = "ws_count";
 pub const KEY_HTTP_BODY_BYTES: &str = "http_body_bytes";
 pub const KEY_WS_BODY_BYTES: &str = "ws_body_bytes";
 pub const KEY_RETENTION_EVICTIONS: &str = "retention_evictions";
+pub const KEY_RETENTION_RECORDS: &str = "retention_records";
+pub const KEY_RETENTION_BYTES: &str = "retention_bytes";
 
 pub const STATE_INITIALIZING: &str = "initializing";
 pub const STATE_READY: &str = "ready";
@@ -84,12 +86,15 @@ pub struct ProjectMeta {
     pub event_loss_count: u64,
     pub http_count: u64,
     pub ws_count: u64,
-    /// Retained request/response body bytes for temporary-project retention.
+    /// Retained request/response body bytes for project retention.
     pub http_body_bytes: u64,
-    /// Retained WebSocket payload bytes for temporary-project retention.
+    /// Retained WebSocket payload bytes for project retention.
     pub ws_body_bytes: u64,
-    /// Records removed by temporary-project retention limits.
+    /// Records removed by project retention limits.
     pub retention_evictions: u64,
+    /// Saved-project limits; zero means unlimited. Temporary limits are runtime-only.
+    pub retention_records: u64,
+    pub retention_bytes: u64,
 }
 
 impl ProjectMeta {
@@ -113,6 +118,8 @@ impl ProjectMeta {
             http_body_bytes: 0,
             ws_body_bytes: 0,
             retention_evictions: 0,
+            retention_records: 0,
+            retention_bytes: 0,
         }
     }
 }
@@ -202,6 +209,14 @@ pub fn write_counters(table: &mut redb::Table<'_, &str, &[u8]>, meta: &ProjectMe
         KEY_RETENTION_EVICTIONS,
         meta.retention_evictions.to_string().as_bytes(),
     )?;
+    table.insert(
+        KEY_RETENTION_RECORDS,
+        meta.retention_records.to_string().as_bytes(),
+    )?;
+    table.insert(
+        KEY_RETENTION_BYTES,
+        meta.retention_bytes.to_string().as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -259,6 +274,8 @@ pub fn read_meta(tx: &ReadTransaction) -> Result<ProjectMeta> {
         http_body_bytes: get_u64(&table, KEY_HTTP_BODY_BYTES)?.unwrap_or(0),
         ws_body_bytes: get_u64(&table, KEY_WS_BODY_BYTES)?.unwrap_or(0),
         retention_evictions: get_u64(&table, KEY_RETENTION_EVICTIONS)?.unwrap_or(0),
+        retention_records: get_u64(&table, KEY_RETENTION_RECORDS)?.unwrap_or(0),
+        retention_bytes: get_u64(&table, KEY_RETENTION_BYTES)?.unwrap_or(0),
     })
 }
 
@@ -335,7 +352,7 @@ mod tests {
 
     #[test]
     fn record_schema_version_is_stable() {
-        assert_eq!(SCHEMA_VERSION, 1);
+        assert_eq!(SCHEMA_VERSION, 2);
         assert_eq!(RECORD_VERSION, 1);
     }
 }

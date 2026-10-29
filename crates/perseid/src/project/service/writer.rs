@@ -13,7 +13,7 @@ use super::super::codec;
 use super::super::schema::ProjectMeta;
 use super::persistence::{
     apply_capture_batch, build_snapshot, clear_http, clear_ws, commit_counters,
-    interrupt_in_flight, open_project, receipt, save_as, write_workspace,
+    interrupt_in_flight, receipt, save_as, write_workspace,
 };
 use super::shared::Shared;
 use super::{Command, ProjectMode, Result, RetentionLimits, new_project_id};
@@ -36,7 +36,10 @@ pub(super) fn run_writer(
     let mut last_workspace: Option<Vec<u8>> = None;
     let mut retention = match initial_mode {
         ProjectMode::Temporary => Some(temporary_retention),
-        ProjectMode::Persistent { .. } => None,
+        ProjectMode::Persistent { .. } => Some(RetentionLimits::new(
+            meta.retention_records,
+            meta.retention_bytes,
+        )),
     };
     loop {
         let command = match pending.pop_front() {
@@ -47,6 +50,31 @@ pub(super) fn run_writer(
             },
         };
         match command {
+            Command::InstallPrepared(prepared, reply) => {
+                db = prepared.db;
+                meta = prepared.meta;
+                retention = Some(RetentionLimits::new(
+                    meta.retention_records,
+                    meta.retention_bytes,
+                ));
+                shared.set_database(db.clone());
+                shared.install_meta(
+                    &meta,
+                    ProjectMode::Persistent {
+                        path: prepared.path,
+                    },
+                );
+                shared.clear_mappings();
+                last_workspace = None;
+                let _ = reply.send(Ok(*prepared.opened));
+            }
+            Command::SetRetention(limits, reply) => {
+                let result = super::persistence::set_retention(&db, &mut meta, limits);
+                if result.is_ok() {
+                    retention = Some(limits);
+                }
+                finish(reply, result, &shared, &meta);
+            }
             Command::Capture(first) => {
                 let mut events = vec![first];
                 let deadline = Instant::now() + CAPTURE_BATCH_WINDOW;
@@ -112,9 +140,10 @@ pub(super) fn run_writer(
                 let result = save_as(&mut db, &shared, &mut meta, &path, overwrite);
                 match result {
                     Ok(()) => {
-                        // Saved projects keep every record; retention applies
-                        // only to the in-memory temporary backend.
-                        retention = None;
+                        retention = Some(RetentionLimits::new(
+                            meta.retention_records,
+                            meta.retention_bytes,
+                        ));
                         let _ = reply.send(Ok(()));
                     }
                     Err(err) => {
@@ -146,16 +175,20 @@ pub(super) fn run_writer(
                     }
                 }
             }
+            #[cfg(test)]
             Command::Open {
                 path,
                 ui_limit,
                 ui_bytes,
                 reply,
-            } => match open_project(&db, &path, ui_limit, ui_bytes) {
+            } => match super::persistence::open_project(&path, ui_limit, ui_bytes) {
                 Ok((new_db, new_meta, opened)) => {
                     db = new_db;
                     meta = new_meta;
-                    retention = None;
+                    retention = Some(RetentionLimits::new(
+                        meta.retention_records,
+                        meta.retention_bytes,
+                    ));
                     shared.set_database(db.clone());
                     shared.install_meta(&meta, ProjectMode::Persistent { path });
                     shared.clear_mappings();
