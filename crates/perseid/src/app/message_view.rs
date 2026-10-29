@@ -78,6 +78,7 @@ pub(super) fn message_toolbar(
 /// Draw the Pretty/Raw/Hex row shared by the history detail panes and the
 /// interception editor.
 pub(super) fn message_tabs(ui: &mut egui::Ui, mode: &mut MessageView) {
+    let key = ui.make_persistent_id("perseid.message.invisibles");
     ui.horizontal(|ui| {
         if message_mode_tab(ui, *mode == MessageView::Pretty, "Pretty").clicked() {
             *mode = MessageView::Pretty;
@@ -88,6 +89,9 @@ pub(super) fn message_tabs(ui: &mut egui::Ui, mode: &mut MessageView) {
         if message_mode_tab(ui, *mode == MessageView::Hex, "Hex").clicked() {
             *mode = MessageView::Hex;
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            invisible_toggle_button(ui, key, *mode != MessageView::Hex);
+        });
     });
 }
 
@@ -257,27 +261,6 @@ fn message_frame(
             }
         });
 
-    // Float the control in the upper-right corner without shifting the editor
-    // or affecting its selection and context-menu hit testing elsewhere.
-    let rect = egui::Rect::from_min_size(
-        egui::pos2(
-            frame.response.rect.right() - 32.0,
-            frame.response.rect.top() + 2.0,
-        ),
-        egui::vec2(30.0, 22.0),
-    );
-    let mut controls = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    if controls
-        .add_enabled(
-            mode != MessageView::Hex,
-            egui::Button::selectable(show_invisibles, "\\n"),
-        )
-        .on_hover_text("Show whitespace and line endings")
-        .clicked()
-    {
-        ui.data_mut(|data| data.insert_temp(toggle_key, !show_invisibles));
-    }
-
     // egui's text editor collapses a selection when it is pressed or loses
     // focus (for example when a menu item is clicked). Remember the text that
     // was selected when the context menu opened so Copy selection still has
@@ -443,19 +426,25 @@ fn message_numbered(
 /// Keep this setting on the pane, not the message or view mode.
 pub(super) fn invisible_toggle(ui: &mut egui::Ui, enabled: bool) -> bool {
     let key = ui.make_persistent_id("perseid.message.invisibles");
-    let mut shown = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(false));
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add_enabled(enabled, egui::Button::selectable(shown, "\\n"))
-                .on_hover_text("Show whitespace and line endings")
-                .clicked()
-            {
-                shown = !shown;
-                ui.data_mut(|data| data.insert_temp(key, shown));
-            }
-        });
-    });
+            invisible_toggle_button(ui, key, enabled)
+        })
+        .inner
+    })
+    .inner
+}
+
+fn invisible_toggle_button(ui: &mut egui::Ui, key: egui::Id, enabled: bool) -> bool {
+    let mut shown = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(false));
+    if ui
+        .add_enabled(enabled, egui::Button::selectable(shown, "\\n"))
+        .on_hover_text("Show whitespace and line endings")
+        .clicked()
+    {
+        shown = !shown;
+        ui.data_mut(|data| data.insert_temp(key, shown));
+    }
     enabled && shown
 }
 
@@ -862,9 +851,10 @@ mod tests {
     }
 
     #[test]
-    fn floating_toggle_can_be_clicked_without_changing_text() {
+    fn toolbar_toggle_can_be_clicked_without_changing_text() {
         let ctx = Context::default();
         let mut text = "hello\r\n".to_owned();
+        let mut mode = MessageView::Raw;
         let mut shown = false;
         let mut frame = |events| {
             let output = ctx.run_ui(
@@ -874,7 +864,8 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    message_editor(ui, 1, MessagePane::Request, MessageView::Raw, &mut text);
+                    message_tabs(ui, &mut mode);
+                    message_editor(ui, 1, MessagePane::Request, mode, &mut text);
                     let key = ui.make_persistent_id("perseid.message.invisibles");
                     shown = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(false));
                 },

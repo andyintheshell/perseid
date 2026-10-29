@@ -14,7 +14,7 @@ use crate::proxy::{
 use egui::TextEdit;
 
 use super::message_view::message_text;
-use super::widgets::{empty_state, message_mode_tab, section_tab};
+use super::widgets::{empty_state, section_tab};
 use super::*;
 use crate::project::{RepeaterResponseWorkspace, RepeaterWorkspace};
 use crate::view::{self, MessageViews};
@@ -904,22 +904,14 @@ fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
     ui.separator();
     ui.add_space(2.0);
 
-    egui::Frame::NONE
-        .fill(Color32::WHITE)
-        .stroke(Stroke::new(1.0, theme::BORDER))
-        .corner_radius(4.0)
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
-            let min_height = ui.available_height().max(180.0);
-            ui.set_min_height(min_height);
-            super::message_view::message_editor(
-                ui,
-                tab.id,
-                MessagePane::Request,
-                MessageView::Raw,
-                &mut tab.request,
-            );
-        });
+    super::message_view::invisible_toggle(ui, true);
+    super::message_view::message_editor(
+        ui,
+        tab.id,
+        MessagePane::Request,
+        MessageView::Raw,
+        &mut tab.request,
+    );
 }
 
 fn response_pane(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
@@ -957,19 +949,8 @@ fn response_pane(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
                     .color(theme::TEXT_MUTED),
             );
         }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if message_mode_tab(ui, tab.response_view == MessageView::Hex, "Hex").clicked() {
-                tab.response_view = MessageView::Hex;
-            }
-            if message_mode_tab(ui, tab.response_view == MessageView::Raw, "Raw").clicked() {
-                tab.response_view = MessageView::Raw;
-            }
-            if message_mode_tab(ui, tab.response_view == MessageView::Pretty, "Pretty").clicked() {
-                tab.response_view = MessageView::Pretty;
-            }
-        });
     });
+    super::message_view::message_tabs(ui, &mut tab.response_view);
 
     if let Some(reply) = &tab.response
         && (reply.truncated || !reply.body_complete || reply.body_error.is_some())
@@ -1253,7 +1234,7 @@ mod tests {
                 .drop_without_applying_deltas();
         };
         run(&mut tab, vec![]);
-        let pos = egui::pos2(55.0, 48.0);
+        let pos = egui::pos2(55.0, 75.0);
         run(&mut tab, vec![egui::Event::PointerMoved(pos)]);
         for pressed in [true, false] {
             run(
