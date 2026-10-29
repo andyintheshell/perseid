@@ -50,6 +50,11 @@ from the open project.
   the new project is complete.
 - **Save Project Copy…** writes a consistent copy to a new path and leaves the
   current project active. It also asks before replacing an existing file.
+- **Quit** asks Save/Discard/Cancel for unsaved temporary work. Saved projects
+  wait asynchronously for acknowledged workspace commits and a durable flush;
+  failure or a ten-second acknowledgement timeout keeps the session open with
+  recovery choices. This is not crash recovery or a bounded teardown guarantee;
+  see [project save and normal-exit guarantees](project-exit-guarantees.md).
 
 Saved projects persist HTTP and WebSocket captures plus the workbench state:
 scope and match/replace rules, the selected tab/section, filters, message views,
@@ -543,7 +548,8 @@ to bundled public roots if none are available.
 
 **HTTP Repeater bypasses interception, match/replace, and proxy scope enforcement.**
 Its HTTP exchanges do not appear in Proxy history. It does not share the browser's
-cookie jar or automatically re-authenticate; review copied cookies and tokens.
+cookie database or automatically re-authenticate. The optional application cookie
+jar can reuse cookies observed through the proxy; review copied cookies and tokens.
 
 ### Cookie jar
 

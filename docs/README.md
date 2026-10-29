@@ -7,8 +7,9 @@ Perseid is an **early prototype** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
-The latest published release, Perseid `0.2.1`, includes the local
-project-persistence support introduced in `0.2.0`. The `main` branch is preparing `0.3.0-dev`; install
+The latest published release, Perseid `0.3.0`, includes the local
+project-persistence support introduced in `0.2.0`,
+with M3 complete and remaining issues moved to M4; install
 the published crate or a prebuilt release, or build from source for current
 development.
 
@@ -34,6 +35,7 @@ use a local lab or another target you are explicitly authorized to test.
 | [Screenshots](screenshots.md) | What does each tool look like? |
 | [Demo storyboard](demo-gif-script.md) | What does the first-time-user demo show, and in what order? |
 | [Releasing](releasing.md) | How are platform packages built, reviewed, and published? |
+| [Project exit guarantees](project-exit-guarantees.md) | What do Save, normal quit, acknowledgement timeouts, and recovery choices guarantee? |
 
 ## Project and technical references
 

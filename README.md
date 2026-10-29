@@ -72,9 +72,11 @@ The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
 macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
 are unsigned; the macOS app is ad-hoc signed but not notarized. See the
 [platform requirements](docs/getting-started.md#requirements) before installing.
-Perseid `0.2.1` is the latest published crate and GitHub release. Project
+Perseid `0.3.0` is the latest published crate and GitHub release. Project
 persistence was introduced in `0.2.0`. Feature descriptions in this repository follow
-`main`, which can include changes not yet released.
+`main`, which can include changes not yet released. In `0.3.0`,
+M3 is complete for the release scope, with remaining issues moved to M4. See the
+[roadmap](docs/roadmap.md) and [parity matrix](docs/burp-parity.md) for current gaps.
 
 ### Install from crates.io
 
