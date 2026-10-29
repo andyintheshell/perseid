@@ -1041,6 +1041,45 @@ mod decoder_transfer_tests {
     }
 
     #[test]
+    fn websocket_history_context_menu_opens_repeater() {
+        let mut app = PerseidApp::test_app();
+        app.main_tab = MainTab::Proxy;
+        app.proxy_section = ProxySection::WebSocketsHistory;
+        app.websocket_history.apply(ProxyEvent::WebSocketMessage {
+            id: 42,
+            timestamp: SystemTime::UNIX_EPOCH,
+            connection: crate::proxy::WebSocketConnectionInfo {
+                id: 7,
+                url: "ws://example.test/socket".into(),
+                host: "example.test".into(),
+                tls: false,
+                listener_port: 8080,
+                protocol: None,
+            },
+            direction: crate::proxy::WebSocketDirection::ToServer,
+            opcode: crate::proxy::WebSocketOpcode::Text,
+            payload: CapturedBody::from_bytes(b"hello".to_vec()),
+        });
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+        click(
+            &ctx,
+            &mut app,
+            "ws://example.test/socket",
+            egui::PointerButton::Secondary,
+        );
+        click(
+            &ctx,
+            &mut app,
+            "Send to Repeater",
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(app.main_tab, MainTab::Repeater);
+        assert!(app.repeater_workspace().is_empty());
+    }
+
+    #[test]
     fn history_menus_send_captured_request_and_response_to_decoder() {
         for (menu, expected) in [
             ("Send request to Decoder", &[0, 255][..]),

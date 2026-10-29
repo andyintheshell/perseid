@@ -1150,11 +1150,54 @@ mod tests {
         assert_eq!(ws.live_connection_id, Some(123));
         assert!(!ws.truncated);
         assert!(app.repeater_workspace().is_empty());
+        app.websocket_history
+            .apply(crate::proxy::ProxyEvent::WebSocketMessage {
+                id: item.id,
+                timestamp: item.timestamp,
+                connection: item.connection.clone(),
+                direction: item.direction,
+                opcode: item.opcode,
+                payload: item.payload.clone(),
+            });
+        let ctx = egui::Context::default();
+        for selected in [Some(item.id), None] {
+            app.repeater_tabs[app.repeater_active]
+                .websocket
+                .as_mut()
+                .unwrap()
+                .selected_message = selected;
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.websocket_repeater_view(ui)
+            })
+            .drop_without_applying_deltas();
+        }
         app.send_active_repeater();
         assert_eq!(
             app.repeater_tabs.last().unwrap().error.as_deref(),
             Some("Proxy is stopped")
         );
+        let ws = app.repeater_tabs[app.repeater_active]
+            .websocket
+            .as_mut()
+            .unwrap();
+        ws.truncated = true;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.websocket_repeater_view(ui)
+        })
+        .drop_without_applying_deltas();
+        app.send_active_repeater();
+        assert_eq!(
+            app.repeater_tabs[app.repeater_active].error.as_deref(),
+            Some("Confirm the incomplete captured message before sending")
+        );
+        let ws = app.repeater_tabs[app.repeater_active]
+            .websocket
+            .as_mut()
+            .unwrap();
+        ws.truncated = false;
+        ws.draft = "gg".into();
+        app.send_active_repeater();
+        assert!(app.repeater_tabs[app.repeater_active].error.is_some());
     }
 
     fn history_item(

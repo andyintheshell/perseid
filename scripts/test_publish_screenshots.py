@@ -46,6 +46,7 @@ class PublishScreenshotsTests(unittest.TestCase):
         first_index = self.show(first, "index.md").decode()
         self.assertIn("Generated from `first`", first_index)
         self.assertIn("![Proxy - HTTP history](perseid-main.png)", first_index)
+        self.assertIn("![Repeater - WebSockets](perseid-repeater-websockets.png)", first_index)
         self.assertNotIn("screenshots-preview/", first_index)
         subprocess.run(["git", "--git-dir", str(self.remote), "merge-base", "--is-ancestor", first, second], check=True)
 

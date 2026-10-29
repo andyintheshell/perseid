@@ -981,9 +981,14 @@ mod tests {
         app.intercept_enabled = true;
         app.receive_websocket_intercept_item(item);
         assert_eq!(app.websocket_intercept_queue[0].draft, "00 ff");
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| app.intercept_view(ui))
+            .drop_without_applying_deltas();
         app.websocket_intercept_queue[0].draft = "0".into();
         app.decide_websocket_intercepts(true, false);
         assert!(app.websocket_intercept_queue[0].error.is_some());
+        ctx.run_ui(egui::RawInput::default(), |ui| app.intercept_view(ui))
+            .drop_without_applying_deltas();
         app.websocket_intercept_queue[0].draft = "fe 01".into();
         app.set_intercept_enabled(false);
         assert!(app.websocket_intercept_queue.is_empty());
