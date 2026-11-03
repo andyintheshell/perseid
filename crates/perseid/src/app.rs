@@ -46,6 +46,7 @@ mod settings;
 mod target;
 mod tls;
 mod util;
+mod utility_window;
 mod widgets;
 mod windows;
 
@@ -443,6 +444,9 @@ impl PerseidApp {
                 false
             }
         };
+        if screenshot_mode {
+            cc.egui_ctx.set_embed_viewports(true);
+        }
         let ca_dir = args.ca_dir.clone().unwrap_or_else(ca_store::default_dir);
         // Create the CA once, on first launch, and reuse it forever after. The
         // screenshot driver supplies its own in-memory CA so documentation
@@ -563,6 +567,12 @@ impl PerseidApp {
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };
+        if !screenshot_mode && let Some(storage) = cc.storage {
+            app.search.window.load(storage, "perseid.search.geometry");
+            app.comparer
+                .window
+                .load(storage, "perseid.comparer.geometry");
+        }
         app.project_baseline_workspace = app.workspace_snapshot();
         #[cfg(feature = "screenshots")]
         if let Some(dir) = args.screenshot_dir.clone() {
@@ -715,6 +725,22 @@ impl PerseidApp {
 }
 
 impl eframe::App for PerseidApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        #[cfg(feature = "screenshots")]
+        if self.screenshots.is_some() {
+            return;
+        }
+        self.search.window.save(storage, "perseid.search.geometry");
+        self.comparer
+            .window
+            .save(storage, "perseid.comparer.geometry");
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        // Persist only geometry, never arbitrary UI memory or captured traffic.
+        false
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
