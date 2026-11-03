@@ -170,6 +170,7 @@ pub(super) struct SearchDetailCache {
 
 /// Persistent Search window state.
 pub(super) struct SearchState {
+    pub(in crate::app) window: super::utility_window::UtilityWindow,
     /// Whether the floating window is visible. The toolbar icon uses this for
     /// its selected state.
     pub(super) open: bool,
@@ -205,6 +206,7 @@ pub(super) struct SearchState {
 impl Default for SearchState {
     fn default() -> Self {
         Self {
+            window: Default::default(),
             open: false,
             query: String::new(),
             options: SearchOptions::default(),
@@ -246,6 +248,7 @@ impl SearchState {
     pub(super) fn focus_or_open(&mut self) {
         self.open = true;
         self.focus_query = true;
+        self.window.request_focus();
     }
 
     fn cancel_job(&mut self) {
@@ -902,6 +905,49 @@ mod tests {
         state.focus_or_open();
         assert!(state.open, "focus_or_open keeps an open window open");
         assert!(state.focus_query, "the shortcut refocuses the query");
+    }
+
+    #[test]
+    fn closing_and_reopening_search_keeps_query_options_and_results() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.search.query = "needle".to_owned();
+        app.search.options.case_sensitive = true;
+        app.search.results.push(SearchHit::text(
+            SearchKey {
+                source: SearchSource::ProxyHttp,
+                id: 1,
+            },
+            Some(1),
+            None,
+            "example.com",
+            "/needle",
+            Some(200),
+            6,
+        ));
+        app.search.focus_or_open();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| app.search_window(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert!(!app.search.open);
+        app.search.focus_or_open();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.search_window(ui.ctx()));
+        output.textures_delta.clear();
+        assert!(app.search.open);
+        assert_eq!(app.search.query, "needle");
+        assert!(app.search.options.case_sensitive);
+        assert_eq!(app.search.results.len(), 1);
     }
 
     #[test]

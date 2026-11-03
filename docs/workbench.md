@@ -342,7 +342,7 @@ limits and do not make the whole editor or process a fixed-size allocation.
 ## Search captured traffic
 
 Click the magnifying glass at the right side of the top toolbar, or press
-`Ctrl`/`Cmd`+`Shift`+`F`, to open the floating **Search** window. Type a term
+`Ctrl`/`Cmd`+`Shift`+`F`, to open the independent **Search** window. Type a term
 and press **Go** or `Enter`. Search covers every HTTP exchange and WebSocket
 message stored in the active project, including rows older than the loaded
 history snapshot, plus the Repeater tabs and retained Intruder results in the
@@ -401,9 +401,28 @@ those tools no longer hold the original message; selecting such a row shows
 that its request or response is no longer available. Workspaces saved by older
 versions contained only HTTP result IDs, so unknown IDs are dropped on open as
 before.
+
 Matching uses the decoded body representation; uncompressed retained bodies
 are searched in full, while decoded compressed previews are bounded by the
 same decoder limits as the message editor.
+
+### Independent utility windows
+
+Search and the Comparer result use native, decorated desktop windows. Drag
+their OS title bars to another monitor or resize them independently of the main
+Perseid window. Reopening Search with its keyboard shortcut focuses its query.
+Press `Esc` in a focused utility window, or use its native close button, to hide
+only that window and return focus to the main window. Closing does not clear
+the search or comparison; project saving still follows the normal workspace
+rules. Quitting the main window closes all child windows.
+
+Each window remembers its last normal size and position across close/reopen and
+app restarts, in per-user application settings rather than in a project file.
+On Wayland, compositors control placement and do not expose global positions;
+Perseid remembers sizes but cannot restore an exact monitor position. Window
+manager policies may also adjust requested geometry. Documentation screenshots
+and headless tests deliberately embed these windows inside the main viewport.
+See the [cross-platform manual checks](utility-window-checks.md).
 
 ## Intercept and edit
 
@@ -706,7 +725,8 @@ select a different row in each table to choose the pair.
   on ASCII whitespace and highlights changed tokens. Byte mode compares raw
   bytes; it is useful when whitespace or encoding differences matter.
 
-The result window has a Text/Hex choice for each pane, Previous/Next difference
+The result opens in an [independent utility window](#independent-utility-windows)
+that can move to another monitor. It has a Text/Hex choice for each pane, Previous/Next difference
 buttons, length labels, and a color key for modified, deleted, and added data.
 Tick **Sync views** to mirror vertical scrolling and wheel input, or use the
 **Sync** button in either pane header. Text is a display-safe rendering of the

@@ -322,36 +322,30 @@ impl ComparerState {
 
     pub(super) fn result_window(&mut self, ctx: &egui::Context) {
         if !self.result_open {
-            return;
-        }
-        if ctx.input(|input| input.key_pressed(Key::Escape)) {
-            self.result_open = false;
-            self.result = None;
+            self.window.hide();
             return;
         }
         let Some(mut result) = self.result.take() else {
             self.result_open = false;
+            self.window.hide();
             return;
         };
 
         let mut open = true;
         let title = result.title().to_string();
-        egui::Window::new(title)
-            .id(egui::Id::unique(RESULT_WINDOW_ID))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_pos(egui::pos2(60.0, 78.0))
-            .default_size(egui::vec2(1160.0, 640.0))
-            .min_width(760.0)
-            .min_height(380.0)
-            .show(ctx, |ui| self.draw_result(ui, &mut result));
-
-        if open {
-            self.result = Some(result);
-        } else {
-            self.result_open = false;
-        }
+        let mut window = std::mem::take(&mut self.window);
+        window.show(
+            ctx,
+            RESULT_WINDOW_ID,
+            &title,
+            &mut open,
+            [egui::vec2(1160.0, 640.0), egui::vec2(760.0, 380.0)],
+            |ui| self.draw_result(ui, &mut result),
+        );
+        self.window = window;
+        // Closing a utility window changes visibility, not its shared model.
+        self.result = Some(result);
+        self.result_open = open;
     }
 
     fn draw_result(&mut self, ui: &mut egui::Ui, result: &mut CompareResult) {
@@ -806,6 +800,39 @@ fn legend_chip(ui: &mut egui::Ui, label: &str, color: Color32) {
 mod tests {
     use super::*;
     use crate::comparer::ChangeKind;
+
+    #[test]
+    fn closing_and_reopening_result_keeps_the_comparison_and_items() {
+        let ctx = egui::Context::default();
+        let mut state = ComparerState::new();
+        state.insert_item(b"first".to_vec(), 0).unwrap();
+        state.insert_item(b"second".to_vec(), 1).unwrap();
+        state.compare(CompareMode::Words);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| state.result_window(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert!(!state.result_open);
+        assert!(state.result.is_some());
+        assert_eq!(state.items.len(), 2);
+        state.result_open = true;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            state.result_window(ui.ctx())
+        });
+        output.textures_delta.clear();
+        assert!(state.result_open);
+        assert!(state.result.is_some());
+    }
 
     #[test]
     fn result_window_does_not_grow_between_frames() {

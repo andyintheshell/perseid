@@ -62,6 +62,7 @@ pub(super) enum ResultView {
 
 /// State for the Comparer tab and its result window.
 pub(in crate::app) struct ComparerState {
+    pub(in crate::app) window: crate::app::utility_window::UtilityWindow,
     pub(super) items: Vec<ComparableItem>,
     pub(super) selected: [Option<usize>; 2],
     pub(super) active: usize,
@@ -81,6 +82,7 @@ pub(in crate::app) struct ComparerState {
 impl ComparerState {
     pub(in crate::app) fn new() -> Self {
         Self {
+            window: Default::default(),
             items: Vec::new(),
             selected: [None, None],
             active: 0,
@@ -169,6 +171,7 @@ impl ComparerState {
                 );
                 self.result = Some(result);
                 self.result_open = true;
+                self.window.request_focus();
                 self.diff_cursor = 0;
                 self.result_views = [ResultView::Text, ResultView::Text];
                 self.result_scroll = [Vec2::ZERO, Vec2::ZERO];

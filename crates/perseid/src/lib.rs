@@ -149,6 +149,9 @@ pub fn run() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport,
+        // Utility geometry is saved explicitly by the app. Keep the existing
+        // main-window startup sizing (including --ui-scale and screenshots).
+        persist_window: false,
         ..Default::default()
     };
 

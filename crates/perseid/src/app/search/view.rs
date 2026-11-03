@@ -33,10 +33,7 @@ impl SearchState {
         inspector: &mut InspectorState,
     ) {
         if !self.open {
-            return;
-        }
-        if ctx.input(|input| input.key_pressed(Key::Escape)) {
-            self.open = false;
+            self.window.hide();
             return;
         }
 
@@ -46,21 +43,19 @@ impl SearchState {
         }
 
         let mut open = self.open;
-        let screen = ctx.content_rect();
-        let default_pos = egui::pos2(
-            (screen.center().x - 500.0).max(screen.left() + 16.0),
-            (screen.center().y - 330.0).max(screen.top() + 42.0),
-        );
-
-        egui::Window::new("Search")
-            .id(egui::Id::unique("perseid.search.window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(egui::vec2(1000.0, 660.0))
-            .min_size(egui::vec2(680.0, 430.0))
-            .default_pos(default_pos)
-            .show(ctx, |ui| {
+        let mut window = std::mem::take(&mut self.window);
+        window.show(
+            ctx,
+            "perseid.search.window",
+            "Search",
+            &mut open,
+            [egui::vec2(1000.0, 660.0), egui::vec2(680.0, 430.0)],
+            |ui| {
+                // Native viewports have their own input stream; the main
+                // window's shortcut handler cannot consume this one for us.
+                if ui.input_mut(|input| input.consume_shortcut(&crate::app::SEARCH_SHORTCUT)) {
+                    self.focus_query = true;
+                }
                 let history_changed = self.last_history_revision
                     != Some(sources.history.revision())
                     || self.last_websocket_revision != Some(sources.websocket_history.revision());
@@ -88,8 +83,10 @@ impl SearchState {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::SURFACE))
                     .show(ui, |ui| self.results_table(ui));
-            });
+            },
+        );
 
+        self.window = window;
         self.open = open;
     }
 
