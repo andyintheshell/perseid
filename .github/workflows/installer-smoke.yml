@@ -21,6 +21,8 @@ jobs:
           - { id: windows-arm64-portable, artifact: windows-arm64, runner: windows-11-arm, format: portable }
           - { id: linux-x64-deb, artifact: linux-x64, runner: ubuntu-22.04, format: deb }
           - { id: linux-arm64-deb, artifact: linux-arm64, runner: ubuntu-22.04-arm, format: deb }
+          - { id: linux-x64-rpm, artifact: linux-x64, runner: ubuntu-22.04, format: rpm }
+          - { id: linux-arm64-rpm, artifact: linux-arm64, runner: ubuntu-22.04-arm, format: rpm }
           - { id: linux-x64-appimage, artifact: linux-x64, runner: ubuntu-22.04, format: appimage }
           - { id: linux-arm64-appimage, artifact: linux-arm64, runner: ubuntu-22.04-arm, format: appimage }
           - { id: macos-arm64-dmg, artifact: macos-universal, runner: macos-15, format: dmg }
@@ -73,7 +75,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed app smoke test failed' }
 
       - name: Install and launch Linux package
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.format != 'rpm'
         env:
           FORMAT: ${{ matrix.format }}
           SMOKE_ID: ${{ matrix.id }}
@@ -97,6 +99,16 @@ jobs:
             openbox > smoke/window-manager.log 2>&1 &
             python scripts/installer-smoke.py "$EXE" "smoke/$SMOKE_ID.png"
           '
+
+      - name: Install and launch RPM on Fedora
+        if: matrix.format == 'rpm'
+        env:
+          SMOKE_ID: ${{ matrix.id }}
+        run: |
+          mkdir -p smoke
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            -e SMOKE_ID -e LIBGL_ALWAYS_SOFTWARE=1 fedora:44 \
+            bash scripts/smoke-rpm.sh
 
       - name: Install and launch macOS disk image
         if: runner.os == 'macOS'

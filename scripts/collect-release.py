@@ -35,8 +35,8 @@ def main() -> None:
 
     arch = {'x64': 'x86_64', 'arm64': 'aarch64'}[args.arch]
     stem = f'perseid-{version}-linux-{arch}'
-    for suffix in ('.AppImage', '.deb'):
-        source = one_file(packaged, suffix)
+    for suffix in ('.AppImage', '.deb', '.rpm'):
+        source = one_file(ROOT / 'dist' / 'rpmbuild' / 'RPMS' if suffix == '.rpm' else packaged, suffix)
         destination = ROOT / 'dist' / f'{stem}{suffix}'
         shutil.copy2(source, destination)
         print(f'Created {destination}')

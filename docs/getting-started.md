@@ -50,11 +50,14 @@ Choose a platform package from
 | --- | --- |
 | Windows | x64 or ARM64 `.msi` installer, or `-portable.zip` |
 | macOS | Universal `.dmg` containing `Perseid.app` |
-| Linux | x86-64 or ARM64 `.AppImage` or `.deb` |
+| Linux | x86-64 or ARM64 `.AppImage`, `.deb`, or `.rpm` |
 
 `SHA256SUMS.txt` lists checksums. Windows packages are unsigned, and the macOS
 DMG is not notarized, so the operating system may warn or block launch. The
-AppImage and DEB still require compatible host desktop and graphics libraries.
+AppImage, DEB, and RPM still require compatible host desktop and graphics libraries.
+Install RPM downloads with `sudo dnf install ./perseid-*.rpm` on compatible
+Fedora-family systems. Release CI installs, launches, captures, and uninstalls
+each RPM in a native-architecture Fedora 44 container.
 
 ### Linux
 

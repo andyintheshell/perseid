@@ -8,6 +8,7 @@ Draft publication requires every smoke test to succeed.
 
 Fresh native runners test Windows x64/ARM64 MSI installation and portable ZIP
 extraction, Linux x64/ARM64 DEB installation and normal AppImage execution
+and RPM installation, launch, and removal in native Fedora 44 containers
 (with FUSE, not extraction), and the universal macOS DMG on both Intel and ARM.
 The DMG is mounted and its app copied into `/Applications`.
 
