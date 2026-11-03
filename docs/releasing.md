@@ -12,7 +12,7 @@ for this release scope; remaining M3 issues moved to M4 (see the [roadmap](roadm
 
 ## Current release formats
 
-The release matrix builds these nine application downloads:
+The release matrix builds these eleven application downloads:
 
 | Platform | Release assets |
 | --- | --- |

@@ -7,7 +7,7 @@ URL: https://github.com/andyintheshell/perseid
 # Include libraries loaded dynamically by the desktop backend as well as the
 # ELF dependencies detected automatically by rpmbuild.
 Requires: libglvnd-egl, libglvnd-glx, mesa-dri-drivers
-Requires: libxkbcommon, libxkbcommon-x11, wayland-libs-client, wayland-libs-cursor, wayland-libs-egl
+Requires: libxkbcommon, libxkbcommon-x11, libwayland-client, libwayland-cursor, libwayland-egl
 Requires: libX11, libxcb, libXcursor, libXi, libXrandr
 
 %description

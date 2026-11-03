@@ -21,7 +21,7 @@ needed for the first plain-HTTP walkthrough.
 
 | Platform | Validation status |
 | --- | --- |
-| Linux | CI-tested on Ubuntu 26.04; x86-64/ARM64 AppImage and DEB downloads are available. Packages are built on Ubuntu 22.04 and need compatible desktop/graphics libraries. The published memory baseline is from a Kali ARM64 VM. |
+| Linux | CI-tested on Ubuntu 26.04; x86-64/ARM64 AppImage, DEB, and RPM downloads are available. Packages are built on Ubuntu 22.04 and need compatible desktop/graphics libraries. RPM install tests use Fedora 44 containers. The published memory baseline is from a Kali ARM64 VM. |
 | macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. A universal Intel/Apple Silicon DMG is available; it is ad-hoc signed but not notarized. |
 | Windows | CI-tested on the GitHub-hosted Windows 2025 x64 runner. x64/ARM64 MSI and no-install ZIP downloads are available; Windows packages are unsigned. Graphics-driver and clean-install coverage is limited. |
 
@@ -110,8 +110,9 @@ desktop dependencies; the macOS job verifies that its hosted runner is arm64.
 Before caching, CI removes each image's unrelated floating `stable` Rust
 toolchain so image updates do not invalidate the cache for the pinned project
 toolchain. The test suite runs headlessly. Running the app still requires a
-working desktop and graphics stack. CI does not install-test release packages
-or promise support for every desktop and graphics configuration.
+working desktop and graphics stack. The separate release workflow install-tests
+the packages as described in [Installed release smoke tests](installer-smoke.md).
+These checks do not promise support for every desktop and graphics configuration.
 
 ## Build from the repository
 
