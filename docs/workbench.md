@@ -402,6 +402,10 @@ that its request or response is no longer available. Workspaces saved by older
 versions contained only HTTP result IDs, so unknown IDs are dropped on open as
 before.
 
+Matching uses the decoded body representation; uncompressed retained bodies
+are searched in full, while decoded compressed previews are bounded by the
+same decoder limits as the message editor.
+
 ### Independent utility windows
 
 Search and the Comparer result use native, decorated desktop windows. Drag
@@ -419,9 +423,6 @@ Perseid remembers sizes but cannot restore an exact monitor position. Window
 manager policies may also adjust requested geometry. Documentation screenshots
 and headless tests deliberately embed these windows inside the main viewport.
 See the [cross-platform manual checks](utility-window-checks.md).
-Matching uses the decoded body representation; uncompressed retained bodies
-are searched in full, while decoded compressed previews are bounded by the
-same decoder limits as the message editor.
 
 ## Intercept and edit
 

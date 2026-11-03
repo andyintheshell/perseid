@@ -1,5 +1,7 @@
 # Independent utility window checks
 
+[Documentation index](README.md) · [Workbench](workbench.md#independent-utility-windows)
+
 Run these checks on macOS, Windows, Linux/X11, and Linux/Wayland with a graphical
 desktop; include two monitors and, where available, different display scales.
 These are manual checks, not claims of completed platform validation. Headless

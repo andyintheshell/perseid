@@ -29,6 +29,7 @@ use a local lab or another target you are explicitly authorized to test.
 | --- | --- |
 | [Getting started](getting-started.md) | Which platforms and dependencies? How do I build, run, and configure the app? |
 | [Workbench](workbench.md) | How do Target, Proxy, Intruder, Repeater, Sequencer, Decoder, and Comparer work? What are the shortcuts and limits? |
+| [Independent utility window checks](utility-window-checks.md) | How do I manually validate Search and Comparer window movement, geometry, and focus across desktop platforms? |
 | [HTTPS interception](tls.md) | Where is the CA? How do I install or remove trust and configure pass-through hosts? |
 | [Troubleshooting](troubleshooting.md) | Why is traffic missing, held, rejected, or failing TLS? What should go in a bug report? |
 | [Safety and privacy](safety.md) | What is retained? What does scope enforce? What happens to credentials and CA keys? |
