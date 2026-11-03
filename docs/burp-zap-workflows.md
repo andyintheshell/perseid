@@ -8,6 +8,11 @@
 > 2026**. For current status, use the [capability matrix](burp-parity.md) and
 > [roadmap](roadmap.md).
 
+**Decoder follow-up:** the historical snapshot below predates binary-preserving
+Hex transfers and selection-aware Decoder Hex panels. Those are now implemented;
+see the [current guide](workbench.md#decoder) and
+[promotion check](burp-parity.md#decoder-promotion-check).
+
 **On this page:** [Manual workflow](#the-manual-workflow) ·
 [Implementation snapshot](#perseid-implementation-snapshot) ·
 [Roadmap implications](#what-this-means-for-the-roadmap) ·

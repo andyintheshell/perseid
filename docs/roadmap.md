@@ -94,8 +94,8 @@ promise.
   Comparer diff and Sequencer analysis are recomputed on open. Live capture,
   running attacks or sends, held interception messages, and CA material do not
   persist. Live WebSocket Repeater tabs are also session-only. History
-  and message selections can be sent to Decoder; Hex selections currently send
-  their displayed hexadecimal text rather than binary bytes.*
+   and message selections can be sent to Decoder; Hex selections preserve binary
+   bytes, and Decoder Hex panels support byte-range transforms and saved selections.*
 
 - [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
   history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
@@ -117,10 +117,13 @@ promise.
   ([#57](https://github.com/andyintheshell/perseid/issues/57)), application settings
   and opt-in tool-state persistence ([#58](https://github.com/andyintheshell/perseid/issues/58)),
   site map annotations ([#59](https://github.com/andyintheshell/perseid/issues/59)),
-  remaining Send to Decoder behavior ([#60](https://github.com/andyintheshell/perseid/issues/60)),
   full-store WebSocket paging/lazy details ([#150](https://github.com/andyintheshell/perseid/issues/150)),
   and a recent-project list without automatic reopening
   ([#152](https://github.com/andyintheshell/perseid/issues/152)).
+
+  **Completed Decoder follow-up (#60):** binary-preserving Hex transfers,
+  Hex-panel selection-aware transforms, and byte-offset selection persistence.
+  A native desktop smoke check remains before promoting Decoder's parity status.
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a

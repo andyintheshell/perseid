@@ -277,7 +277,15 @@ impl PerseidApp {
                 DecoderViewRecord::Text => ViewMode::Text,
                 DecoderViewRecord::Hex => ViewMode::Hex,
             };
-            panel.selection = selection_from_workspace(&panel.text, workspace.selection.as_ref());
+            panel.selection = if panel.view == ViewMode::Hex {
+                workspace.selection.as_ref().and_then(|selection| {
+                    let start = selection.start.min(panel.data.len());
+                    let end = selection.end.min(panel.data.len());
+                    (start != end).then(|| start.min(end)..start.max(end))
+                })
+            } else {
+                selection_from_workspace(&panel.text, workspace.selection.as_ref())
+            };
             self.decoder.panels.push(panel);
         }
         self.decoder.next_id = next_id;
@@ -288,6 +296,20 @@ impl PerseidApp {
 #[cfg(test)]
 mod hash_persistence_tests {
     use super::*;
+
+    #[test]
+    fn binary_hex_selection_round_trips_without_utf8_boundary_conversion() {
+        let mut app = PerseidApp::test_app();
+        app.decoder
+            .receive(vec![0xff, 0, 0x80, 42], "binary".into(), false);
+        app.decoder.panels[0].selection = Some(1..3);
+        let json = serde_json::to_string(&app.decoder_workspace()).unwrap();
+        let saved = serde_json::from_str::<Vec<DecoderPanelWorkspace>>(&json).unwrap();
+        app.apply_decoder_workspace(&saved);
+        assert_eq!(app.decoder.panels[0].view, ViewMode::Hex);
+        assert_eq!(app.decoder.panels[0].data, [0xff, 0, 0x80, 42]);
+        assert_eq!(app.decoder.panels[0].selection, Some(1..3));
+    }
 
     #[test]
     fn all_hashes_round_trip_through_project_json() {

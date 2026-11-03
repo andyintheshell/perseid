@@ -43,8 +43,28 @@ fraction of each capability implemented. In particular, a Working row denotes a
 usable workflow, not every Burp option: Intruder lacks payload processing, and
 WebSocket replay cannot reopen closed connections. The biggest partial gaps
 include bounded live-history views, session-only WebSocket Repeater tabs,
-Decoder hex-selection behavior, and approximate Sequencer analysis. See the
+approximate Sequencer analysis. Decoder's binary Hex transfers and Hex-panel
+selection transforms are now implemented and regression-tested; its status
+remains Partial pending the native desktop manual check required below. Promoting
+Decoder alone would yield **82.1%**: `(9 + 5 × 0.5) / 14 × 100`. See the
 matrix for details. Recalculate this snapshot when matrix statuses or scope change.
+
+### Decoder promotion check
+
+The binary-selection implementation is covered by headless egui interaction and
+workspace round-trip tests. Before changing Decoder to Working, manually check
+on a native desktop build:
+
+- Send a Hex selection containing `00 ff` to Decoder with both Append and
+  Start new chain; verify byte values, not ASCII `30 30 20 66 66`.
+- Drag backwards across Hex rows in both columns; copy the selection and apply
+  ASCII hex encoding or a hash. Verify only selected bytes change.
+- Save/reopen a project containing non-UTF-8 bytes and a Hex selection; verify
+  bytes, selection, and the next transform survive.
+- Confirm Raw/Pretty sends remain labeled displayed/derived text, preview
+  limits remain bounded, and no transform makes network requests.
+
+This native desktop check has not yet been recorded for this change.
 
 ## Status at a glance
 
@@ -81,7 +101,7 @@ Decoder, Comparer, and Sequencer.
 | **WebSocket history** | 🟡 Partial | Capture, intercept, edit, forward and drop text/binary messages for `ws://` and decrypted `wss://`. Saved projects retain history, but the UI loads a bounded snapshot. |
 | **WebSocket editing and replay** | ✅ Working | Hold and edit text or binary messages in both directions; replay captured messages repeatedly on the existing live connection. Reopening closed connections and fuzzing are not supported. |
 | **Repeater** | 🟡 Partial | Editable HTTP/HTTPS requests and live-connection WebSocket replay with text/hex editing and message views. HTTP tabs persist; WebSocket tabs are session-only and cannot reopen closed connections. Direct HTTP sends bypass proxy scope, interception, and rewrite rules. |
-| **Decoder** | 🟡 Partial | Stacked Text/Hex panels, common encode/decode operations, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms. Projects save panel contents, operation annotations, view, and selection. History can send full captured messages, and message panes can send selections to Decoder. Hex selections currently send displayed hexadecimal text rather than the selected binary bytes. |
+| **Decoder** | 🟡 Partial · validation pending | Stacked Text/Hex panels, common encode/decode operations, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms in Text and Hex. Projects save panel contents, operation annotations, view, and byte-range selection. History sends full captured messages; message-pane Hex selections transfer original selected binary bytes, while clipboard copies remain hexadecimal text. Raw/Pretty selections are explicitly displayed/derived text, not byte-exact exports. Binary transfers, reverse/multiline Hex selection, and persistence have automated regression coverage; native desktop smoke validation remains before promotion to Working. |
 | **Comparer** | ✅ Working | Shared item list, word- and byte-level differences, Text/Hex views, difference navigation, and synchronized scrolling. Persistent projects save input items, selections, and result-window state; the diff is recomputed on open. |
 | **Intruder** | ✅ Working | `$$` positions; editable or file-loaded payloads; Sniper, Battering ram, Pitchfork, and Cluster bomb; up to 32 concurrent requests with scope checks. Projects save request/payload configuration and result rows. No payload processing. |
 | **Sequencer** | 🟡 Partial | Manual token loading and live regex capture from HTTP history; character-level count/transition tests; bit-position and whole-stream tests; effective-entropy chart and per-analysis settings. Capture is expression-based rather than parameter-aware, and the statistical results are bounded approximations. |
@@ -115,7 +135,7 @@ For usage details, limits, and safety behavior, see the
 | **M1 — Proxy core** | ✅ Complete: HTTP/1.1 proxy, interception, scope, and match/replace. |
 | **M2 — HTTPS** | ✅ Complete: local CA lifecycle, TLS interception, and pass-through. |
 | **M3 — Daily workbench** | ✅ Complete for the `0.3.0` release scope: Repeater, Decoder, Comparer, full-store Search, stored HTTP paging, a full-store paged site map, and local project files. Remaining issues moved to M4; completion does not imply full capability parity. |
-| **M4 — Protocols and testing tools** | 🟡 Current focus: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. Includes M3 carryovers for WebSocket paging, history filters, settings, site map annotations, Decoder transfers, and recent projects; see the roadmap. |
+| **M4 — Protocols and testing tools** | 🟡 Current focus: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. Includes M3 carryovers for WebSocket paging, history filters, settings, site map annotations, and recent projects; Decoder transfers are implemented pending native parity validation. See the roadmap. |
 | **M5 — Parity hardening** | 🟡 In progress: release packages are published; clean-install testing, crash recovery, accessibility, and broader parity audits remain. |
 
 ## When does a capability count as parity?

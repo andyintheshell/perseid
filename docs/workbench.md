@@ -642,7 +642,7 @@ to release admission for unread results. See
 
 Paste or type into the first panel, then choose **Decode as**, **Encode as**,
 **Hash**, or **Smart decode**. Every operation adds a panel; transforming an
-earlier panel replaces the chain below it. Select text to transform only that
+earlier panel replaces the chain below it. Select text or Hex bytes to transform only that
 part, preserving the surrounding prefix and suffix. With no selection, the
 whole panel is used.
 
@@ -687,18 +687,24 @@ cSHAKE; no older standalone TupleHash dependency is required.
 
 </details>
 
-Right-click a text selection in a message pane and choose **Send selection to
+Right-click a selection in a message pane and choose **Send selection to
 Decoder**, then append a panel or start a new chain. Pretty selections contain
 the displayed formatted or decoded text; Raw selections also reflect the text
-preview, which can normalize or replace binary bytes. Hex preview selections
-can be copied as hexadecimal; sending one to Decoder currently sends the
-space-separated hexadecimal text, not the selected byte values. From HTTP
+preview, which can normalize or replace binary bytes. For byte-exact transfers,
+use Hex: selections send the original selected bytes (including NUL and invalid
+UTF-8), while clipboard copies remain space-separated hexadecimal text. Hex
+shows the bytes represented by that view, which may already be content-decoded;
+it does not recover uncaptured or truncated data. From HTTP
 history, right-click an exchange to send the full captured request or response,
 including its original captured body bytes and a
 reconstructed HTTP head. Captures may themselves be truncated. Starting a new
 chain replaces the current panels; appending preserves them.
 
 Text panels are editable; Hex panels are read-only and preview at most 64 KiB.
+Drag in either the hexadecimal or ASCII column to select whole bytes across
+rows, in either direction. The selection survives context-menu and operation
+menu clicks. **Copy selection** (or the platform Copy shortcut) exports selected
+bytes as spaced hex; **Select all bytes** includes bytes beyond the preview.
 Binary results open in Hex. Switching to Text gives a lossy preview, and editing
 it replaces the bytes with UTF-8 text. **Copy** and **Copy output** export all
 retained data as text or hex, not just the visible hex preview.

@@ -239,6 +239,7 @@ fn message_frame(
         ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary));
     let mut selection = None;
     let mut hex_selection = None;
+    let mut hex_bytes = None;
     let mut changed = false;
     let frame = egui::Frame::NONE
         .fill(Color32::WHITE)
@@ -251,8 +252,8 @@ fn message_frame(
                 // A single text galley for a 64 KiB hex dump is surprisingly
                 // expensive to lay out. Virtualize the lines so memory stays
                 // proportional to the visible page rather than the whole dump.
-                hex_selection = message_hex(ui, id, pane, mode, text.as_str())
-                    .map(|bytes| format_hex_selection(&bytes));
+                hex_bytes = message_hex(ui, id, pane, mode, text.as_str());
+                hex_selection = hex_bytes.as_deref().map(format_hex_selection);
             } else {
                 let output =
                     message_numbered(ui, id, pane, mode, text, context.matches, show_invisibles);
@@ -266,6 +267,12 @@ fn message_frame(
     // was selected when the context menu opened so Copy selection still has
     // something to copy after that happens.
     if secondary_pressed {
+        ui.data_mut(|data| {
+            data.remove::<Vec<u8>>(selection_key.with("bytes"));
+            if let Some(bytes) = &hex_bytes {
+                data.insert_temp(selection_key.with("bytes"), bytes.clone());
+            }
+        });
         let selected = hex_selection
             .as_deref()
             .or_else(|| {
@@ -283,6 +290,7 @@ fn message_frame(
         });
     }
     let saved_selection = ui.data(|data| data.get_temp::<Arc<str>>(selection_key));
+    let saved_bytes = ui.data(|data| data.get_temp::<Vec<u8>>(selection_key.with("bytes")));
     frame.response.container_context_menu(|ui| {
         let selected = saved_selection
             .as_deref()
@@ -306,8 +314,17 @@ fn message_frame(
             ui.menu_button("Send selection to Decoder", |ui| {
                 decoder_send_menu(
                     ui,
-                    selected.as_bytes(),
-                    if mode == MessageView::Pretty {
+                    if mode == MessageView::Hex {
+                        saved_bytes
+                            .as_deref()
+                            .or(hex_bytes.as_deref())
+                            .unwrap_or_default()
+                    } else {
+                        selected.as_bytes()
+                    },
+                    if mode == MessageView::Hex {
+                        "Hex selection (original bytes)"
+                    } else if mode == MessageView::Pretty {
                         "Pretty view selection (formatted/decoded)"
                     } else {
                         "Displayed text selection"
@@ -1131,6 +1148,74 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(selection.range(), Some(14..19));
+    }
+
+    #[test]
+    fn hex_context_menu_transfers_original_binary_bytes() {
+        for (label, replace) in [
+            ("Append panel", false),
+            ("Start new chain (replace current)", true),
+        ] {
+            let text = "00000000  00 ff 41                                          |..A|\n";
+            let ctx = Context::default();
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let run = |events| {
+                ctx.run_ui(
+                    RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(700.0, 300.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        message_text(ui, 7, MessagePane::Response, MessageView::Hex, text);
+                    },
+                )
+            };
+            run(vec![]).drop_without_applying_deltas();
+            let width = ctx.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap("0".into(), message_font(), theme::TEXT)
+                    .size()
+                    .x
+            });
+            let start = egui::pos2(5.0 + 14.0 * width, 10.0);
+            let end = egui::pos2(5.0 + 10.5 * width, 10.0);
+            for events in [
+                vec![Event::PointerMoved(start)],
+                vec![button(start, true)],
+                vec![Event::PointerMoved(end)],
+                vec![button(end, false)],
+                vec![secondary_button(end, true)],
+                vec![secondary_button(end, false)],
+                vec![],
+            ] {
+                run(events).drop_without_applying_deltas();
+            }
+            for label in ["Send selection to Decoder", label] {
+                let output = run(vec![]);
+                let pos =
+                    text_position(&output, label).unwrap_or_else(|| panic!("missing {label}"));
+                output.drop_without_applying_deltas();
+                for events in [
+                    vec![Event::PointerMoved(pos)],
+                    vec![button(pos, true)],
+                    vec![button(pos, false)],
+                ] {
+                    run(events).drop_without_applying_deltas();
+                }
+            }
+            let transfer = ctx
+                .data(|data| {
+                    data.get_temp::<DecoderTransfer>(egui::Id::unique("perseid.decoder.transfer"))
+                })
+                .expect("transfer queued");
+            assert_eq!(transfer.bytes, [0, 255]);
+            assert_eq!(transfer.source, "Hex selection (original bytes)");
+            assert_eq!(transfer.replace, replace);
+        }
     }
 
     #[test]
