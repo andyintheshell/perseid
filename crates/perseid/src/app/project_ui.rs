@@ -2108,7 +2108,7 @@ pub(super) mod tests {
 
     /// Run the project poll loop until no command is pending. Commands finish
     /// on the writer thread, so a short bounded wait keeps the test honest.
-    fn poll_until_idle(app: &mut PerseidApp) {
+    pub(super) fn poll_until_idle(app: &mut PerseidApp) {
         let deadline = Instant::now() + Duration::from_secs(30);
         while !app.project.pending.is_empty() {
             app.poll_project();
@@ -3127,14 +3127,28 @@ mod switch_tests {
         app.project.dialog = None;
         app.begin_save_project(path.clone(), false, false);
         app.scope_enabled = false;
+        // Saving creates and publishes a database on the writer thread. Use
+        // the same bounded wait as other file-backed project tests rather than
+        // charging that work against the final-flush deadline on slower CI.
+        super::tests::poll_until_idle(&mut app);
+        assert!(
+            app.project.quit_flush.is_some() || app.project.quit_ready,
+            "project save did not start the final workspace flush: {:?}",
+            app.project.notice()
+        );
         let ctx = egui::Context::default();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !app.project.quit_ready && Instant::now() < deadline {
             app.poll_project();
             app.handle_close_request(&ctx);
-            std::thread::yield_now();
+            assert!(
+                app.project.quit_error.is_none(),
+                "final workspace flush failed: {:?}",
+                app.project.quit_error
+            );
+            std::thread::sleep(Duration::from_millis(2));
         }
-        assert!(app.project.quit_ready);
+        assert!(app.project.quit_ready, "quit did not complete after saving");
         assert!(path.is_file());
         assert_eq!(
             app.project.last_workspace.as_ref().unwrap(),
