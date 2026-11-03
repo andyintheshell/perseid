@@ -691,7 +691,7 @@ Right-click a selection in a message pane and choose **Send selection to
 Decoder**, then append a panel or start a new chain. Pretty selections contain
 the displayed formatted or decoded text; Raw selections also reflect the text
 preview, which can normalize or replace binary bytes. For byte-exact transfers,
-use Hex: selections send the original selected bytes (including NUL and invalid
+use Hex: selections send the current view's selected bytes (including NUL and invalid
 UTF-8), while clipboard copies remain space-separated hexadecimal text. Hex
 shows the bytes represented by that view, which may already be content-decoded;
 it does not recover uncaptured or truncated data. From HTTP

@@ -594,10 +594,11 @@ fn hex_view(ui: &mut egui::Ui, panel: &mut Panel) {
         egui::Sense::focusable_noninteractive(),
     );
     let mut anchor = ui.data(|data| data.get_temp::<usize>(drag_id));
-    let (pressed, down, pointer) = ui.input(|input| {
+    let (pressed, down, released, pointer) = ui.input(|input| {
         (
             input.pointer.primary_pressed(),
             input.pointer.primary_down(),
+            input.pointer.primary_released(),
             input.pointer.interact_pos(),
         )
     });
@@ -623,7 +624,7 @@ fn hex_view(ui: &mut egui::Ui, panel: &mut Panel) {
                     egui::Sense::click_and_drag() - egui::Sense::FOCUSABLE,
                 );
                 let hit = pointer.map(|pos| {
-                    if anchor.is_some() && down && ui.clip_rect().height() > 1.0 {
+                    if anchor.is_some() && (down || released) && ui.clip_rect().height() > 1.0 {
                         egui::pos2(
                             pos.x,
                             pos.y
@@ -642,7 +643,9 @@ fn hex_view(ui: &mut egui::Ui, panel: &mut Panel) {
                             anchor = Some(offset);
                             ui.memory_mut(|memory| memory.request_focus(drag_id));
                         }
-                        if down && let Some(start) = anchor {
+                        if (down || released)
+                            && let Some(start) = anchor
+                        {
                             panel.selection = Some(start.min(offset)..start.max(offset) + 1);
                         }
                     } else if pressed {
@@ -810,6 +813,65 @@ mod tests {
         assert_eq!(hex_byte_at(0, 9, 10), None);
         assert_eq!(hex_byte_at(1, 37, 10), Some(9));
         assert_eq!(hex_byte_at(1, 38, 10), None);
+    }
+
+    #[test]
+    fn hex_panel_finalizes_batched_release_and_same_frame_click() {
+        for same_frame_click in [false, true] {
+            let ctx = egui::Context::default();
+            let mut panel = Panel::new(1, (0..16).collect(), vec![], None);
+            let mut run = |events| {
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(600.0, 250.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| hex_view(ui, &mut panel),
+                )
+            };
+            run(vec![]).drop_without_applying_deltas();
+            let (width, height) = ctx.fonts_mut(|fonts| {
+                let font = FontId::monospace(13.0);
+                (
+                    fonts
+                        .layout_no_wrap("0".into(), font.clone(), theme::TEXT)
+                        .size()
+                        .x,
+                    fonts.row_height(&font) + 2.0,
+                )
+            });
+            let start = egui::pos2(37.5 * width, height * 1.5);
+            let end = egui::pos2(28.5 * width, height * 0.5);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            run(vec![egui::Event::PointerMoved(start)]).drop_without_applying_deltas();
+            if same_frame_click {
+                run(vec![button(start, true), button(start, false)]).drop_without_applying_deltas();
+            } else {
+                run(vec![button(start, true)]).drop_without_applying_deltas();
+                // No intermediate frame sees the final endpoint while down.
+                run(vec![egui::Event::PointerMoved(end), button(end, false)])
+                    .drop_without_applying_deltas();
+            }
+            // An unrelated release must not extend the completed selection.
+            run(vec![
+                egui::Event::PointerMoved(egui::pos2(10.5 * width, height * 0.5)),
+                button(egui::pos2(10.5 * width, height * 0.5), false),
+            ])
+            .drop_without_applying_deltas();
+            assert_eq!(
+                panel.selection,
+                Some(if same_frame_click { 9..10 } else { 6..10 })
+            );
+        }
     }
 
     #[test]

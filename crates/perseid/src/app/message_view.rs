@@ -323,7 +323,7 @@ fn message_frame(
                         selected.as_bytes()
                     },
                     if mode == MessageView::Hex {
-                        "Hex selection (original bytes)"
+                        "Hex selection (current view bytes)"
                     } else if mode == MessageView::Pretty {
                         "Pretty view selection (formatted/decoded)"
                     } else {
@@ -1151,7 +1151,7 @@ mod tests {
     }
 
     #[test]
-    fn hex_context_menu_transfers_original_binary_bytes() {
+    fn hex_context_menu_transfers_current_view_binary_bytes() {
         for (label, replace) in [
             ("Append panel", false),
             ("Start new chain (replace current)", true),
@@ -1213,7 +1213,7 @@ mod tests {
                 })
                 .expect("transfer queued");
             assert_eq!(transfer.bytes, [0, 255]);
-            assert_eq!(transfer.source, "Hex selection (original bytes)");
+            assert_eq!(transfer.source, "Hex selection (current view bytes)");
             assert_eq!(transfer.replace, replace);
         }
     }
