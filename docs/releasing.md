@@ -27,6 +27,14 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
 
+### 0.3.1 development highlights
+
+- Binary-preserving Send to Decoder from Hex message selections; selection-aware
+  Decoder Hex transforms, copying, and byte-offset selection persistence.
+- Automated regressions and user-confirmed native macOS smoke testing promote
+  Decoder to Working; the scoped manual-workflow parity estimate is **82.1%**.
+- This version bump does not itself publish release artifacts.
+
 ### 0.3.0 release highlights
 
 - M3 daily-workbench release scope is complete; six remaining issues moved to

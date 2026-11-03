@@ -123,7 +123,8 @@ promise.
 
   **Completed Decoder follow-up (#60):** binary-preserving Hex transfers,
   Hex-panel selection-aware transforms, and byte-offset selection persistence.
-  A native desktop smoke check remains before promoting Decoder's parity status.
+  Automated regressions and user-confirmed native macOS smoke testing in the
+  `0.3.1` development build complete Decoder's scoped Working parity status.
 
 - [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
   handling of sensitive traffic, accessibility, performance benchmarks, and a
