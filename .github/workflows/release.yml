@@ -47,7 +47,7 @@ jobs:
           sudo apt-get install -y \
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev libssl-dev \
-            libfuse2 file desktop-file-utils
+            libfuse2 file desktop-file-utils rpm
 
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
@@ -102,9 +102,9 @@ jobs:
         if: matrix.os == 'linux'
         run: cargo packager --release --config packager.json
 
-      - name: Normalize Linux release assets
+      - name: Build RPM and normalize Linux release assets
         if: matrix.os == 'linux'
-        run: python scripts/collect-release.py --os linux --arch ${{ matrix.arch }}
+        run: bash scripts/package-rpm.sh ${{ matrix.arch }}
 
       - name: Build universal macOS DMG
         if: matrix.os == 'macos'
@@ -156,7 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p screenshots
-          for id in windows-x64-msi windows-arm64-msi windows-x64-portable windows-arm64-portable linux-x64-deb linux-arm64-deb linux-x64-appimage linux-arm64-appimage macos-arm64-dmg macos-x64-dmg; do
+          for id in windows-x64-msi windows-arm64-msi windows-x64-portable windows-arm64-portable linux-x64-deb linux-arm64-deb linux-x64-rpm linux-arm64-rpm linux-x64-appimage linux-arm64-appimage macos-arm64-dmg macos-x64-dmg; do
             test -s "smoke/smoke-$id/$id.png"
             cp "smoke/smoke-$id/$id.png" "screenshots/installer-$id.png"
           done
@@ -177,9 +177,10 @@ jobs:
           for arch in x86_64 aarch64; do
             test -s "dist/perseid-${version}-linux-${arch}.AppImage"
             test -s "dist/perseid-${version}-linux-${arch}.deb"
+            test -s "dist/perseid-${version}-linux-${arch}.rpm"
           done
           test -s "dist/perseid-${version}-macos-universal.dmg"
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 9
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 11
           (cd dist && sha256sum perseid-* > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 

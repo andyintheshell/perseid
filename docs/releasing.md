@@ -12,12 +12,12 @@ for this release scope; remaining M3 issues moved to M4 (see the [roadmap](roadm
 
 ## Current release formats
 
-The release matrix builds these nine application downloads:
+The release matrix builds these eleven application downloads:
 
 | Platform | Release assets |
 | --- | --- |
 | Windows x64 and ARM64 | `.msi` installer and no-install `-portable.zip` for each architecture |
-| Linux x86-64 and ARM64 | `.AppImage` and `.deb` for each architecture |
+| Linux x86-64 and ARM64 | `.AppImage`, `.deb`, and `.rpm` for each architecture |
 | macOS Intel and Apple Silicon | Universal `.dmg` containing `Perseid.app` |
 
 Every draft also includes `SHA256SUMS.txt`. Windows packages are unsigned. The
@@ -91,7 +91,8 @@ maintainers.
   `x86_64`, and verify the ad-hoc signature. Test launch behavior on both CPU
   families; notarization/Gatekeeper approval is not expected yet.
 - **Linux:** Run each AppImage on x86-64 and ARM64 with a graphical desktop;
-  install and uninstall each DEB on a compatible Debian-family system. Check
+  install and uninstall each DEB on a compatible Debian-family system and each
+  RPM on a compatible Fedora-family system. Check
   Wayland and X11/OpenGL startup and confirm the proxy and local CA work.
 - **All platforms:** Verify the downloaded files against `SHA256SUMS.txt`,
   inspect generated notes, and check that upgrading does not remove existing
@@ -134,6 +135,7 @@ generated `packager.json` is ignored as well.
 cargo build --release --locked -p perseid
 python scripts/generate-packager-config.py --os linux
 cargo packager --release --config packager.json
+bash scripts/package-rpm.sh x64 # requires rpmbuild; use arm64 on ARM64 hosts
 python scripts/collect-release.py --os linux --arch x64  # or arm64
 
 # macOS (builds both Rust targets and creates a universal DMG)

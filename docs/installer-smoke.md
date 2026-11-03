@@ -10,6 +10,9 @@ Fresh native runners test Windows x64/ARM64 MSI installation and portable ZIP
 extraction, Linux x64/ARM64 DEB installation and normal AppImage execution
 (with FUSE, not extraction), and the universal macOS DMG on both Intel and ARM.
 The DMG is mounted and its app copied into `/Applications`.
+RPM installation, launch, and removal run in native x64/ARM64 Fedora 44
+containers on Ubuntu hosts. The image is pinned to a multi-architecture digest;
+update that digest when refreshing the Fedora base image.
 
 Each case launches the packaged executable, waits up to 90 seconds for a
 visible process-owned window, waits another five seconds, verifies the process
@@ -35,7 +38,7 @@ When updating Mesa, update both architecture-specific digests in
 
 This is a packaging/startup smoke test, not a functional or visual regression
 test. Inspect the screenshots when reviewing a release. It does not exercise
-installer wizard interactions, shortcuts, upgrades, uninstall, all supported OS
+installer wizard interactions, shortcuts, upgrades, uninstall (except RPM removal), all supported OS
 versions, or proxy functionality. macOS launches the installed executable
 directly: this does **not** validate Finder/LaunchServices or Gatekeeper's
 download-quarantine/notarization path. Current macOS packages are ad-hoc signed.
