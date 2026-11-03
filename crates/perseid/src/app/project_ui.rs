@@ -3131,6 +3131,11 @@ mod switch_tests {
         // the same bounded wait as other file-backed project tests rather than
         // charging that work against the final-flush deadline on slower CI.
         super::tests::poll_until_idle(&mut app);
+        assert!(
+            app.project.quit_flush.is_some() || app.project.quit_ready,
+            "project save did not start the final workspace flush: {:?}",
+            app.project.notice()
+        );
         let ctx = egui::Context::default();
         let deadline = Instant::now() + Duration::from_secs(30);
         while !app.project.quit_ready && Instant::now() < deadline {
