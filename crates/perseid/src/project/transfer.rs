@@ -42,7 +42,9 @@ pub fn copy_to_new_file(
 ///
 /// Overwrites never truncate `destination` in place. The copy is written to a
 /// uniquely named sibling first and only published when it is complete, so a
-/// failed transfer leaves the previous file untouched.
+/// copy or publication failure leaves the previous file untouched. Once rename
+/// succeeds, the replacement is published even if reopening it subsequently
+/// fails. See `docs/storage-design.md` for crash and filesystem limitations.
 pub fn copy_to_file(
     source: &Database,
     destination: &Path,
@@ -79,32 +81,12 @@ fn temporary_path(destination: &Path) -> PathBuf {
     destination.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()))
 }
 
-#[cfg(not(windows))]
 fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+    // std::fs::rename supports replacement on Windows too (MoveFileExW).
+    // Never delete the destination and retry: a sharing/permission failure must
+    // preserve the old file, and process termination must not open a deletion gap.
     std::fs::rename(source, destination)?;
     Ok(())
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> Result<()> {
-    // Windows cannot rename over an existing file. Only remove the old file
-    // after the rename proves that the replacement is blocked; a different
-    // failure must leave the existing project untouched.
-    match std::fs::rename(source, destination) {
-        Ok(()) => Ok(()),
-        Err(err)
-            if destination.exists()
-                && matches!(
-                    err.kind(),
-                    std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
-                ) =>
-        {
-            std::fs::remove_file(destination)?;
-            std::fs::rename(source, destination)?;
-            Ok(())
-        }
-        Err(err) => Err(err.into()),
-    }
 }
 
 fn copy_contents(source: &Database, destination: &Database, meta: &ProjectMeta) -> Result<()> {
@@ -443,6 +425,51 @@ mod tests {
             leftovers.is_empty(),
             "a failed overwrite must clean up temporary files: {leftovers:?}"
         );
+    }
+
+    #[test]
+    fn a_publication_failure_preserves_the_existing_file() {
+        let destination = TempProject::new("publish-failed");
+        let missing_source = TempProject::new("publish-missing");
+        std::fs::write(&destination.path, b"old project bytes").expect("existing file");
+
+        replace_file(&missing_source.path, &destination.path)
+            .expect_err("publishing a missing staged file must fail");
+
+        assert_eq!(
+            std::fs::read(&destination.path).unwrap(),
+            b"old project bytes"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_sharing_violation_preserves_the_old_project_and_cleans_staging() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let meta = ProjectMeta::new("transfer-locked".to_string());
+        let source = backend::create_memory(&meta).expect("source project");
+        let destination = TempProject::new("locked-overwrite");
+        // A private directory lets us assert staging cleanup without races with
+        // other tests. Refuse delete sharing to block Windows rename publication.
+        std::fs::create_dir(&destination.path).expect("private directory");
+        let project = destination.path.join("locked.perseid");
+        std::fs::write(&project, b"old project bytes").expect("existing file");
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1) // FILE_SHARE_READ, deliberately not FILE_SHARE_DELETE
+            .open(&project)
+            .expect("lock destination");
+
+        let error = copy_to_file(&source, &project, &meta, true)
+            .expect_err("publication must fail while delete sharing is denied");
+        assert!(matches!(error, ProjectError::Io(_)));
+        assert_eq!(std::fs::read(&project).unwrap(), b"old project bytes");
+        assert_eq!(std::fs::read_dir(&destination.path).unwrap().count(), 1);
+
+        drop(lock);
+        std::fs::remove_file(project).unwrap();
+        std::fs::remove_dir(&destination.path).unwrap();
     }
 
     #[test]
