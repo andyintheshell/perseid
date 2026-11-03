@@ -52,10 +52,12 @@ matrix for details. Recalculate this snapshot when matrix statuses or scope chan
 
 The binary-selection implementation is covered by headless egui interaction and
 workspace round-trip tests. The user confirmed that the native macOS `0.3.1`
-development build worked on **2026-11-03**, following the smoke-check instructions
-for binary transfers, selection transforms/copy, and save/reopen. This is a
-targeted smoke check, not exhaustive platform or toolkit validation. Regression
-checklist:
+development build worked on **2026-11-03** ("Yep, seems to work"). This was
+general confirmation after smoke-check instructions, not an item-by-item report;
+individual manual results, including save/reopen, were not recorded. Binary
+selection persistence is covered by the automated workspace round-trip test.
+This is a targeted smoke check, not exhaustive platform or toolkit validation.
+Regression checklist (not an itemized record of the manual run):
 
 - Send a Hex selection containing `00 ff` to Decoder with both Append and
   Start new chain; verify byte values, not ASCII `30 30 20 66 66`.
