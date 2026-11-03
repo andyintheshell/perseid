@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://cubic.dev/schema/cubic-repository-config.schema.json
+version: 1
+
+reviews:
+  ignore:
+    base_branches:
+      - release
+      - screenshots-preview
