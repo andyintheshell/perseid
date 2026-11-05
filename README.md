@@ -47,7 +47,7 @@ browser required.**
 | Tool | Available today |
 | --- | --- |
 | **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; Burp-style target site map with a host/folder tree, display filters, and sortable Contents table; Pretty, Raw, and Hex message views; Copy as curl for complete captures; gzip, deflate, and Brotli decoding. |
-| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence for captured history and project-scoped workbench state. Browse stored HTTP history in pages or search all retained traffic. |
+| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence. Unified HTTP/WebSocket tables cover all retained traffic with lazy details. |
 | **Search** | Search every stored HTTP exchange and WebSocket message, plus current Repeater tabs and retained Intruder results, with case, regex, negative, in-scope, and dynamic-update options; background scans report progress and highlight Pretty/Raw/Hex matches. |
 | **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
 | **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
@@ -120,20 +120,21 @@ Perseid is already usable for hands-on HTTP security testing, but there are
 important boundaries:
 
 - **Project persistence is an initial slice.** `.perseid` files save captured
-  HTTP/WebSocket history and the full workbench state, but the history and
-  site-map tables load only a bounded newest-first snapshot. Search scans all
-  stored HTTP and WebSocket records in the background; **Browse stored history…**
-  pages through older HTTP rows and loads their details and notes. Files are not
+  HTTP/WebSocket history and the full workbench state. Unified history tables
+  cover all retained captures using bounded metadata windows and lazy details.
+  Search scans stored bodies in the background. Files are not
   encrypted, recent-projects are not implemented, and temporary contents are lost
   on exit unless saved.
   Temporary projects bound captured records and retained body bytes with the
-  configurable `--temporary-retention-*` limits (defaulting to `--history-*`)
+  opt-in `--temporary-retention-*` limits (defaulting to unlimited)
   and evict the oldest records first. These are soft limits: each stream's
   newest record is kept even when it alone exceeds the byte budget, in-flight
   HTTP exchanges are kept until they complete, `0` disables a dimension, and
   headers, indexes, and database overhead are outside the byte budget. Saved
   projects default to unlimited retention; opt-in saved limits are available
-  under **Project storage…**, but do not cap physical file size. Schema-v1
+  under **Settings > Automatic deletion…**, but do not cap physical file size.
+  Temporary project RAM is unbounded by default; save to disk before exhausting it.
+  There is no automatic memory-pressure pause. Schema-v1
   projects migrate atomically to v2 on open; back up before upgrading if needed
   by older versions. Delete a whole saved project via the filesystem after
   switching away or quitting; deletion is not secure erasure. New

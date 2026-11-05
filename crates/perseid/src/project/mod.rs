@@ -7,6 +7,7 @@
 
 mod backend;
 mod codec;
+mod history;
 mod migrations;
 mod queries;
 mod records;
@@ -16,7 +17,7 @@ mod transfer;
 
 use std::path::PathBuf;
 
-pub(crate) use queries::{HistoryCursor, HttpRow};
+pub(crate) use history::{HistoryPage, HttpHistoryRow};
 pub use records::{
     BodyWorkspace, CapturePartRecord, CompareModeRecord, ComparerWorkspace, DecoderCodecRecord,
     DecoderColorTagRecord, DecoderHashRecord, DecoderOperationRecord, DecoderPanelWorkspace,

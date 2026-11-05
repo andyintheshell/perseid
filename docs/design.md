@@ -23,9 +23,9 @@ Perseid aims to be:
 - **Manual-first.** The request and response are the center of the interface,
   not a dashboard of speculative findings.
 - **Lightweight by design.** No embedded browser or web-based desktop UI;
-  streamed bodies and bounded UI history are requirements. The project store
-  bounds temporary capture retention by configurable aggregate count and
-  retained-body limits, with opt-in saved-project limits too. These do not
+  streamed bodies and bounded UI caches are requirements. Project retention
+  defaults to unlimited, with opt-in aggregate count and retained-body limits
+  independent of the cache sizes. These do not
   bound physical file size or compact freed pages.
 - **Keyboard-friendly.** Fast navigation among requests, replay tabs, search,
   and comparisons.
@@ -137,13 +137,13 @@ operation truncates the panels after its source and appends the result, so the
 chain cannot describe transformations that no longer produced the visible
 bytes.
 
-Project persistence uses a bounded newest-first live snapshot and a separate
-asynchronous stored HTTP browser with metadata paging and lazy details/notes.
+Project persistence uses unified virtual HTTP/WebSocket tables with bounded
+metadata windows and lazy details/notes over either backend.
 Search scans all stored HTTP and WebSocket records on a background worker while
 also matching the current Repeater tabs and retained Intruder results. The
-temporary redb project bounds capture retention with configurable aggregate count
-and retained-body limits (`--temporary-retention-*`, defaulting to the
-`--history-*` values), evicting the oldest records first. New and Open ask
+temporary redb project retains all captures by default; optional aggregate count
+and retained-body limits (`--temporary-retention-*`) delete the oldest eligible
+records first. New and Open ask
 Save/Discard/Cancel when the temporary
 project has unsaved work. Saved projects support opt-in combined record/body
 retention and atomic schema-v1→v2 migration. Open validates the destination before
@@ -247,17 +247,17 @@ performance claims.
 
 Important implementation principles:
 
-- redb-backed project history with bounded live caches, 500-row stored HTTP
-  metadata pages, and on-demand background detail loading.
+- redb-backed project history with bounded recent caches, 1,000-row HTTP/WS
+  metadata windows, and on-demand background detail loading.
 - Hard limits on captured body size, with bounded text and hex previews.
 - A total retained-body budget for the UI cache, independent of the exchange
-  count (half of physical memory by default, with a 256 MiB fallback). The
+  count (64 MiB per cache by default). The
   temporary redb project has its own aggregate retention limits for record
-  count and retained HTTP body/WebSocket payload bytes; by default they mirror
-  the history flags and can be set with `--temporary-retention-limit` and
+  count and retained HTTP body/WebSocket payload bytes; by default they are
+  unlimited and can be set with `--temporary-retention-limit` and
   `--temporary-retention-bytes`. Oldest records are evicted first and the newest
   record of each stream and in-flight HTTP are always kept. Saved retention
-  defaults to unlimited and can be configured under **Project storage…**.
+  defaults to unlimited and can be configured under **Settings > Automatic deletion…**.
   Clear history and retention remove logical records; filesystem deletion after
   closing/switching removes a project file. None provides secure erasure.
 - Concurrent proxy connection/tunnel limits and a bounded capture-event channel

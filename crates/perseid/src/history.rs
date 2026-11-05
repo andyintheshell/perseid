@@ -13,27 +13,20 @@ use std::time::{Duration, SystemTime};
 
 use crate::proxy::{CapturedBody, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead};
 
-/// Fallback cap when the platform does not report physical memory.
+/// Body budget used by cache tests.
+#[cfg(test)]
 pub const FALLBACK_HISTORY_BYTES: usize = 256 * 1024 * 1024;
 
-/// Never hand the history less than this, even on a tiny reported machine.
+/// Default body budget for each recent UI cache.
 pub const MIN_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
-/// Default total captured request/response body budget: half of physical RAM.
+/// Default recent-body cache budget, independent of project retention.
 ///
 /// The exchange-count limit alone allowed a worst case of roughly 4 GiB with
 /// 1 MiB per body and 2,000 exchanges. This budget bounds the bodies themselves;
 /// exchange metadata and display caches add a small amount on top.
 pub fn default_history_bytes() -> usize {
-    crate::memory::physical_memory_bytes()
-        .map(history_budget_for)
-        .unwrap_or(FALLBACK_HISTORY_BYTES)
-}
-
-/// Split a machine's physical memory in half, with a small floor for unusual
-/// or malformed reports. Kept separate so the arithmetic is testable.
-fn history_budget_for(physical_bytes: u64) -> usize {
-    usize::try_from((physical_bytes / 2).max(MIN_HISTORY_BYTES as u64)).unwrap_or(usize::MAX)
+    MIN_HISTORY_BYTES
 }
 
 /// Where an exchange is in its lifecycle.
@@ -201,6 +194,7 @@ impl History {
     }
 
     /// Number of entries dropped because of the history limits.
+    #[cfg(test)]
     pub fn evicted(&self) -> u64 {
         self.evicted
     }
@@ -591,10 +585,8 @@ mod tests {
     }
 
     #[test]
-    fn history_budget_is_half_of_physical_memory_with_a_floor() {
-        const GIB: u64 = 1024 * 1024 * 1024;
-        assert_eq!(history_budget_for(8 * GIB), 4 * GIB as usize);
-        assert_eq!(history_budget_for(64 * 1024 * 1024), MIN_HISTORY_BYTES);
+    fn recent_cache_budget_is_fixed_and_independent_of_ram() {
+        assert_eq!(default_history_bytes(), 64 * 1024 * 1024);
     }
 
     #[test]

@@ -20,6 +20,10 @@ impl PerseidApp {
         {
             match sweep.receiver.try_recv() {
                 Ok(Ok((http, ws))) => {
+                    self.http_table.invalidate();
+                    self.http_table.invalidate_detail();
+                    self.ws_table.invalidate();
+                    self.ws_table.invalidate_detail();
                     self.history.remove_stored(&http);
                     self.websocket_history.remove_stored(&ws);
                     if self.selected.is_some_and(|id| http.contains(&id)) {

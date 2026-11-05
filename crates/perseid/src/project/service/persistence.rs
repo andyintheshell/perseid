@@ -71,8 +71,11 @@ pub(super) fn apply_capture_batch(
                         let number = next_meta.next_http_number;
                         next_meta.next_http_number = next_meta.next_http_number.saturating_add(1);
                         next_meta.next_http_id = next_meta.next_http_id.max(id.saturating_add(1));
-                        let record =
+                        let mut record =
                             HttpExchangeRecord::started(*id, number, *timestamp, request.clone());
+                        record.summary = Some(super::super::history::HttpSummary::from_item(
+                            &record.to_history_item(Vec::new(), Vec::new()),
+                        ));
                         http.insert(*id, codec::encode(&record)?.as_slice())?;
                         by_time.insert((record.started_at_ms, *id), ())?;
                         let host = normalized_host(&record.request.host);
@@ -156,6 +159,13 @@ pub(super) fn apply_capture_batch(
                                 };
                             }
                         }
+                        let response = match &end.result {
+                            ExchangeResult::Response { body } => body.data().to_vec(),
+                            _ => Vec::new(),
+                        };
+                        record.summary = Some(super::super::history::HttpSummary::from_item(
+                            &record.to_history_item(end.request_body.data().to_vec(), response),
+                        ));
                         http.insert(*id, codec::encode(&record)?.as_slice())?;
                         in_flight.remove(*id)?;
                     }
@@ -774,7 +784,9 @@ pub(super) fn build_snapshot(
     ui_limit: usize,
     ui_bytes: usize,
 ) -> Result<OpenedProject> {
-    let limit = ui_limit.max(1);
+    // Desktop views query metadata and hydrate selected captures lazily. Keep
+    // the bounded snapshot API for callers that explicitly request one.
+    let limit = ui_limit;
     let (http_budget, ws_budget) = snapshot_budgets(ui_bytes);
     let (http, http_total) =
         queries::load_http_snapshot(db, limit, http_budget.max(1)).map_err(|source| {

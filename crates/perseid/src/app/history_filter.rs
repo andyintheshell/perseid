@@ -225,6 +225,21 @@ impl HistoryFilter {
         scope: &BTreeSet<String>,
         search: &HistorySearch,
     ) -> bool {
+        self.matches_metadata(
+            item,
+            scope,
+            search,
+            site_map::request_parameter_count(&item.request, &item.request_body).count,
+        )
+    }
+
+    pub(super) fn matches_metadata(
+        &self,
+        item: &HistoryItem,
+        scope: &BTreeSet<String>,
+        search: &HistorySearch,
+        parameters: usize,
+    ) -> bool {
         if !self.enabled {
             return true;
         }
@@ -237,11 +252,8 @@ impl HistoryFilter {
         if self.hide_without_response && item.response.is_none() {
             return false;
         }
-        if self.parameterized_only {
-            let parameters = site_map::request_parameter_count(&item.request, &item.request_body);
-            if parameters.count == 0 {
-                return false;
-            }
+        if self.parameterized_only && parameters == 0 {
+            return false;
         }
         if !self.mime_visible(item) || !self.status_visible(item) {
             return false;
@@ -557,12 +569,6 @@ fn truncate_summary(text: &str) -> String {
 impl PerseidApp {
     /// Toolbar above the HTTP history table.
     pub(super) fn history_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            self.stored_history_button(ui);
-            if ui.button("Project storage…").clicked() {
-                self.open_project_storage();
-            }
-        });
         let mut open_filter = false;
         ui.horizontal(|ui| {
             // Lay the row out from the right so the width-hungry summary bar

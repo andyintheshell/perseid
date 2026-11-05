@@ -117,7 +117,7 @@ impl PerseidApp {
             .show(ui, |ui| self.history_toolbar(ui));
         // The filter or scope can hide the selected exchange. Do not leave its
         // detail visible next to a table where the row no longer exists.
-        if self.selected.is_some_and(|id| !self.visible.contains(&id)) {
+        if !self.http_table.active && self.selected.is_some_and(|id| !self.visible.contains(&id)) {
             self.selected = None;
             self.detail = None;
             self.scroll_to_selected = false;
@@ -155,9 +155,10 @@ impl PerseidApp {
             .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| self.websocket_history_toolbar(ui));
         self.rebuild_websocket_visible();
-        if self
-            .websocket_selected
-            .is_some_and(|id| !self.websocket_visible.contains(&id))
+        if !self.ws_table.active
+            && self
+                .websocket_selected
+                .is_some_and(|id| !self.websocket_visible.contains(&id))
         {
             self.websocket_selected = None;
             self.websocket_detail = None;
@@ -228,8 +229,15 @@ impl PerseidApp {
                 ui.label(
                     RichText::new(format!(
                         "{} shown / {} captured",
-                        self.websocket_visible.len(),
-                        self.websocket_history.len()
+                        if self.ws_table.active {
+                            self.ws_table.total()
+                        } else {
+                            self.websocket_visible.len()
+                        },
+                        self.project
+                            .status()
+                            .map_or(self.websocket_history.len() as u64, |status| status
+                                .ws_count)
                     ))
                     .small()
                     .color(theme::TEXT_MUTED),
@@ -255,7 +263,12 @@ impl PerseidApp {
 
     fn websocket_history_table(&mut self, ui: &mut egui::Ui) {
         ui.style_mut().interaction.selectable_labels = false;
-        let rows = self.websocket_visible.len();
+        self.history_reader_status(ui, true);
+        let rows = if self.ws_table.active {
+            self.ws_table.total()
+        } else {
+            self.websocket_visible.len()
+        };
         if rows == 0 {
             empty_state(
                 ui,
@@ -267,6 +280,7 @@ impl PerseidApp {
 
         let mut clicked = None;
         let mut send_to_repeater = None;
+        let mut first_visible = None;
         table_frame(ui, |ui| {
             let mut table = TableBuilder::new(ui)
                 .striped(true)
@@ -309,10 +323,23 @@ impl PerseidApp {
                 .body(|body| {
                     body.rows(18.0, rows, |mut row| {
                         let index = row.index();
-                        let id = self.websocket_visible[index];
-                        let Some(item) = self.websocket_history.get(id) else {
+                        first_visible.get_or_insert(index);
+                        let item = if self.ws_table.active {
+                            self.ws_table.row(index).cloned()
+                        } else {
+                            self.websocket_history
+                                .get(self.websocket_visible[index])
+                                .cloned()
+                        };
+                        let Some(item) = item else {
+                            for _ in 0..8 {
+                                row.col(|ui| {
+                                    ui.weak("…");
+                                });
+                            }
                             return;
                         };
+                        let id = item.id;
 
                         row.set_selected(self.websocket_selected == Some(id));
                         row.col(|ui| {
@@ -390,11 +417,17 @@ impl PerseidApp {
                         });
 
                         let response = row.response();
-                        if response.clicked() {
+                        if response.clicked() || response.secondary_clicked() {
                             clicked = Some(id);
                         }
                         response.context_menu(|ui| {
-                            if ui.button("Send to Repeater").clicked() {
+                            if ui
+                                .add_enabled(
+                                    self.selected_ws_item(id).is_some(),
+                                    egui::Button::new("Send to Repeater"),
+                                )
+                                .clicked()
+                            {
                                 send_to_repeater = Some(id);
                                 ui.close();
                             }
@@ -403,11 +436,18 @@ impl PerseidApp {
                 });
         });
 
+        if self.ws_table.active
+            && self.ws_table.select_row.is_none()
+            && let Some(index) = first_visible
+        {
+            self.ws_table.wanted = index;
+        }
+
         if let Some(id) = clicked {
             self.select_websocket_id(id);
         }
         if let Some(item) = send_to_repeater
-            .and_then(|id| self.websocket_history.get(id))
+            .and_then(|id| self.selected_ws_item(id))
             .cloned()
         {
             self.send_websocket_to_repeater(&item);
@@ -419,17 +459,14 @@ impl PerseidApp {
             .websocket_detail
             .as_ref()
             .is_some_and(|cache| cache.id == id)
-            && self.websocket_history.get(id).is_some()
+            && self.selected_ws_item(id).is_some()
         {
             return;
         }
-        self.websocket_detail = self
-            .websocket_history
-            .get(id)
-            .map(|item| WebSocketDetailCache {
-                id,
-                views: view::websocket_message_views(item),
-            });
+        self.websocket_detail = self.selected_ws_item(id).map(|item| WebSocketDetailCache {
+            id,
+            views: view::websocket_message_views(item),
+        });
     }
 
     fn websocket_detail_panel(&mut self, ui: &mut egui::Ui) {
@@ -443,7 +480,15 @@ impl PerseidApp {
         };
         self.ensure_websocket_detail(id);
 
-        let Some(item) = self.websocket_history.get(id) else {
+        let Some(item) = self
+            .ws_table
+            .item(id)
+            .or_else(|| self.websocket_history.get(id))
+        else {
+            if self.ws_table.loading(id) {
+                ui.spinner();
+                return;
+            }
             empty_state(
                 ui,
                 "Message no longer in history",
@@ -550,9 +595,19 @@ impl PerseidApp {
         // The row itself is the click target. Selectable labels inside the
         // cells would capture the click before the row response sees it.
         ui.style_mut().interaction.selectable_labels = false;
-        let rows = self.visible.len();
+        self.history_reader_status(ui, false);
+        let rows = if self.http_table.active {
+            self.http_table.total()
+        } else {
+            self.visible.len()
+        };
         if rows == 0 {
-            if self.history.len() == 0 {
+            if self
+                .project
+                .status()
+                .map_or(self.history.len() as u64, |status| status.http_count)
+                == 0
+            {
                 empty_state(
                     ui,
                     "No exchanges to show",
@@ -582,6 +637,7 @@ impl PerseidApp {
 
         let mut clicked = None;
         let mut action = None;
+        let mut first_visible = None;
         table_frame(ui, |ui| {
             let mut table = TableBuilder::new(ui)
                 .striped(true)
@@ -632,10 +688,14 @@ impl PerseidApp {
                 .body(|body| {
                     body.rows(18.0, rows, |mut row| {
                         let index = row.index();
-                        let id = self.visible[index];
-                        let Some(item) = self.history.get(id) else {
+                        first_visible.get_or_insert(index);
+                        let metadata = if self.http_table.active { self.http_table.row(index).cloned() } else { None };
+                        let fallback = if self.http_table.active { None } else { self.history.get(self.visible[index]).cloned() };
+                        let Some(item) = metadata.as_ref().map(|row| &row.item).or(fallback.as_ref()) else {
+                            for _ in 0..12 { row.col(|ui| { ui.weak("…"); }); }
                             return;
                         };
+                        let id = item.id;
 
                         row.set_selected(self.selected == Some(id));
                         row.col(|ui| {
@@ -674,14 +734,16 @@ impl PerseidApp {
                             ui.add(Label::new(RichText::new(&path).color(theme::TEXT)).truncate())
                                 .on_hover_text(&url);
                         });
-                        let parameters =
-                            site_map::request_parameter_count(&item.request, &item.request_body);
+                        let parameters = metadata.as_ref().map_or_else(
+                            || site_map::request_parameter_count(&item.request, &item.request_body).count,
+                            |row| row.summary.parameters,
+                        );
                         row.col(|ui| {
-                            if parameters.count > 0 {
+                            if parameters > 0 {
                                 check_mark(ui, theme::GREEN).on_hover_text(format!(
                                     "{} parameter{}",
-                                    parameters.count,
-                                    if parameters.count == 1 { "" } else { "s" }
+                                    parameters,
+                                    if parameters == 1 { "" } else { "s" }
                                 ));
                             } else {
                                 ui.label(RichText::new("").small());
@@ -727,7 +789,7 @@ impl PerseidApp {
                             ui.label(RichText::new(extension).small().color(theme::TEXT_MUTED));
                         });
                         row.col(|ui| {
-                            let title = history_title(&self.title_cache, item);
+                            let title = metadata.as_ref().map_or_else(|| history_title(&self.title_cache, item), |row| row.summary.title.clone());
                             if title.is_empty() {
                                 ui.label(RichText::new("").small());
                             } else {
@@ -758,8 +820,9 @@ impl PerseidApp {
                         } else {
                             url
                         };
-                        let can_send = !item.is_tunnel();
-                        let has_response = item.response.is_some();
+                        let full_item = self.selected_http_item(id).cloned();
+                        let can_send = !item.is_tunnel() && full_item.is_some();
+                        let has_response = item.response.is_some() && full_item.is_some();
                         let can_capture = has_response && !item.is_in_flight();
                         let response = row.response().on_hover_text(hover);
                         if response.clicked() || response.secondary_clicked() {
@@ -867,7 +930,7 @@ impl PerseidApp {
                             }
                             ui.add_enabled_ui(can_send, |ui| {
                                 ui.menu_button("Send to Decoder (request)", |ui| {
-                                    if let Some(bytes) = view::captured_message_bytes(item, false) {
+                                    if let Some(bytes) = full_item.as_ref().and_then(|item| view::captured_message_bytes(item, false)) {
                                         super::message_view::decoder_send_menu(
                                             ui,
                                             &bytes,
@@ -878,7 +941,7 @@ impl PerseidApp {
                             });
                             ui.add_enabled_ui(has_response, |ui| {
                                 ui.menu_button("Send to Decoder (response)", |ui| {
-                                    if let Some(bytes) = view::captured_message_bytes(item, true) {
+                                    if let Some(bytes) = full_item.as_ref().and_then(|item| view::captured_message_bytes(item, true)) {
                                         super::message_view::decoder_send_menu(
                                             ui,
                                             &bytes,
@@ -917,26 +980,23 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::ClearHistory);
                                 ui.close();
                             }
-                            if ui
-                                .add_enabled(
-                                    self.project.handle().is_some(),
-                                    egui::Button::new("Browse stored history…"),
-                                )
-                                .clicked()
-                            {
-                                self.project.history_browser.open = true;
-                                ui.close();
-                            }
                             ui.separator();
                             if ui.button("Copy URL").clicked() {
                                 ui.ctx().copy_text(request_url(item));
                                 ui.close();
                             }
-                            super::curl::context_menu(ui, item);
+                            if let Some(item) = &full_item { super::curl::context_menu(ui, item); }
                         });
                     });
                 });
         });
+
+        if self.http_table.active
+            && self.http_table.select_row.is_none()
+            && let Some(index) = first_visible
+        {
+            self.http_table.wanted = index;
+        }
 
         if let Some(id) = clicked {
             self.select_id(id);
@@ -944,7 +1004,7 @@ impl PerseidApp {
         match action {
             Some(HistoryRowAction::Delete) => self.delete_selected_http_item(),
             Some(HistoryRowAction::AddToScope) => {
-                if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
+                if let Some(item) = self.selected.and_then(|id| self.selected_http_item(id)) {
                     self.scope.insert(item.request.host.clone());
                     self.invalidate_views();
                     self.apply_proxy_settings();
@@ -994,11 +1054,12 @@ impl PerseidApp {
         self.ensure_detail(id);
 
         let Some(item) = self
-            .history
-            .get(id)
+            .http_table
+            .item(id)
+            .or_else(|| self.history.get(id))
             .or_else(|| self.site_map_ui.stored.item(id))
         else {
-            if self.site_map_ui.stored.loading(id) {
+            if self.site_map_ui.stored.loading(id) || self.http_table.loading(id) {
                 ui.spinner();
                 ui.label("Loading retained exchange…");
                 return;
@@ -1328,7 +1389,6 @@ mod decoder_transfer_tests {
                 "Add notes",
                 "Delete item",
                 "Clear history",
-                "Browse stored history…",
                 "Copy URL",
                 "Copy as curl",
             ];

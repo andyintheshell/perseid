@@ -67,15 +67,13 @@ promise.
 
   *Complete for the release scope: projects start in temporary memory by default. Save As, Open, and Save
   Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
-  project-scoped workbench state are written automatically. On open, the live
-  history tables load only a bounded newest-first history snapshot; older
-   records are reachable through the paged **Browse stored history…** HTTP
-   browser with lazy details and notes, full-store Search, and the paged Target
+   project-scoped workbench state are written automatically. Unified HTTP and
+   WebSocket history tables cover all retained records with bounded metadata
+   windows and lazy details/notes, alongside full-store Search and the paged Target
    site map. The site map derives endpoints from all retained HTTP exchanges,
    using a disposable disk index rather than hydrating the complete store.
-  Temporary storage evicts the oldest
-  captures when it exceeds the configurable aggregate count or retained-body
-  limits. New Project and Open Project ask Save/Discard/Cancel when the current
+   Temporary storage retains all captures unless aggregate count/body limits
+   are explicitly configured. New Project and Open Project ask Save/Discard/Cancel when the current
   temporary project has unsaved work; ordinary quit also prompts and waits for
   acknowledged saved-project writes. A recent-project list is not implemented.
   Saved projects now support opt-in combined record/body

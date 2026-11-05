@@ -60,12 +60,10 @@ public interface just to work around a local port conflict.
    For curl, `--noproxy "" --proxy http://127.0.0.1:8080` forces the proxy path,
    including for a loopback target.
 4. Clear the history filter and disable **Filter views to the scope** temporarily.
-5. Check UI-cache eviction and dropped-event counters in the status bar. Cache
-   eviction removes a row from the current view; it does not delete that record
-   from a saved project. Temporary projects also evict the oldest records once
-   they exceed the configured retention limits, shown as an eviction count in
-   the status bar; raise `--temporary-retention-limit` /
-   `--temporary-retention-bytes` if you need a larger temporary history.
+5. Check dropped-event counters, storage errors, and automatic-deletion counts
+   in the status bar. UI-cache eviction never hides stored history. Temporary
+   projects delete old records only when `--temporary-retention-*` is explicitly
+   configured; both limits default to unlimited.
 6. In **Target > Site map**, check the display filter. By default Perseid hides
    not-found items, CSS, images, general binary content, 4xx responses, and
    empty folders. Click the filter bar and choose **Show all items** (or relax
@@ -91,10 +89,9 @@ exchanges are also separate from Proxy history by design.
   v2 atomically; keep a backup if you need to use a `0.2.x` application again.
   Incomplete/corrupt projects should be restored from a backup. Failed opens
   keep the current project, workspace, and running listener usable.
-- **History limits do not delete old saved records.** Opening a project loads a
-  bounded newest-first snapshot controlled by `--history-limit` and
-  `--history-bytes`. Use **Browse stored history…** for older HTTP rows/details
-  or **Search** for all retained HTTP/WebSocket messages. Check **Project storage…**
+- **UI-cache limits do not delete captures.** Scroll the HTTP or WebSocket
+  history table for older records, or use **Search** for body matches.
+  Check **Settings > Automatic deletion…**
   and the eviction count: explicitly configured retention and **Clear history**
   remove stored captures. They cannot be recovered by raising the UI-cache limit.
 - **A file need not shrink after deletion.** Freed redb pages are reusable;

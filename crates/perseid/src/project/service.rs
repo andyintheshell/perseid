@@ -40,11 +40,10 @@ mod tests;
 
 const COMMAND_QUEUE: usize = 4096;
 
-/// Default count cap for a temporary project. The app derives its own default
-/// from `--history-limit`; this keeps the library constructor bounded too.
-pub const DEFAULT_TEMPORARY_RETENTION_RECORDS: u64 = 2_000;
+/// Temporary projects retain all captures unless automatic deletion is opted in.
+pub const DEFAULT_TEMPORARY_RETENTION_RECORDS: u64 = 0;
 /// Default retained-body cap for a temporary project.
-pub const DEFAULT_TEMPORARY_RETENTION_BYTES: u64 = 256 * 1024 * 1024;
+pub const DEFAULT_TEMPORARY_RETENTION_BYTES: u64 = 0;
 
 /// Aggregate logical retention limits for a project.
 ///
@@ -210,19 +209,12 @@ pub struct ProjectHandle {
 /// than pinning one snapshot for the whole search.
 #[derive(Clone)]
 pub(crate) struct ProjectSnapshot {
-    db: Arc<Database>,
+    pub(super) db: Arc<Database>,
 }
 
 impl ProjectSnapshot {
     pub(crate) fn pruned_ids(&self, http: Vec<u64>, ws: Vec<u64>) -> Result<(Vec<u64>, Vec<u64>)> {
         queries::pruned_ids(&self.db, http, ws)
-    }
-    pub(crate) fn list_http(
-        &self,
-        before: Option<HistoryCursor>,
-        limit: usize,
-    ) -> Result<Vec<HttpRow>> {
-        queries::list_http(&self.db, before, limit)
     }
     pub(crate) fn get_http(&self, id: u64) -> Result<Option<HistoryItem>> {
         queries::get_http(&self.db, id)

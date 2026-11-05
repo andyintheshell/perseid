@@ -188,7 +188,6 @@ use retention::RetentionSweep;
 pub(super) struct ProjectUi {
     retention_seen: (u64, u64),
     retention_sweep: Option<RetentionSweep>,
-    pub(super) history_browser: super::history_browser::HistoryBrowser,
     storage_limits: Option<RetentionLimits>,
     retention_pending: Option<Receiver<std::result::Result<CommitReceipt, ProjectError>>>,
     handle: Option<ProjectHandle>,
@@ -225,7 +224,6 @@ impl ProjectUi {
         let mut ui = Self {
             retention_seen: (0, 0),
             retention_sweep: None,
-            history_browser: Default::default(),
             storage_limits: None,
             retention_pending: None,
             handle,
@@ -262,6 +260,14 @@ impl ProjectUi {
         self.handle.as_ref().map(ProjectHandle::status)
     }
 
+    pub(super) fn history_clearing(&self, websocket: bool) -> bool {
+        self.pending.iter().any(|pending| match pending {
+            PendingProject::ClearHttp { .. } => !websocket,
+            PendingProject::ClearWs { .. } => websocket,
+            _ => false,
+        })
+    }
+
     fn dialog_icon(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         if self.dialog_icon.is_none() {
             self.dialog_icon = branding::mark_texture(ctx);
@@ -296,7 +302,6 @@ impl ProjectUi {
     }
 
     pub(super) fn clear_http_history(&mut self) {
-        self.history_browser = Default::default();
         let Some(handle) = self.handle() else {
             return;
         };
@@ -969,7 +974,7 @@ impl PerseidApp {
         let mut open = true;
         let mut apply = false;
         let saved = matches!(status.mode, ProjectMode::Persistent { .. });
-        egui::Window::new("Project storage")
+        egui::Window::new("Project automatic deletion")
             .open(&mut open).collapsible(false).resizable(false).default_width(480.0)
             .show(ctx, |ui| {
                 ui.label(format!("{} HTTP exchanges, {} WebSocket messages, {} retained body bytes", status.http_count, status.ws_count, status.retained_body_bytes));
@@ -1300,8 +1305,11 @@ impl PerseidApp {
             match receiver.try_recv() {
                 Ok(Ok(_)) => {
                     self.project.retention_pending = None;
-                    self.project.history_browser = Default::default();
-                    self.project.notify("Saved retention limits. Oldest eligible records were removed; use Browse stored history to see retained records.");
+                    self.http_table.invalidate();
+                    self.ws_table.invalidate();
+                    self.project.notify(
+                        "Saved automatic deletion policy. Oldest eligible records were removed.",
+                    );
                 }
                 Ok(Err(err)) => {
                     self.project.retention_pending = None;
@@ -1434,12 +1442,9 @@ impl PerseidApp {
     fn apply_opened_project(&mut self, opened: OpenedProject, path: Option<&Path>) {
         self.project.retention_sweep = None;
         self.project.retention_seen = (0, 0);
-        self.project.history_browser = Default::default();
+        self.http_table = Default::default();
+        self.ws_table = Default::default();
         self.project.storage_limits = None;
-        let http_total = opened.http_total;
-        let ws_total = opened.ws_total;
-        let http_loaded = opened.http.len() as u64;
-        let ws_loaded = opened.ws.len() as u64;
 
         self.history.load(opened.http);
         self.websocket_history.load(opened.ws);
@@ -1457,14 +1462,13 @@ impl PerseidApp {
         self.project_baseline_workspace = baseline;
         self.project.last_workspace_check = Instant::now();
 
-        let truncated = http_loaded < http_total || ws_loaded < ws_total;
-        if truncated {
+        if let Some(path) = path {
             self.project.notify(format!(
-                "Loaded the newest {} of {http_total} exchanges and {ws_loaded} of {ws_total} WebSocket messages; use Browse stored history or Search for older records.",
-                http_loaded
+                "Opened {} ({} exchanges, {} WebSocket messages)",
+                path.display(),
+                opened.http_total,
+                opened.ws_total
             ));
-        } else if let Some(path) = path {
-            self.project.notify(format!("Opened {}", path.display()));
         } else {
             self.project.notify("Started a new temporary project.");
         }
@@ -1499,12 +1503,8 @@ impl PerseidApp {
         self.history_filter_draft = None;
         self.title_cache.borrow_mut().clear();
         self.websocket_filter = workspace.websocket_filter.clone();
-        self.selected = workspace
-            .selected_http_id
-            .filter(|id| self.history.get(*id).is_some());
-        self.websocket_selected = workspace
-            .selected_websocket_id
-            .filter(|id| self.websocket_history.get(*id).is_some());
+        self.selected = workspace.selected_http_id;
+        self.websocket_selected = workspace.selected_websocket_id;
         self.detail = None;
         self.websocket_detail = None;
         self.scroll_to_selected = false;
@@ -1606,10 +1606,12 @@ impl PerseidApp {
     /// Poll project commands and draw their dialogs. Called once per frame.
     pub(super) fn project_windows(&mut self, ctx: &egui::Context) {
         self.quit_recovery_window(ctx);
-        if self.project.is_busy() || self.project.retention_sweep.is_some() {
+        if self.project.is_busy()
+            || self.project.retention_sweep.is_some()
+            || self.history_reads_pending()
+        {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
-        self.stored_history_window(ctx);
         self.project_storage_window(ctx);
         if let Some(action) = self.project.switch_prompt(ctx) {
             match action {
@@ -2746,7 +2748,8 @@ pub(super) mod tests {
         assert!(app.websocket_selected.is_none());
         let (text, error) = app.project.notice().expect("notice");
         assert!(!error);
-        assert!(text.contains("Loaded the newest 0 of 5 exchanges"));
+        assert!(text.contains("5 exchanges, 0 WebSocket messages"));
+        assert!(!text.contains("Browse stored"));
 
         app.apply_opened_project(
             OpenedProject {

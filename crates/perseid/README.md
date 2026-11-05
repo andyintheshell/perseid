@@ -41,22 +41,22 @@ The `perseid` package provides both the desktop application and the
 - HTTPS interception with a local certificate authority, explicit trust setup, and per-host TLS pass-through.
 - Interception controls, Repeater, Intruder, Decoder, Comparer, scope rules, and match/replace.
 - WebSocket history, message interception, and live-connection replay for `ws://` and decrypted `wss://` traffic.
-- Bounded capture/history resources and a live memory indicator.
+- Bounded per-message capture and UI caches, plus a live memory indicator.
 
 WebSocket replay cannot reopen closed connections; automated scanning is not implemented. Project
-persistence has no encryption. The UI opens a bounded newest-first live snapshot;
-**Browse stored history…** pages through all retained HTTP exchanges with lazy
-details and notes. Schema-v1 projects migrate atomically to v2 on open; back up
+persistence has no encryption. Unified HTTP/WebSocket history tables cover all
+retained captures with bounded metadata windows and lazy details/notes.
+Schema-v1 projects migrate atomically to v2 on open; back up
 before upgrading if older application compatibility is needed. See the
 [workbench guide](https://github.com/andyintheshell/perseid/blob/main/docs/workbench.md#projects-and-persistence)
 for exactly what is saved. Temporary projects evict the oldest captured
 records when they exceed the configurable `--temporary-retention-limit` and
-`--temporary-retention-bytes` limits (which default to the history flags; `0`
+`--temporary-retention-bytes` limits (which default to unlimited; `0`
 disables a dimension). The limits are soft, not a hard RAM ceiling: each
 stream's newest record is kept even when it alone exceeds the byte budget,
 in-flight HTTP exchanges are kept until they complete, and headers, indexes,
 and database overhead are outside the byte budget. Saved projects default to
-unlimited retention, with opt-in logical limits under **Project storage…**;
+unlimited retention, with opt-in logical limits under **Settings > Automatic deletion…**;
 these do not cap physical file size. To delete a whole project, switch away or
 quit and delete the `.perseid` file and any copies via the filesystem. Neither
 retention nor deletion securely erases disk data. Burp Suite and Burp

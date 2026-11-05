@@ -134,10 +134,17 @@ impl PerseidApp {
             if up {
                 self.move_selection(-1);
             }
-            if home && !self.visible.is_empty() {
+            if home && self.http_table.active {
+                self.http_table.select_row = Some(0);
+                self.http_table.wanted = 0;
+            } else if home && !self.visible.is_empty() {
                 self.select_id(self.visible[0]);
             }
-            if end && !self.visible.is_empty() {
+            if end && self.http_table.active {
+                let index = self.http_table.total().saturating_sub(1);
+                self.http_table.select_row = Some(index);
+                self.http_table.wanted = index;
+            } else if end && !self.visible.is_empty() {
                 self.select_id(self.visible[self.visible.len() - 1]);
             }
         } else {
@@ -147,10 +154,17 @@ impl PerseidApp {
             if up {
                 self.move_websocket_selection(-1);
             }
-            if home && !self.websocket_visible.is_empty() {
+            if home && self.ws_table.active {
+                self.ws_table.select_row = Some(0);
+                self.ws_table.wanted = 0;
+            } else if home && !self.websocket_visible.is_empty() {
                 self.select_websocket_id(self.websocket_visible[0]);
             }
-            if end && !self.websocket_visible.is_empty() {
+            if end && self.ws_table.active {
+                let index = self.ws_table.total().saturating_sub(1);
+                self.ws_table.select_row = Some(index);
+                self.ws_table.wanted = index;
+            } else if end && !self.websocket_visible.is_empty() {
                 self.select_websocket_id(self.websocket_visible[self.websocket_visible.len() - 1]);
             }
         }
