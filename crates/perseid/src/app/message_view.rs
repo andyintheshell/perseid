@@ -17,6 +17,9 @@ use super::*;
 use crate::highlight;
 use crate::history::HistoryItem;
 
+mod search;
+pub(super) use search::{MessageSearch, searchable_view};
+
 pub(super) fn message_toolbar(
     ui: &mut egui::Ui,
     pane: MessagePane,
@@ -79,6 +82,7 @@ pub(super) fn message_toolbar(
 /// interception editor.
 pub(super) fn message_tabs(ui: &mut egui::Ui, mode: &mut MessageView) {
     let key = ui.make_persistent_id("perseid.message.invisibles");
+    let wrap_key = ui.make_persistent_id("perseid.message.wrap");
     ui.horizontal(|ui| {
         if message_mode_tab(ui, *mode == MessageView::Pretty, "Pretty").clicked() {
             *mode = MessageView::Pretty;
@@ -91,6 +95,7 @@ pub(super) fn message_tabs(ui: &mut egui::Ui, mode: &mut MessageView) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             invisible_toggle_button(ui, key, *mode != MessageView::Hex);
+            wrap_toggle_button(ui, wrap_key, *mode != MessageView::Hex);
         });
     });
 }
@@ -154,9 +159,8 @@ pub(super) fn request_message_text_with_curl(
         mode,
         &mut readonly,
         MessageContext {
-            copy_label: "Copy request",
-            matches: None,
             curl_item: Some(item),
+            ..MessageContext::new("Copy request")
         },
     );
 }
@@ -182,9 +186,8 @@ pub(super) fn message_text_with_matches(
         mode,
         &mut readonly,
         MessageContext {
-            copy_label,
             matches: Some(matches),
-            curl_item: None,
+            ..MessageContext::new(copy_label)
         },
     );
 }
@@ -207,10 +210,35 @@ pub(super) fn message_editor(
     message_frame(ui, id, pane, mode, text, MessageContext::new(copy_label))
 }
 
+/// WebSocket drafts retain their send-size guard while using the same search,
+/// wrapping, selection, and scrolling behavior as HTTP message editors.
+pub(super) fn message_editor_with_limit(
+    ui: &mut egui::Ui,
+    id: u64,
+    text: &mut String,
+    char_limit: usize,
+    allow_invisibles: bool,
+) {
+    message_frame(
+        ui,
+        id,
+        MessagePane::Request,
+        MessageView::Raw,
+        text,
+        MessageContext {
+            char_limit,
+            allow_invisibles,
+            ..MessageContext::new("Copy message")
+        },
+    );
+}
+
 struct MessageContext<'a> {
     copy_label: &'a str,
     matches: Option<&'a [Range<usize>]>,
     curl_item: Option<&'a HistoryItem>,
+    char_limit: usize,
+    allow_invisibles: bool,
 }
 
 impl<'a> MessageContext<'a> {
@@ -219,6 +247,8 @@ impl<'a> MessageContext<'a> {
             copy_label,
             matches: None,
             curl_item: None,
+            char_limit: usize::MAX,
+            allow_invisibles: true,
         }
     }
 }
@@ -232,7 +262,9 @@ fn message_frame(
     context: MessageContext<'_>,
 ) -> bool {
     let toggle_key = ui.make_persistent_id("perseid.message.invisibles");
-    let show_invisibles = ui.data(|data| data.get_temp::<bool>(toggle_key).unwrap_or(false));
+    let show_invisibles = context.allow_invisibles
+        && ui.data(|data| data.get_temp::<bool>(toggle_key).unwrap_or(false));
+    let wrap = wrap_lines(ui);
     let selection_key =
         ui.make_persistent_id(("perseid.message.selection", id, pane as u8, mode as u8));
     let secondary_pressed =
@@ -248,18 +280,25 @@ fn message_frame(
         .inner_margin(egui::Margin::same(5))
         .show(ui, |ui| {
             ui.set_min_size(ui.available_size());
-            if mode == MessageView::Hex {
-                // A single text galley for a 64 KiB hex dump is surprisingly
-                // expensive to lay out. Virtualize the lines so memory stays
-                // proportional to the visible page rather than the whole dump.
-                hex_bytes = message_hex(ui, id, pane, mode, text.as_str());
-                hex_selection = hex_bytes.as_deref().map(format_hex_selection);
-            } else {
-                let output =
-                    message_numbered(ui, id, pane, mode, text, context.matches, show_invisibles);
-                selection = output.selection;
-                changed = output.changed;
-            }
+            searchable_view(ui, pane, text, context.matches, |ui, text, search| {
+                if mode == MessageView::Hex {
+                    // A single text galley for a 64 KiB hex dump is surprisingly
+                    // expensive to lay out. Virtualize the lines so memory stays
+                    // proportional to the visible page rather than the whole dump.
+                    hex_bytes = message_hex_searched(ui, id, pane, mode, text.as_str(), search);
+                    hex_selection = hex_bytes.as_deref().map(format_hex_selection);
+                } else {
+                    let display = MessageDisplay {
+                        search: Some(search),
+                        wrap,
+                        char_limit: context.char_limit,
+                    };
+                    let output =
+                        message_numbered(ui, id, pane, mode, text, &display, show_invisibles);
+                    selection = output.selection;
+                    changed = output.changed;
+                }
+            });
         });
 
     // egui's text editor collapses a selection when it is pressed or loses
@@ -354,13 +393,29 @@ struct NumberedOutput {
     changed: bool,
 }
 
+struct MessageDisplay<'a> {
+    search: Option<&'a MessageSearch>,
+    wrap: bool,
+    char_limit: usize,
+}
+
+impl Default for MessageDisplay<'_> {
+    fn default() -> Self {
+        Self {
+            search: None,
+            wrap: true,
+            char_limit: usize::MAX,
+        }
+    }
+}
+
 fn message_numbered(
     ui: &mut egui::Ui,
     id: u64,
     pane: MessagePane,
     mode: MessageView,
     text: &mut dyn egui::TextBuffer,
-    matches: Option<&[Range<usize>]>,
+    display: &MessageDisplay<'_>,
     show_invisibles: bool,
 ) -> NumberedOutput {
     let line_count = text.as_str().lines().count() + usize::from(text.as_str().ends_with('\n'));
@@ -387,9 +442,14 @@ fn message_numbered(
         bottom: 0,
     });
     let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-        let mut job = highlight::message_job(buffer.as_str(), wrap_width, &font);
-        if let Some(matches) = matches {
-            highlight::paint_matches(&mut job, matches, theme::SEARCH_MATCH);
+        let width = if display.wrap {
+            wrap_width
+        } else {
+            f32::INFINITY
+        };
+        let mut job = highlight::message_job(buffer.as_str(), width, &font);
+        if let Some(search) = display.search {
+            search.paint(&mut job);
         }
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
@@ -408,13 +468,14 @@ fn message_numbered(
         None
     };
     ui.spacing_mut().item_spacing.y = 0.0;
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::new([!display.wrap, true])
         .id_salt(("perseid.message", id, pane as u8, mode as u8))
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let output = egui::TextEdit::multiline(text)
                 .id(text_id)
+                .char_limit(display.char_limit)
                 .font(egui::FontSelection::FontId(font.clone()))
                 .frame(frame)
                 .desired_width(f32::INFINITY)
@@ -431,6 +492,9 @@ fn message_numbered(
             if show_invisibles {
                 paint_invisibles(ui, &output.galley, output.galley_pos, &font);
             }
+            if let Some(search) = display.search {
+                search.reveal(ui, &output.galley, output.galley_pos);
+            }
             NumberedOutput {
                 selection: previous_selection
                     .or(output.cursor_range.filter(|range| !range.is_empty())),
@@ -440,16 +504,83 @@ fn message_numbered(
         .inner
 }
 
-/// Keep this setting on the pane, not the message or view mode.
-pub(super) fn invisible_toggle(ui: &mut egui::Ui, enabled: bool) -> bool {
+/// Pane-local editor controls. Binary drafts disable whitespace markers, but
+/// their editable hex text still supports wrapping (unlike the fixed Hex view).
+pub(super) fn invisible_toggle(ui: &mut egui::Ui, allow_invisibles: bool) -> bool {
     let key = ui.make_persistent_id("perseid.message.invisibles");
+    let wrap_key = ui.make_persistent_id("perseid.message.wrap");
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            invisible_toggle_button(ui, key, enabled)
+            let shown = invisible_toggle_button(ui, key, allow_invisibles);
+            wrap_toggle_button(ui, wrap_key, true);
+            shown
         })
         .inner
     })
     .inner
+}
+
+/// Pane-local, like the whitespace setting; Hex always keeps its fixed columns.
+pub(super) fn wrap_lines(ui: &egui::Ui) -> bool {
+    let key = ui.make_persistent_id("perseid.message.wrap");
+    ui.data(|data| data.get_temp::<bool>(key).unwrap_or(true))
+}
+
+fn wrap_toggle_button(ui: &mut egui::Ui, key: egui::Id, enabled: bool) {
+    let selected = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(true));
+    let icon = egui::Atom::paint(egui::vec2(16.0, 16.0), |ui, args| {
+        // Text lines with the second line bending back onto the next row.
+        // Paint the icon instead of relying on a font's Return-key glyph.
+        let origin = args.rect.min;
+        let point = |x, y| origin + egui::vec2(x, y);
+        let stroke = Stroke::new(1.2, args.fallback_text_color);
+        let painter = ui.painter();
+        for (y, end) in [(3.0, 14.0), (7.0, 11.0), (12.0, 5.0)] {
+            painter.line_segment([point(1.0, y), point(end, y)], stroke);
+        }
+        painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+            [
+                point(11.0, 7.0),
+                point(15.0, 7.0),
+                point(15.0, 12.0),
+                point(11.0, 12.0),
+            ],
+            false,
+            Color32::TRANSPARENT,
+            stroke,
+        ));
+        painter.line_segment([point(11.0, 12.0), point(8.0, 12.0)], stroke);
+        painter.add(egui::Shape::line(
+            vec![point(10.0, 10.0), point(8.0, 12.0), point(10.0, 14.0)],
+            stroke,
+        ));
+    });
+    let response = ui
+        .add_enabled(enabled, egui::Button::selectable(selected, icon))
+        .on_hover_text("Wrap lines");
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::Role::Button,
+            response.enabled(),
+            selected,
+            "Wrap lines",
+        )
+    });
+    if response.clicked() {
+        ui.data_mut(|data| data.insert_temp(key, !selected));
+    }
+}
+
+fn scroll_to_match(ui: &egui::Ui, galley: &egui::Galley, origin: egui::Pos2, range: &Range<usize>) {
+    let text = &galley.job.text;
+    let start = text[..range.start].chars().count();
+    // Scroll to the start rather than the full range: a multiline hit can be
+    // taller/wider than the viewport. Do not move the editor's cursor or focus.
+    let cursor = galley.pos_from_cursor(egui::text::CCursor::new(start));
+    ui.scroll_to_rect(
+        cursor.translate(origin.to_vec2()),
+        Some(egui::Align::Center),
+    );
 }
 
 fn invisible_toggle_button(ui: &mut egui::Ui, key: egui::Id, enabled: bool) -> bool {
@@ -656,12 +787,24 @@ fn format_hex_selection(bytes: &[u8]) -> String {
 }
 
 /// Select whole bytes in either column; clipboard text is spaced hexadecimal.
-pub(super) fn message_hex(
+#[cfg(test)]
+fn message_hex(
     ui: &mut egui::Ui,
     id: u64,
     pane: MessagePane,
     mode: MessageView,
     text: &str,
+) -> Option<Vec<u8>> {
+    message_hex_searched(ui, id, pane, mode, text, &MessageSearch::default())
+}
+
+fn message_hex_searched(
+    ui: &mut egui::Ui,
+    id: u64,
+    pane: MessagePane,
+    mode: MessageView,
+    text: &str,
+    search: &MessageSearch,
 ) -> Option<Vec<u8>> {
     let lines: Vec<&str> = text.lines().collect();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -703,101 +846,152 @@ pub(super) fn message_hex(
         )
     });
 
-    egui::ScrollArea::both()
+    let mut scroll = egui::ScrollArea::both()
         .id_salt(("perseid.hex", id, pane as u8, mode as u8))
-        .auto_shrink([false, false])
-        .show_rows(ui, row_height, total_rows, |ui, range| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for index in range {
-                let line = lines.get(index).copied().unwrap_or_default();
-                let bytes = hex_row_bytes(line, index);
-                let galley = ui.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(line.to_owned(), font.clone(), theme::TEXT)
-                });
-                let available_width = ui.available_width();
-                let width = galley.size().x.max(if available_width.is_finite() {
-                    available_width
-                } else {
-                    0.0
-                });
-                let (_, rect) = ui.allocate_space(egui::vec2(width, row_height));
-                ui.interact(
-                    rect,
-                    line_id_base.with(index),
-                    Sense::click_and_drag() - Sense::FOCUSABLE,
+        .auto_shrink([false, false]);
+    if search.jump
+        && let Some(active) = search.active_range()
+    {
+        let prefix = &text[..active.start];
+        let row = prefix.bytes().filter(|&byte| byte == b'\n').count();
+        let column = prefix
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count();
+        scroll = scroll
+            .vertical_scroll_offset(
+                (row as f32 * row_height - ui.available_height() * 0.5).max(0.0),
+            )
+            .horizontal_scroll_offset(
+                (column as f32 * char_width - ui.available_width() * 0.5).max(0.0),
+            );
+    }
+    let mut line_offset = 0;
+    let line_offsets: Vec<usize> = lines
+        .iter()
+        .map(|line| {
+            let offset = line_offset;
+            line_offset += line.len() + 1;
+            offset
+        })
+        .collect();
+    scroll.show_rows(ui, row_height, total_rows, |ui, range| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for index in range {
+            let line = lines.get(index).copied().unwrap_or_default();
+            let bytes = hex_row_bytes(line, index);
+            let galley = ui.fonts_mut(|fonts| {
+                let mut job = egui::text::LayoutJob::simple(
+                    line.to_owned(),
+                    font.clone(),
+                    theme::TEXT,
+                    f32::INFINITY,
                 );
-                let hit_pos = pointer.map(|pos| {
-                    if selection.dragging && down && ui.clip_rect().height() > 1.0 {
-                        egui::pos2(
-                            pos.x,
-                            pos.y
-                                .clamp(ui.clip_rect().top() + 0.5, ui.clip_rect().bottom() - 0.5),
-                        )
-                    } else {
-                        pos
-                    }
-                });
-                if let Some(pos) =
-                    hit_pos.filter(|pos| rect.contains(*pos) && ui.clip_rect().contains(*pos))
-                {
-                    let column = ((pos.x - rect.left()) / char_width).floor().max(0.0) as usize;
-                    if let Some(byte) = hex_column_byte(column, bytes.len()) {
-                        let offset = index * 16 + byte;
-                        if pressed {
-                            selection.anchor = Some(offset);
-                            selection.focus = Some(offset);
-                            selection.dragging = true;
-                            ui.memory_mut(|memory| memory.request_focus(focus_id));
-                        } else if down && selection.dragging {
-                            selection.focus = Some(offset);
-                        }
-                    } else if pressed {
-                        selection.anchor = None;
-                        selection.focus = None;
-                        selection.dragging = false;
+                if let Some(&offset) = line_offsets.get(index) {
+                    let end = offset + line.len();
+                    let first = search.ranges.partition_point(|range| range.end <= offset);
+                    let ranges: Vec<_> = search.ranges[first..]
+                        .iter()
+                        .take_while(|range| range.start < end)
+                        .map(|range| range.start.max(offset) - offset..range.end.min(end) - offset)
+                        .collect();
+                    highlight::paint_matches(&mut job, &ranges, theme::SEARCH_MATCH);
+                    if let Some(active) = search
+                        .active_range()
+                        .filter(|range| range.start < end && range.end > offset)
+                    {
+                        let range = active.start.max(offset) - offset..active.end.min(end) - offset;
+                        highlight::paint_matches(&mut job, &[range], theme::SEARCH_ACTIVE);
                     }
                 }
-                if ui.is_rect_visible(rect) {
-                    if let Some(selected) = selection.range() {
-                        for byte in 0..bytes.len() {
-                            if selected.contains(&(index * 16 + byte)) {
-                                for column in [10 + byte * 3 + usize::from(byte >= 8), 61 + byte] {
-                                    let left = rect.left() + column as f32 * char_width;
-                                    let width = if column < 61 {
-                                        2.0 * char_width
-                                    } else {
-                                        char_width
-                                    };
-                                    ui.painter().rect_filled(
-                                        egui::Rect::from_min_size(
-                                            egui::pos2(left, rect.top()),
-                                            egui::vec2(width, row_height),
-                                        ),
-                                        0.0,
-                                        ui.visuals().selection.bg_fill,
-                                    );
-                                }
+                fonts.layout_job(job)
+            });
+            let available_width = ui.available_width();
+            let width = galley.size().x.max(if available_width.is_finite() {
+                available_width
+            } else {
+                0.0
+            });
+            let (_, rect) = ui.allocate_space(egui::vec2(width, row_height));
+            ui.interact(
+                rect,
+                line_id_base.with(index),
+                Sense::click_and_drag() - Sense::FOCUSABLE,
+            );
+            let hit_pos = pointer.map(|pos| {
+                if selection.dragging && down && ui.clip_rect().height() > 1.0 {
+                    egui::pos2(
+                        pos.x,
+                        pos.y
+                            .clamp(ui.clip_rect().top() + 0.5, ui.clip_rect().bottom() - 0.5),
+                    )
+                } else {
+                    pos
+                }
+            });
+            if let Some(pos) =
+                hit_pos.filter(|pos| rect.contains(*pos) && ui.clip_rect().contains(*pos))
+            {
+                let column = ((pos.x - rect.left()) / char_width).floor().max(0.0) as usize;
+                if let Some(byte) = hex_column_byte(column, bytes.len()) {
+                    let offset = index * 16 + byte;
+                    if pressed {
+                        selection.anchor = Some(offset);
+                        selection.focus = Some(offset);
+                        selection.dragging = true;
+                        ui.memory_mut(|memory| memory.request_focus(focus_id));
+                    } else if down && selection.dragging {
+                        selection.focus = Some(offset);
+                    }
+                } else if pressed {
+                    selection.anchor = None;
+                    selection.focus = None;
+                    selection.dragging = false;
+                }
+            }
+            if ui.is_rect_visible(rect) {
+                if let Some(selected) = selection.range() {
+                    for byte in 0..bytes.len() {
+                        if selected.contains(&(index * 16 + byte)) {
+                            for column in [10 + byte * 3 + usize::from(byte >= 8), 61 + byte] {
+                                let left = rect.left() + column as f32 * char_width;
+                                let width = if column < 61 {
+                                    2.0 * char_width
+                                } else {
+                                    char_width
+                                };
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(
+                                        egui::pos2(left, rect.top()),
+                                        egui::vec2(width, row_height),
+                                    ),
+                                    0.0,
+                                    ui.visuals().selection.bg_fill,
+                                );
                             }
                         }
                     }
-                    ui.painter().galley(rect.min, galley, theme::TEXT);
                 }
+                ui.painter().galley(rect.min, galley, theme::TEXT);
             }
-            if selection.dragging
-                && down
-                && let Some(pos) = pointer
-            {
-                let clip = ui.clip_rect();
-                if pos.y < clip.top() || pos.y > clip.bottom() {
-                    let delta = if pos.y < clip.top() { 18.0 } else { -18.0 };
-                    ui.scroll_with_delta_animation(
-                        egui::vec2(0.0, delta),
-                        egui::style::ScrollAnimation::none(),
-                    );
-                    ui.ctx().request_repaint();
-                }
+        }
+        if selection.dragging
+            && down
+            && let Some(pos) = pointer
+        {
+            let clip = ui.clip_rect();
+            if pos.y < clip.top() || pos.y > clip.bottom() {
+                let delta = if pos.y < clip.top() { 18.0 } else { -18.0 };
+                ui.scroll_with_delta_animation(
+                    egui::vec2(0.0, delta),
+                    egui::style::ScrollAnimation::none(),
+                );
+                ui.ctx().request_repaint();
             }
-        });
+        }
+    });
     if released {
         selection.dragging = false;
     }
@@ -826,6 +1020,463 @@ mod tests {
     use egui::{Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect};
 
     #[test]
+    fn wrapping_icon_uses_painted_text_lines_and_a_return_curve_at_both_scales() {
+        for scale in [1.0, 2.0] {
+            let ctx = Context::default();
+            ctx.set_pixels_per_point(scale);
+            for selected in [true, false] {
+                for enabled in [true, false] {
+                    let output = ctx.run_ui(RawInput::default(), |ui| {
+                        let key = ui.make_persistent_id("perseid.message.wrap");
+                        ui.data_mut(|data| data.insert_temp(key, selected));
+                        wrap_toggle_button(ui, key, enabled);
+                        assert_eq!(wrap_lines(ui), selected);
+                    });
+                    let curve_start = wrap_icon_position(&output);
+                    let text_lines = output.shapes.iter().filter(|shape| {
+                        matches!(&shape.shape, egui::Shape::LineSegment { points, .. }
+                            if points[0].y == points[1].y && points[0].x < curve_start.x)
+                    });
+                    assert_eq!(text_lines.count(), 3);
+                    assert!(text_position(&output, "↩").is_none());
+                    output.drop_without_applying_deltas();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wrapping_toggle_is_default_on_pane_local_and_preserved_through_hex() {
+        let ctx = Context::default();
+        let mut mode = MessageView::Raw;
+        let mut wrapping = true;
+        let mut frame = |events, mode: &mut MessageView| {
+            ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.push_id("request", |ui| {
+                        message_tabs(ui, mode);
+                        wrapping = wrap_lines(ui);
+                    });
+                    ui.push_id("response", |ui| assert!(wrap_lines(ui)));
+                },
+            )
+        };
+        let output = frame(vec![], &mut mode);
+        let wrap = wrap_icon_position(&output);
+        let invisible = text_position(&output, "\\n").unwrap();
+        assert!(wrap.x < invisible.x);
+        output.drop_without_applying_deltas();
+        frame(
+            vec![Event::PointerMoved(wrap), button(wrap, true)],
+            &mut mode,
+        )
+        .drop_without_applying_deltas();
+        frame(vec![button(wrap, false)], &mut mode).drop_without_applying_deltas();
+        mode = MessageView::Hex;
+        frame(vec![], &mut mode).drop_without_applying_deltas();
+        // Disabled in Hex; clicking must not re-enable the stored preference.
+        frame(
+            vec![Event::PointerMoved(wrap), button(wrap, true)],
+            &mut mode,
+        )
+        .drop_without_applying_deltas();
+        frame(vec![button(wrap, false)], &mut mode).drop_without_applying_deltas();
+        mode = MessageView::Pretty;
+        frame(vec![], &mut mode).drop_without_applying_deltas();
+        assert!(!wrapping);
+    }
+
+    #[test]
+    fn binary_editor_can_reenable_wrapping_without_enabling_whitespace() {
+        let ctx = Context::default();
+        let mut wrapping = true;
+        let mut frame = |events, allow_invisibles| {
+            ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let key = ui.make_persistent_id("perseid.message.invisibles");
+                    ui.data_mut(|data| {
+                        if data.get_temp::<bool>(key).is_none() {
+                            data.insert_temp(key, true);
+                        }
+                    });
+                    assert_eq!(invisible_toggle(ui, allow_invisibles), allow_invisibles);
+                    assert_eq!(ui.data(|data| data.get_temp::<bool>(key)), Some(true));
+                    wrapping = wrap_lines(ui);
+                },
+            )
+        };
+        let output = frame(vec![], true);
+        let wrap = wrap_icon_position(&output);
+        let invisible = text_position(&output, "\\n").unwrap();
+        assert!(wrap.x < invisible.x);
+        output.drop_without_applying_deltas();
+        for allow_invisibles in [true, false] {
+            frame(
+                vec![Event::PointerMoved(wrap), button(wrap, true)],
+                allow_invisibles,
+            )
+            .drop_without_applying_deltas();
+            frame(vec![button(wrap, false)], allow_invisibles).drop_without_applying_deltas();
+            // Clicking the disabled binary whitespace toggle must not change
+            // the saved text-mode preference or the wrapping preference.
+            if !allow_invisibles {
+                frame(
+                    vec![Event::PointerMoved(invisible), button(invisible, true)],
+                    false,
+                )
+                .drop_without_applying_deltas();
+                frame(vec![button(invisible, false)], false).drop_without_applying_deltas();
+            }
+        }
+        frame(vec![], true).drop_without_applying_deltas();
+        assert!(wrapping);
+    }
+
+    fn search_frame(
+        ctx: &Context,
+        mut events: Vec<Event>,
+        text: &str,
+        hex: bool,
+    ) -> (egui::FullOutput, MessageSearch) {
+        let mut observed = MessageSearch::default();
+        let modifiers = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Key { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
+        events.insert(0, Event::ModifiersChanged(modifiers));
+        let output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let mut readonly = text;
+                searchable_view(
+                    ui,
+                    MessagePane::Request,
+                    &mut readonly,
+                    None,
+                    |ui, text, search| {
+                        observed = search.clone();
+                        if hex {
+                            message_hex_searched(
+                                ui,
+                                1,
+                                MessagePane::Request,
+                                MessageView::Hex,
+                                text.as_str(),
+                                search,
+                            );
+                        } else {
+                            message_numbered(
+                                ui,
+                                1,
+                                MessagePane::Request,
+                                MessageView::Raw,
+                                text,
+                                &MessageDisplay {
+                                    search: Some(search),
+                                    ..Default::default()
+                                },
+                                false,
+                            );
+                        }
+                    },
+                );
+            },
+        );
+        (output, observed)
+    }
+
+    #[test]
+    fn search_field_counts_highlights_arrows_and_enter_wrap_without_editing() {
+        let ctx = Context::default();
+        let text = "é needle NEEDLE needle";
+        let (output, _) = search_frame(&ctx, vec![], text, false);
+        let pos = text_position(&output, "Search").unwrap();
+        assert!(pos.y > 260.0, "search belongs at the bottom");
+        assert!(text_position(&output, "0 highlights").is_some());
+        output.drop_without_applying_deltas();
+        search_frame(
+            &ctx,
+            vec![Event::PointerMoved(pos), button(pos, true)],
+            text,
+            false,
+        )
+        .0
+        .drop_without_applying_deltas();
+        search_frame(&ctx, vec![button(pos, false)], text, false)
+            .0
+            .drop_without_applying_deltas();
+        let (output, search) = search_frame(&ctx, vec![Event::Text("needle".into())], text, false);
+        assert_eq!(search.ranges.len(), 3);
+        assert_eq!(search.active, Some(0));
+        assert!(text_position(&output, "3 highlights").is_some());
+        let next = text_position(&output, "→").unwrap();
+        let previous = text_position(&output, "←").unwrap();
+        output.drop_without_applying_deltas();
+        let enter = |shift| Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers {
+                shift,
+                ..Default::default()
+            },
+        };
+        let (output, search) = search_frame(&ctx, vec![enter(false)], text, false);
+        assert_eq!(search.active, Some(1));
+        output.drop_without_applying_deltas();
+        let (output, search) = search_frame(&ctx, vec![enter(true)], text, false);
+        assert_eq!(search.active, Some(0));
+        output.drop_without_applying_deltas();
+        for (pos, expected) in [(previous, 2), (next, 0)] {
+            search_frame(
+                &ctx,
+                vec![Event::PointerMoved(pos), button(pos, true)],
+                text,
+                false,
+            )
+            .0
+            .drop_without_applying_deltas();
+            let (output, search) = search_frame(&ctx, vec![button(pos, false)], text, false);
+            assert_eq!(search.active, Some(expected));
+            output.drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn search_query_survives_view_changes_and_refreshes_for_new_text() {
+        let ctx = Context::default();
+        let output = ctx.run_ui(RawInput::default(), |ui| {
+            let key = ui.make_persistent_id(("perseid.message.search", MessagePane::Request as u8));
+            let mut search = MessageSearch::default();
+            search.query = "a".into();
+            ui.data_mut(|data| data.insert_temp(key, search));
+            let mut text = "aa";
+            searchable_view(ui, MessagePane::Request, &mut text, None, |_, _, search| {
+                assert_eq!(search.ranges.len(), 2)
+            });
+            let mut response = "a";
+            searchable_view(
+                ui,
+                MessagePane::Response,
+                &mut response,
+                None,
+                |_, _, search| assert!(search.query.is_empty()),
+            );
+        });
+        output.drop_without_applying_deltas();
+        let (output, search) = search_frame(&ctx, vec![], "a", true);
+        assert_eq!(search.query, "a");
+        assert_eq!(search.ranges.len(), 1);
+        output.drop_without_applying_deltas();
+        let (output, search) = search_frame(&ctx, vec![], "other", false);
+        assert_eq!(search.query, "a");
+        assert!(search.ranges.is_empty());
+        output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn unwrapped_layout_keeps_long_lines() {
+        let ctx = Context::default();
+        let text = "x".repeat(200);
+        let mut sizes = Vec::new();
+        for wrap in [true, false] {
+            let output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut readonly = text.as_str();
+                    message_numbered(
+                        ui,
+                        1,
+                        MessagePane::Request,
+                        MessageView::Raw,
+                        &mut readonly,
+                        &MessageDisplay {
+                            wrap,
+                            ..Default::default()
+                        },
+                        true,
+                    );
+                },
+            );
+            fn find(shape: &egui::Shape, text: &str) -> Option<egui::Vec2> {
+                match shape {
+                    egui::Shape::Text(shape) if shape.galley.text() == text => {
+                        Some(shape.galley.size())
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find(shape, text)),
+                    _ => None,
+                }
+            }
+            sizes.push(
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| find(&shape.shape, &text))
+                    .unwrap(),
+            );
+            output.drop_without_applying_deltas();
+        }
+        assert!(sizes[0].y > sizes[1].y);
+        assert!(sizes[1].x > 400.0);
+    }
+
+    #[test]
+    fn navigating_to_a_text_match_scrolls_both_axes_without_taking_focus() {
+        let ctx = Context::default();
+        let text = format!("{}{}needle", "padding\n".repeat(80), "x".repeat(200));
+        let mut search = MessageSearch::default();
+        search.query = "needle".into();
+        search.refresh(&text, None);
+        search.advance(false);
+        let mut scroll_id = egui::Id::NULL;
+        for step in 0..3 {
+            let output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    time: Some(step as f64),
+                    ..Default::default()
+                },
+                |ui| {
+                    scroll_id = ui.make_persistent_id(egui::IdSalt::new((
+                        "perseid.message",
+                        1_u64,
+                        MessagePane::Request as u8,
+                        MessageView::Raw as u8,
+                    )));
+                    let mut readonly = text.as_str();
+                    message_numbered(
+                        ui,
+                        1,
+                        MessagePane::Request,
+                        MessageView::Raw,
+                        &mut readonly,
+                        &MessageDisplay {
+                            search: Some(&search),
+                            wrap: false,
+                            ..Default::default()
+                        },
+                        false,
+                    );
+                },
+            );
+            search.jump = false;
+            output.drop_without_applying_deltas();
+        }
+        let state = egui::scroll_area::State::load(&ctx, scroll_id).unwrap();
+        assert!(state.clamped_offset().y > 500.0, "{state:?}");
+        assert!(state.clamped_offset().x > 500.0, "{state:?}");
+        assert!(!ctx.egui_wants_keyboard_input());
+    }
+
+    #[test]
+    fn limited_message_editor_preserves_websocket_send_guards() {
+        let ctx = Context::default();
+        let mut text = String::new();
+        let mut frame = |events| {
+            ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| message_editor_with_limit(ui, 1, &mut text, 3, false),
+            )
+        };
+        let pos = egui::pos2(40.0, 10.0);
+        for events in [
+            vec![],
+            vec![Event::PointerMoved(pos), button(pos, true)],
+            vec![button(pos, false)],
+            vec![Event::Text("😀abcd".into())],
+        ] {
+            frame(events).drop_without_applying_deltas();
+        }
+        assert_eq!(text, "😀ab");
+    }
+
+    #[test]
+    fn hex_navigation_reveals_and_paints_an_offscreen_match() {
+        let ctx = Context::default();
+        let text = (0..80)
+            .map(|index| {
+                format!(
+                    "{:08x}  {} |{}|",
+                    index * 16,
+                    "61 ".repeat(16),
+                    "a".repeat(16)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut search = MessageSearch::default();
+        search.query = format!("{:08x}", 79 * 16);
+        search.refresh(&text, None);
+        search.advance(false);
+        let mut scroll_id = egui::Id::NULL;
+        let output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                ..Default::default()
+            },
+            |ui| {
+                scroll_id = ui.make_persistent_id(egui::IdSalt::new((
+                    "perseid.hex",
+                    1_u64,
+                    MessagePane::Request as u8,
+                    MessageView::Hex as u8,
+                )));
+                message_hex_searched(
+                    ui,
+                    1,
+                    MessagePane::Request,
+                    MessageView::Hex,
+                    &text,
+                    &search,
+                );
+            },
+        );
+        let painted = output.shapes.iter().any(|shape| match &shape.shape {
+            egui::Shape::Text(shape) => shape
+                .galley
+                .job
+                .sections
+                .iter()
+                .any(|section| section.format.background == theme::SEARCH_ACTIVE),
+            _ => false,
+        });
+        output.drop_without_applying_deltas();
+        assert!(
+            egui::scroll_area::State::load(&ctx, scroll_id)
+                .unwrap()
+                .clamped_offset()
+                .y
+                > 500.0
+        );
+        assert!(painted);
+    }
+
+    #[test]
     fn invisible_markers_leave_the_editable_buffer_unchanged() {
         assert_eq!(invisible_marker(' '), Some("·"));
         assert_eq!(invisible_marker('\t'), Some("→"));
@@ -842,7 +1493,7 @@ mod tests {
                 MessagePane::Request,
                 MessageView::Raw,
                 &mut text,
-                None,
+                &MessageDisplay::default(),
                 true,
             );
             assert!(!result.changed);
@@ -965,7 +1616,7 @@ mod tests {
                 MessagePane::Request,
                 MessageView::Raw,
                 &mut readonly,
-                None,
+                &MessageDisplay::default(),
                 false,
             );
         });
@@ -1093,7 +1744,7 @@ mod tests {
                                 MessagePane::Request,
                                 MessageView::Raw,
                                 &mut readonly,
-                                None,
+                                &MessageDisplay::default(),
                                 false,
                             );
                         },
@@ -1461,6 +2112,17 @@ mod tests {
             ctx.any_popup_open(),
             "right-clicking a captured request should open the menu with Copy as curl"
         );
+    }
+
+    fn wrap_icon_position(output: &egui::FullOutput) -> Pos2 {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::CubicBezier(curve) => Some(curve.points[0]),
+                _ => None,
+            })
+            .expect("painted line-wrapping icon")
     }
 
     fn text_position(output: &egui::FullOutput, label: &str) -> Option<Pos2> {
