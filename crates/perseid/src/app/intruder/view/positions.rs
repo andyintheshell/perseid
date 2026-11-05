@@ -86,6 +86,10 @@ impl PerseidApp {
                 }
             });
 
+        let before = self
+            .intruder
+            .body_incomplete
+            .then(|| self.intruder.request.clone());
         if add_marker {
             let target = self.intruder.target_range();
             let (request, range) = toggle_marker(&self.intruder.request, target);
@@ -115,6 +119,16 @@ impl PerseidApp {
             });
             self.intruder.selection = None;
             self.intruder.cursor = self.intruder.cursor.min(self.intruder.request.len());
+        }
+        if let Some(before) = before {
+            crate::app::replay_body::edited(
+                &before,
+                &self.intruder.request,
+                &mut self.intruder.body_incomplete,
+            );
+            if !self.intruder.body_incomplete {
+                self.intruder.legacy_body = None;
+            }
         }
     }
 }

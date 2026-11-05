@@ -29,9 +29,12 @@ pub(super) struct RepeaterTab {
     title: String,
     scheme: String,
     host: String,
-    /// Full editable UTF-8 request; non-UTF-8/incomplete bodies stay separate.
+    /// Full editable request; binary body bytes have reversible byte escapes.
     request: String,
-    preserved_body: Option<crate::project::BodyWorkspace>,
+    body_escaped: bool,
+    body_incomplete: bool,
+    /// Retain conflicting old workspace bytes until the user edits the body.
+    legacy_body: Option<crate::project::BodyWorkspace>,
     /// Seed warning, for example when the captured body was truncated.
     note: Option<String>,
     response: Option<RepeaterReply>,
@@ -90,18 +93,12 @@ impl RepeaterTab {
     }
 
     pub(super) fn request_views(&self) -> MessageViews {
-        let (head, text) = split_raw_request(&self.request);
-        let body = self
-            .preserved_body
-            .as_ref()
-            .map_or(text.as_bytes(), |body| body.data.as_slice());
-        view::editor_views(head, body)
+        let (head, _) = split_raw_request(&self.request);
+        view::editor_views(head, &self.request_body_bytes())
     }
 
-    pub(super) fn preserved_body_bytes(&self) -> Option<&[u8]> {
-        self.preserved_body
-            .as_ref()
-            .map(|body| body.data.as_slice())
+    pub(super) fn request_body_bytes(&self) -> Vec<u8> {
+        super::replay_body::bytes(&self.request, self.body_escaped, false).unwrap_or_default()
     }
 
     pub(super) fn response_raw(&self) -> Option<&str> {
@@ -131,7 +128,9 @@ impl RepeaterTab {
             scheme: "https".to_string(),
             host: String::new(),
             request: "GET / HTTP/1.1\nHost: \n\n".to_string(),
-            preserved_body: None,
+            body_escaped: false,
+            body_incomplete: false,
+            legacy_body: None,
             note: None,
             response: None,
             pending: None,
@@ -165,7 +164,9 @@ impl RepeaterTab {
             scheme,
             host: item.request.host.clone(),
             request: view::replay_request_head(item),
-            preserved_body: Some(crate::project::BodyWorkspace::from_body(&item.request_body)),
+            body_escaped: false,
+            body_incomplete: false,
+            legacy_body: None,
             note: None,
             response: None,
             pending: None,
@@ -174,7 +175,15 @@ impl RepeaterTab {
             response_view: MessageView::Pretty,
             websocket: None,
         };
-        super::replay_body::inline_text(&mut tab.preserved_body, &mut tab.request, false);
+        super::replay_body::inline(
+            Some(&crate::project::BodyWorkspace::from_body(
+                &item.request_body,
+            )),
+            &mut tab.request,
+            &mut tab.body_escaped,
+            &mut tab.body_incomplete,
+            false,
+        );
         tab
     }
 
@@ -817,7 +826,7 @@ impl PerseidApp {
         let raw = tab.request.clone();
         let scheme = tab.scheme.clone();
         let host = tab.host.clone();
-        let body = match super::replay_body::bytes(&tab.preserved_body, &raw) {
+        let body = match super::replay_body::bytes(&raw, tab.body_escaped, tab.body_incomplete) {
             Ok(body) => body,
             Err(error) => {
                 self.repeater_tabs[index].response = None;
@@ -826,7 +835,7 @@ impl PerseidApp {
             }
         };
         let (head, _) = split_raw_request(&raw);
-        let request = match RepeaterRequest::parse(head, body.to_vec(), &scheme, &host) {
+        let request = match RepeaterRequest::parse(head, body, &scheme, &host) {
             Ok(request) => request,
             Err(err) => {
                 let tab = &mut self.repeater_tabs[index];
@@ -897,13 +906,17 @@ pub(super) fn parse_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
-    super::replay_body::controls(ui, &mut tab.preserved_body, &mut tab.request);
+    let before = tab.body_incomplete.then(|| tab.request.clone());
     ui.horizontal(|ui| {
         ui.label(RichText::new("Request").strong().color(theme::TEXT));
         ui.label(
-            RichText::new("editable raw message")
-                .small()
-                .color(theme::TEXT_MUTED),
+            RichText::new(if tab.body_escaped {
+                "editable raw message · body: \\xNN bytes, \\\\ backslash"
+            } else {
+                "editable raw message"
+            })
+            .small()
+            .color(theme::TEXT_MUTED),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
@@ -929,6 +942,12 @@ fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
         MessageView::Raw,
         &mut tab.request,
     );
+    if let Some(before) = before {
+        super::replay_body::edited(&before, &tab.request, &mut tab.body_incomplete);
+        if !tab.body_incomplete {
+            tab.legacy_body = None;
+        }
+    }
 }
 
 fn response_pane(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
@@ -1040,7 +1059,9 @@ impl PerseidApp {
                 scheme: tab.scheme.clone(),
                 host: tab.host.clone(),
                 request: tab.request.clone(),
-                preserved_body: tab.preserved_body.clone(),
+                preserved_body: tab.legacy_body.clone(),
+                body_escaped: tab.body_escaped,
+                body_incomplete: tab.body_incomplete,
                 note: tab.note.clone(),
                 response: tab
                     .response
@@ -1073,8 +1094,18 @@ impl PerseidApp {
             tab.scheme = workspace.scheme.clone();
             tab.host = workspace.host.clone();
             tab.request = workspace.request.clone();
-            tab.preserved_body = workspace.preserved_body.clone();
-            super::replay_body::inline_text(&mut tab.preserved_body, &mut tab.request, false);
+            tab.body_escaped = workspace.body_escaped;
+            tab.body_incomplete = workspace.body_incomplete;
+            let imported = super::replay_body::inline(
+                workspace.preserved_body.as_ref(),
+                &mut tab.request,
+                &mut tab.body_escaped,
+                &mut tab.body_incomplete,
+                false,
+            );
+            tab.legacy_body = (!imported)
+                .then(|| workspace.preserved_body.clone())
+                .flatten();
             tab.note = workspace.note.clone();
             tab.response = workspace.response.as_ref().map(|response| RepeaterReply {
                 views: (&response.views).into(),
@@ -1398,13 +1429,41 @@ mod tests {
     }
 
     #[test]
-    fn seeding_from_history_preserves_binary_bodies_outside_the_editor() {
+    fn seeding_from_history_keeps_binary_bodies_inside_the_editor() {
         let item = history_item(1, "POST", "/upload", "https", vec![0xff, 0x00]);
         let tab = RepeaterTab::from_history(1, &item);
-        assert!(tab.request.ends_with("\n\n"));
+        assert!(tab.request.ends_with("\\xFF\0"));
         assert!(tab.request_views().hex.contains("ff"));
-        assert_eq!(tab.preserved_body_bytes(), Some([0xff, 0x00].as_slice()));
-        assert_eq!(tab.preserved_body.unwrap().data, vec![0xff, 0x00]);
+        assert_eq!(tab.request_body_bytes(), vec![0xff, 0x00]);
+        assert!(tab.body_escaped);
+    }
+
+    #[test]
+    fn binary_and_incomplete_editor_has_no_body_replacement_controls() {
+        let ctx = egui::Context::default();
+        let item = history_item(1, "POST", "/upload", "https", vec![255]);
+        let mut tab = RepeaterTab::from_history(1, &item);
+        tab.body_incomplete = true;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| request_editor(ui, &mut tab),
+        );
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("Preserved captured body")
+                || text.galley.job.text.contains("Replace captured body")
+                || text.galley.job.text.contains("Use captured prefix")
+        )));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("\\xFF")
+        )));
+        assert!(tab.body_incomplete);
+        output.drop_without_applying_deltas();
     }
 
     #[test]

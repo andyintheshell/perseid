@@ -71,6 +71,8 @@ impl AttackType {
 /// editing the request cannot change a running attack underneath the engine.
 #[derive(Clone, Debug)]
 pub struct IntruderPlan {
+    /// Interpret reversible byte escapes in the rendered request body.
+    pub body_escaped: bool,
     /// Captured bytes sent independently of the header-only template.
     pub preserved_body: Option<Vec<u8>>,
     pub attack: AttackType,
@@ -104,6 +106,13 @@ pub struct RenderedRequest {
 }
 
 impl IntruderPlan {
+    pub(crate) fn body_bytes(&self, raw: &str) -> Result<Vec<u8>, String> {
+        match &self.preserved_body {
+            Some(body) => Ok(body.clone()),
+            None => super::super::body_text::decode(split_raw_request(raw).1, self.body_escaped)
+                .map(|bytes| bytes.into_owned()),
+        }
+    }
     /// Parse the template and validate payload sets and request count.
     pub fn prepare(&self) -> Result<PreparedIntruderPlan<'_>, IntruderError> {
         if self.preserved_body.is_some() && !split_raw_request(&self.template).1.is_empty() {
@@ -242,6 +251,7 @@ impl PreparedIntruderPlan<'_> {
 
         let mut raw = String::with_capacity(plan.template.len());
         let mut cursor = 0;
+        let body_start = split_raw_request(&plan.template).0.len();
         for (index, range) in self.positions.iter().enumerate() {
             // `range` covers the content between the delimiters. Keep the text
             // before the opening `$$`, then emit the payload (or the original
@@ -249,7 +259,14 @@ impl PreparedIntruderPlan<'_> {
             let open = range.start - MARKER.len();
             raw.push_str(&plan.template[cursor..open]);
             match values[index] {
-                Some(payload) => raw.push_str(payload),
+                Some(payload) => {
+                    if plan.body_escaped && range.start >= body_start {
+                        // Payloads are UTF-8 values, not escape-language source.
+                        raw.push_str(&super::super::body_text::encode(payload.as_bytes(), false));
+                    } else {
+                        raw.push_str(payload);
+                    }
+                }
                 None => raw.push_str(&plan.template[range.clone()]),
             }
             cursor = range.end + MARKER.len();
@@ -258,11 +275,17 @@ impl PreparedIntruderPlan<'_> {
         if plan.preserved_body.is_some() && !split_raw_request(&raw).1.is_empty() {
             return Err(IntruderError::PreservedBodyConflict);
         }
-        if raw
-            .len()
-            .saturating_add(plan.preserved_body.as_ref().map_or(0, Vec::len))
-            > MAX_REQUEST_BYTES
-        {
+        let request_len = if plan.body_escaped {
+            split_raw_request(&raw).0.len().saturating_add(
+                plan.body_bytes(&raw)
+                    .map_err(IntruderError::BodyEscape)?
+                    .len(),
+            )
+        } else {
+            raw.len()
+                .saturating_add(plan.preserved_body.as_ref().map_or(0, Vec::len))
+        };
+        if request_len > MAX_REQUEST_BYTES {
             return Err(IntruderError::RequestTooLarge { sequence });
         }
 
@@ -528,6 +551,8 @@ pub fn update_host_header(raw: &str, host: &str) -> String {
 /// Why a plan or generated request is invalid.
 #[derive(Debug, thiserror::Error)]
 pub enum IntruderError {
+    #[error("{0}")]
+    BodyEscape(String),
     #[error(
         "the template or generated request contains body text that conflicts with the preserved body; remove body text or header/body boundaries introduced by payloads, or replace the preserved body"
     )]

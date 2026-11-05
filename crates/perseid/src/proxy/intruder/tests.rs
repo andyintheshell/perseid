@@ -3,6 +3,42 @@ use std::ops::Range;
 use super::*;
 
 #[test]
+fn escaped_body_payloads_are_literal_utf8_in_every_attack_mode() {
+    for attack in AttackType::ALL {
+        let mut plan = plan(
+            attack,
+            "POST / HTTP/1.1\r\n\r\n\\xFF$$base$$\\x24\\x24\\\\x00",
+            &[&["é\\x00$$"]],
+        );
+        plan.body_escaped = true;
+        let rendered = plan.render_sequence(1).unwrap();
+        assert_eq!(
+            plan.body_bytes(&rendered.raw).unwrap(),
+            [b"\xff".as_slice(), "é\\x00$$$$\\x00".as_bytes()].concat()
+        );
+        assert_eq!(rendered.payloads, vec!["é\\x00$$"]);
+    }
+}
+
+#[test]
+fn escaped_body_size_limit_counts_bytes_not_escape_notation() {
+    let mut plan = plan(
+        AttackType::Sniper,
+        &format!(
+            "POST /$$base$$ HTTP/1.1\r\n\r\n{}",
+            "\\xFF".repeat(3 * 1024 * 1024)
+        ),
+        &[&["x"]],
+    );
+    plan.body_escaped = true;
+    let rendered = plan.render_sequence(1).unwrap();
+    assert_eq!(
+        plan.body_bytes(&rendered.raw).unwrap().len(),
+        3 * 1024 * 1024
+    );
+}
+
+#[test]
 fn preserved_bodies_are_not_templates_and_conflicting_text_is_rejected() {
     let mut plan = plan(
         AttackType::Sniper,
@@ -42,6 +78,7 @@ fn preserved_body_counts_toward_the_request_size_limit() {
 
 fn plan(attack: AttackType, template: &str, sets: &[&[&str]]) -> IntruderPlan {
     IntruderPlan {
+        body_escaped: false,
         preserved_body: None,
         attack,
         scheme: "http".to_string(),
@@ -238,6 +275,7 @@ fn update_host_header_replaces_or_inserts_a_header() {
 #[test]
 fn request_counts_fail_instead_of_overflowing() {
     let plan = IntruderPlan {
+        body_escaped: false,
         preserved_body: None,
         attack: AttackType::ClusterBomb,
         scheme: "http".to_string(),

@@ -70,6 +70,7 @@
 //! # Ok::<(), perseid::proxy::StartError>(())
 //! ```
 
+pub(crate) mod body_text;
 mod capture;
 mod config;
 pub mod cookies;

@@ -634,6 +634,10 @@ pub struct RepeaterResponseWorkspace {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RepeaterWorkspace {
     #[serde(default)]
+    pub body_escaped: bool,
+    #[serde(default)]
+    pub body_incomplete: bool,
+    #[serde(default)]
     pub preserved_body: Option<BodyWorkspace>,
     #[serde(default)]
     pub id: u64,
@@ -748,6 +752,8 @@ impl Default for IntruderResultOutcomeWorkspace {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntruderPlanWorkspace {
     #[serde(default)]
+    pub body_escaped: bool,
+    #[serde(default)]
     pub preserved_body: Option<BodyWorkspace>,
     #[serde(default)]
     pub attack: IntruderAttackRecord,
@@ -775,6 +781,10 @@ pub struct TextSelectionWorkspace {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntruderWorkspace {
+    #[serde(default)]
+    pub body_escaped: bool,
+    #[serde(default)]
+    pub body_incomplete: bool,
     #[serde(default)]
     pub preserved_body: Option<BodyWorkspace>,
     #[serde(default)]
@@ -1417,6 +1427,8 @@ mod tests {
                 }],
             },
             repeater: vec![RepeaterWorkspace {
+                body_escaped: false,
+                body_incomplete: false,
                 preserved_body: Some(BodyWorkspace::from_body(&body)),
                 id: 3,
                 title: "Login".to_string(),

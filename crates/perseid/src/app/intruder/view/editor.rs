@@ -23,28 +23,17 @@ impl PerseidApp {
             )
             .show(ui, |ui| {
                 let state = &mut self.intruder;
-                let had_preserved_body = state.preserved_body.is_some();
-                crate::app::replay_body::controls(
-                    ui,
-                    &mut state.preserved_body,
-                    &mut state.request,
-                );
-                if had_preserved_body && state.preserved_body.is_none() {
-                    state.selection = None;
-                    state.cursor = 0;
-                    let editor_id = egui::Id::unique(INTRUDER_EDITOR_ID);
-                    let mut editor = TextEditState::load(ui.ctx(), editor_id).unwrap_or_default();
-                    editor
-                        .cursor
-                        .set_char_range(Some(CCursorRange::one(CCursor::new(0))));
-                    editor.store(ui.ctx(), editor_id);
-                }
+                let before = state.body_incomplete.then(|| state.request.clone());
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Request").strong().color(theme::TEXT));
                     ui.label(
-                        RichText::new("editable raw message")
-                            .small()
-                            .color(theme::TEXT_MUTED),
+                        RichText::new(if state.body_escaped {
+                            "editable raw message · body: \\xNN bytes, \\\\ backslash"
+                        } else {
+                            "editable raw message"
+                        })
+                        .small()
+                        .color(theme::TEXT_MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
@@ -92,6 +81,16 @@ impl PerseidApp {
                             },
                         );
                     });
+                if let Some(before) = before {
+                    crate::app::replay_body::edited(
+                        &before,
+                        &state.request,
+                        &mut state.body_incomplete,
+                    );
+                    if !state.body_incomplete {
+                        state.legacy_body = None;
+                    }
+                }
             });
     }
 }
@@ -157,58 +156,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn replacing_preserved_body_resets_marker_and_editor_selection() {
+    fn binary_and_incomplete_drafts_have_no_preserved_body_controls() {
         let ctx = egui::Context::default();
         let mut app = PerseidApp::test_app();
         app.intruder.request =
-            "POST / HTTP/1.1\r\nContent-Encoding: gzip\r\nContent-Length: 1\r\n\r\n".into();
-        app.intruder.preserved_body = Some(crate::project::BodyWorkspace::default());
-        let end = app.intruder.request.len();
-        app.intruder.select_request(&ctx, 20..end);
-        let input = |events| egui::RawInput {
+            "POST / HTTP/1.1\r\nContent-Encoding: gzip\r\nContent-Length: 1\r\n\r\n\\xFF".into();
+        app.intruder.body_escaped = true;
+        app.intruder.body_incomplete = true;
+        let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(1200.0, 600.0),
             )),
-            events,
             ..Default::default()
         };
-        let output = ctx.run_ui(input(vec![]), |ui| app.intruder_editor(ui));
-        let pos = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text)
-                    if text.galley.job.text == "Replace captured body with empty editable text" =>
-                {
-                    Some(text.pos + egui::vec2(3.0, 3.0))
-                }
-                _ => None,
-            })
-            .expect("replacement button visible");
+        let output = ctx.run_ui(input.clone(), |ui| app.intruder_editor(ui));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("Preserved captured body")
+                || text.galley.job.text.contains("Replace captured body")
+                || text.galley.job.text.contains("Use captured prefix")
+        )));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("\\xFF")
+        )));
         output.drop_without_applying_deltas();
-        for pressed in [true, false] {
-            ctx.run_ui(
-                input(vec![
-                    egui::Event::PointerMoved(pos),
-                    egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: egui::Modifiers::NONE,
-                    },
-                ]),
-                |ui| app.intruder_editor(ui),
-            )
-            .drop_without_applying_deltas();
-        }
-        assert!(app.intruder.preserved_body.is_none());
-        assert!(app.intruder.selection.is_none());
-        assert_eq!(app.intruder.cursor, 0);
-        let editor = TextEditState::load(&ctx, egui::Id::unique(INTRUDER_EDITOR_ID)).unwrap();
+        assert!(app.intruder.body_incomplete);
+        let end = app.intruder.request.len();
+        app.intruder.select_request(&ctx, end..end);
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Text("edited".into())],
+                ..input
+            },
+            |ui| app.intruder_editor(ui),
+        )
+        .drop_without_applying_deltas();
+        assert!(!app.intruder.body_incomplete);
         assert_eq!(
-            editor.cursor.char_range(),
-            Some(CCursorRange::one(CCursor::new(0)))
+            crate::app::replay_body::bytes(&app.intruder.request, true, false).unwrap(),
+            b"\xffedited"
         );
     }
 
