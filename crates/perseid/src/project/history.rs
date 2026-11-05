@@ -14,6 +14,59 @@ use super::{ProjectSnapshot, Result, codec, queries, schema};
 use crate::history::HistoryItem;
 use crate::websocket_history::WebSocketMessageItem;
 
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use crate::proxy::{CapturedBody, RequestInfo, ResponseHead};
+    use std::io::Write;
+
+    #[test]
+    fn borrowed_summary_counts_forms_and_decodes_html_without_changing_capture_bytes() {
+        let request = RequestInfo {
+            method: "POST".into(),
+            uri: "http://example.test/?q=1".into(),
+            scheme: "http".into(),
+            host: "example.test".into(),
+            path: "/?q=1".into(),
+            version: "HTTP/1.1".into(),
+            headers: vec![(
+                "content-type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
+        };
+        let request_body = CapturedBody::from_bytes(b"a=1&b=2".to_vec());
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(b"<title>Borrowed &amp; decoded</title>")
+            .unwrap();
+        let compressed = encoder.finish().unwrap();
+        let response_body = CapturedBody::from_bytes(compressed.clone());
+        let response = ResponseHead {
+            version: "HTTP/1.1".into(),
+            status: 200,
+            reason: "OK".into(),
+            headers: vec![
+                ("content-type".into(), "text/html".into()),
+                ("content-encoding".into(), "gzip".into()),
+            ],
+        };
+        let summary = HttpSummary::from_parts(
+            &request,
+            &request_body,
+            Some(&response),
+            Some(&response_body),
+        );
+        assert_eq!(summary.parameters, 3);
+        assert_eq!(summary.title, "Borrowed & decoded");
+        assert_eq!(response_body.data(), compressed);
+        assert!(
+            HttpSummary::from_parts(&request, &request_body, None, None)
+                .title
+                .is_empty()
+        );
+    }
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct HttpSummary {
     pub parameters: usize,
@@ -22,9 +75,22 @@ pub(crate) struct HttpSummary {
 
 impl HttpSummary {
     pub(crate) fn from_item(item: &HistoryItem) -> Self {
-        let parameters =
-            crate::site_map::request_parameter_count(&item.request, &item.request_body).count;
-        let html = item.response.as_ref().is_some_and(|head| {
+        Self::from_parts(
+            &item.request,
+            &item.request_body,
+            item.response.as_ref(),
+            item.response_body(),
+        )
+    }
+
+    pub(crate) fn from_parts(
+        request: &crate::proxy::RequestInfo,
+        request_body: &crate::proxy::CapturedBody,
+        response: Option<&crate::proxy::ResponseHead>,
+        response_body: Option<&crate::proxy::CapturedBody>,
+    ) -> Self {
+        let parameters = crate::site_map::request_parameter_count(request, request_body).count;
+        let html = response.is_some_and(|head| {
             head.headers
                 .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
@@ -34,12 +100,13 @@ impl HttpSummary {
                 })
         });
         let title = if html
-            && item
-                .response_body()
-                .is_some_and(|body| body.is_complete() || body.is_truncated())
+            && response_body.is_some_and(|body| body.is_complete() || body.is_truncated())
         {
-            crate::site_map::html_title(&crate::view::response_body_for_search(item))
-                .unwrap_or_default()
+            crate::site_map::html_title(&crate::view::response_body_for_search_from_parts(
+                response,
+                response_body,
+            ))
+            .unwrap_or_default()
         } else {
             String::new()
         };

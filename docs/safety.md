@@ -107,7 +107,7 @@ on demand. The site map covers all retained
 HTTP endpoints using a disposable disk index and bounded pages. Its private
 temporary directory contains sensitive URL/title summaries and is removed on
 normal exit; a crash can leave it in the OS temporary directory. If
-a workspace snapshot cannot be decoded, the open fails visibly and the previous
+a requested recent-history or workspace snapshot cannot be decoded, the open fails visibly and the previous
 project stays active. History corruption encountered later is reported in the
 history view. The project does not
 include the local TLS CA certificate or private key.

@@ -121,11 +121,12 @@ impl PerseidApp {
     }
 
     pub(super) fn select_id(&mut self, id: u64) {
-        if let Some(page) = &self.http_table.page
-            && let Some(index) = page.rows.iter().position(|row| row.item.id == id)
-        {
-            self.http_table.selected_index = Some(page.offset + index);
-        }
+        self.http_table.selected_index = self.http_table.page.as_ref().and_then(|page| {
+            page.rows
+                .iter()
+                .position(|row| row.item.id == id)
+                .map(|index| page.offset + index)
+        });
         if self.selected != Some(id) {
             self.selected = Some(id);
             self.detail = None;
@@ -134,11 +135,12 @@ impl PerseidApp {
     }
 
     pub(super) fn select_websocket_id(&mut self, id: u64) {
-        if let Some(page) = &self.ws_table.page
-            && let Some(index) = page.rows.iter().position(|row| row.id == id)
-        {
-            self.ws_table.selected_index = Some(page.offset + index);
-        }
+        self.ws_table.selected_index = self.ws_table.page.as_ref().and_then(|page| {
+            page.rows
+                .iter()
+                .position(|row| row.id == id)
+                .map(|index| page.offset + index)
+        });
         if self.websocket_selected != Some(id) {
             self.websocket_selected = Some(id);
             self.websocket_detail = None;

@@ -63,7 +63,9 @@ public interface just to work around a local port conflict.
 5. Check dropped-event counters, storage errors, and automatic-deletion counts
    in the status bar. UI-cache eviction never hides stored history. Temporary
    projects delete old records only when `--temporary-retention-*` is explicitly
-   configured; both limits default to unlimited.
+   configured; both limits default to unlimited. These are soft limits: each
+   stream's newest record and in-flight HTTP exchanges are always kept. `0`
+   disables a dimension; the byte budget excludes headers and indexes.
 6. In **Target > Site map**, check the display filter. By default Perseid hides
    not-found items, CSS, images, general binary content, 4xx responses, and
    empty folders. Click the filter bar and choose **Show all items** (or relax

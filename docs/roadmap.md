@@ -14,8 +14,8 @@ milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
 Decoder, Comparer, WebSocket capture/history, and the first local
 project-persistence workflow are available. Search scans all stored HTTP and
 WebSocket history as well as current Repeater and Intruder results. The remaining
-M4 follow-ups include a full-store WebSocket table view and
-recent-project workflow polish. Normal quit now protects unsaved work and
+M4 follow-ups include recent-project workflow polish. Unified HTTP/WebSocket
+tables now navigate all retained captures with lazy details. Normal quit protects unsaved work and
 acknowledges saved workspace commits; crash recovery remains M5 work.
 Stored HTTP paging, lazy details/notes,
 saved-project logical retention, atomic v1→v2 migration, and a full-store site map
@@ -115,9 +115,11 @@ promise.
   ([#57](https://github.com/andyintheshell/perseid/issues/57)), application settings
   and opt-in tool-state persistence ([#58](https://github.com/andyintheshell/perseid/issues/58)),
   site map annotations ([#59](https://github.com/andyintheshell/perseid/issues/59)),
-  full-store WebSocket paging/lazy details ([#150](https://github.com/andyintheshell/perseid/issues/150)),
   and a recent-project list without automatic reopening
-  ([#152](https://github.com/andyintheshell/perseid/issues/152)).
+   ([#152](https://github.com/andyintheshell/perseid/issues/152)).
+
+  **Completed history follow-up (#150):** unified HTTP/WebSocket tables cover
+  all retained captures with bounded metadata windows and lazy details.
 
   **Completed Decoder follow-up (#60):** binary-preserving Hex transfers,
   Hex-panel selection-aware transforms, and byte-offset selection persistence.

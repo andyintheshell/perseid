@@ -29,14 +29,14 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 - Oldest-first aggregate retention by combined HTTP/WebSocket count and retained body/payload bytes. Temporary limits default to unlimited and can be overridden with `--temporary-retention-*`, independently of UI-cache limits. Saved limits default to unlimited and are configurable under **Settings > Automatic deletion…**; Apply atomically updates the policy and prunes eligible records. The policy survives reopen/copy. Each stream's newest record and in-flight HTTP exchanges are kept even over budget; `0` disables a dimension. Headers, indexes, and workbench data are excluded. Caches reconcile pruned IDs asynchronously.
 - **Physical storage:** retention does not cap the database file. redb reuses freed pages without necessarily shrinking it; there is no automatic compaction. Save Copy writes retained tables to a fresh file and may reduce size. Project files are unencrypted; Clear history, retention, and filesystem deletion are not secure erasure.
 - **Deletion:** Clear history deletes captures (and HTTP Inspector notes), leaving independent tool snapshots. Discard temporary work by leaving it unsaved; delete a closed saved `.perseid` file and any copies/backups using the filesystem. No dedicated whole-project deletion UI is needed; see the Burp parity note below.
-- A corrupt requested snapshot fails with a contextual error instead of substituting empty state. Desktop open requests no body snapshot; corrupt history encountered during lazy reads is reported in the history view, while workspace corruption still fails open.
+- A corrupt requested snapshot fails with a contextual error instead of substituting empty state. Desktop open loads only the configured bounded recent caches, not the full history. Corruption in those snapshots or workspace state fails open; corruption encountered in older history during lazy reads is reported in the history view.
 
 ### 0.2 Deviations from the proposal
 
 | Proposal | Implemented | Why |
 | --- | --- | --- |
 | §9.2 ordered delta replay during Save As | The single writer copies a consistent read snapshot to a new `initializing` file, marks it ready, then switches to it. Capture events queued during the copy are processed by that writer after the switch; queue overflow is reported as capture loss. | No separate delta log is used. Single-writer ordering handles normal handover while retaining the proposed file format and service boundary. |
-| Paged UI over `list_http`/`list_ws` (§7.1) | Unified HTTP/WebSocket history tables use asynchronous windows of at most 1,000 metadata rows and lazy selected details over RAM or disk. Filtering precedes pagination; scans are bounded by their initial newest time key. Search scans retained bodies. The site map uses a disposable disk-backed summary index. | Old records remain reachable after cache eviction. Exact filtered counts scan all metadata; legacy HTTP rows without summaries transiently load bodies. |
+| Paged UI over `list_http`/`list_ws` (§7.1) | Unified HTTP/WebSocket history tables use asynchronous windows of at most 1,000 metadata rows and lazy selected details over RAM or disk. Filtering precedes pagination; scans are bounded by their initial newest time key. Search scans all retained HTTP/WebSocket records, including headers, bodies, and payloads. The site map uses a disposable disk-backed summary index. | Old records remain reachable after cache eviction. Exact filtered counts scan all metadata; legacy HTTP rows without summaries transiently load bodies. |
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
 | §7.2 separately versioned workspace component keys | One `workspace/v1` JSON document holds all project-scoped workbench state, stored inline up to 32 MiB or split into 8 MiB chunks in the same `workspace` table with a manifest. Reads are capped at 512 MiB. | A single atomic snapshot keeps cross-tool state consistent; chunking handles result bodies without a schema change. |
 | §7.2 persist logical inputs and regenerate derived results | Intruder results store response heads/bodies and rebuild their detail views; Comparer diffs and Sequencer analysis are recomputed on open. Repeater's last response is stored as its Pretty/Raw/Hex views because the tab does not retain the raw body. | Intruder and Repeater responses are already bounded by the UI; storing views preserves the visible result without adding a second body store. |
@@ -47,7 +47,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 
 - Storage tests live with the modules they cover (`project::service` has the lifecycle tests; `codec`, `records` and `schema` have round-trip/version tests). They cover: capture round-trip and flush, Save As then reopen, Save Copy independence, exclusive destination refusal without explicit consent, staged overwrite of an existing file, invalid/incomplete/newer-schema files, in-flight repair on open, clear-history persistence, legacy and complete workspace round-trips (including result bodies and view state), app-level workspace wiring, chunked workspace replacement/readback, and ID monotonicity across clears.
 - Additional regression coverage: multi-page timestamp ties with concurrent captures, lazy binary details, old-row tool sends/notes, stale reader results after switches, saved retention across reopen/copy, transactional retention rollback, legacy HTTP/WebSocket fixtures, malformed/missing/future/interrupted schema failures, and failed opens preserving the listener/workspace.
-- Follow-ups: full-store WebSocket table views, recent projects, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls. Normal quit protection is implemented.
+- Follow-ups: recent projects, broader crash/scale/integrity tests, and physical disk-capacity/compaction controls. Full-store HTTP/WebSocket tables and normal quit protection are implemented.
 
 ### Full-store site-map index (#151)
 
@@ -796,7 +796,7 @@ The links above point to current `main` for readable source paths; this snapshot
 
 This was the target for the first persistence implementation. Stored HTTP
 paging, the full-store site map, and Search now navigate retained history without
-hydrating it all. The live HTTP/WebSocket tables still show bounded snapshots.
+hydrating it all. Unified HTTP/WebSocket tables use bounded metadata windows and lazy details.
 See §0 for the shipped subset and deviations.
 
 The initial project-storage implementation is ready to release when a user can:

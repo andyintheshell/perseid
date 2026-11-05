@@ -544,7 +544,11 @@ impl PerseidApp {
             decoder: decoder::DecoderState::new(),
             comparer: comparer::ComparerState::new(),
             sequencer: sequencer::SequencerState::new(),
-            project: project_ui::ProjectUi::new(0, 0, temporary_retention),
+            project: project_ui::ProjectUi::new(
+                args.history_limit,
+                args.history_bytes,
+                temporary_retention,
+            ),
             project_baseline_workspace: WorkspaceState::default(),
             site_map: None,
             site_map_ui: target::SiteMapUi::new(),
@@ -858,8 +862,7 @@ mod tests {
 
     #[test]
     fn temporary_retention_is_independent_of_cache_limits() {
-        // The UI caches clamp zero to one, so the default retention limits do
-        // the same instead of silently disabling retention.
+        // Even minimal recent caches leave project retention unlimited.
         let args = Args::parse_from(["perseid", "--history-limit", "0", "--history-bytes", "0"]);
         assert_eq!(configured_retention(&args), RetentionLimits::new(0, 0));
     }

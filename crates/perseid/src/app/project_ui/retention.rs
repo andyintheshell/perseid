@@ -20,9 +20,9 @@ impl PerseidApp {
         {
             match sweep.receiver.try_recv() {
                 Ok(Ok((http, ws))) => {
-                    self.http_table.invalidate();
+                    self.http_table.mark_stale();
                     self.http_table.invalidate_detail();
-                    self.ws_table.invalidate();
+                    self.ws_table.mark_stale();
                     self.ws_table.invalidate_detail();
                     self.history.remove_stored(&http);
                     self.websocket_history.remove_stored(&ws);
@@ -35,7 +35,7 @@ impl PerseidApp {
                         self.websocket_detail = None;
                     }
                     self.project.retention_seen = (sweep.generation, sweep.evictions);
-                    self.invalidate_views();
+                    self.site_map = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     self.project.retention_sweep = Some(sweep);

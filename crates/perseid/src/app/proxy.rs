@@ -325,11 +325,9 @@ impl PerseidApp {
                         let index = row.index();
                         first_visible.get_or_insert(index);
                         let item = if self.ws_table.active {
-                            self.ws_table.row(index).cloned()
+                            self.ws_table.row(index)
                         } else {
-                            self.websocket_history
-                                .get(self.websocket_visible[index])
-                                .cloned()
+                            self.websocket_history.get(self.websocket_visible[index])
                         };
                         let Some(item) = item else {
                             for _ in 0..8 {
@@ -820,7 +818,22 @@ impl PerseidApp {
                         } else {
                             url
                         };
-                        let full_item = self.selected_http_item(id).cloned();
+                        let full_item = self.selected_http_item(id);
+                        let request_unavailable = if item.is_tunnel() {
+                            "CONNECT tunnels do not contain an HTTP request"
+                        } else {
+                            "Loading the exchange…"
+                        };
+                        let response_unavailable = if full_item.is_none() {
+                            "Loading the exchange…"
+                        } else {
+                            "The highlighted exchange has no response"
+                        };
+                        let capture_unavailable = if full_item.is_none() {
+                            response_unavailable
+                        } else {
+                            "Wait for a response before extracting tokens"
+                        };
                         let can_send = !item.is_tunnel() && full_item.is_some();
                         let has_response = item.response.is_some() && full_item.is_some();
                         let can_capture = has_response && !item.is_in_flight();
@@ -868,9 +881,7 @@ impl PerseidApp {
                                 .on_hover_text(
                                     "Open the highlighted request in the Intruder workspace",
                                 )
-                                .on_disabled_hover_text(
-                                    "CONNECT tunnels do not contain an HTTP request",
-                                )
+                                .on_disabled_hover_text(request_unavailable)
                                 .clicked()
                             {
                                 action = Some(HistoryRowAction::Intruder);
@@ -881,9 +892,7 @@ impl PerseidApp {
                                 .on_hover_text(
                                     "Replay the highlighted request in an editable Repeater tab",
                                 )
-                                .on_disabled_hover_text(
-                                    "CONNECT tunnels do not contain an HTTP request",
-                                )
+                                .on_disabled_hover_text(request_unavailable)
                                 .clicked()
                             {
                                 action = Some(HistoryRowAction::Repeater);
@@ -894,9 +903,7 @@ impl PerseidApp {
                                 .on_hover_text(
                                     "Extract response tokens with the Sequencer capture regex",
                                 )
-                                .on_disabled_hover_text(
-                                    "Wait for a response before extracting tokens",
-                                )
+                                .on_disabled_hover_text(capture_unavailable)
                                 .clicked()
                             {
                                 action = Some(HistoryRowAction::Sequencer);
@@ -908,9 +915,7 @@ impl PerseidApp {
                                     egui::Button::new("Send to Comparer (request)"),
                                 )
                                 .on_hover_text("Add the highlighted request to Comparer item 1")
-                                .on_disabled_hover_text(
-                                    "CONNECT tunnels do not contain an HTTP request",
-                                )
+                                .on_disabled_hover_text(request_unavailable)
                                 .clicked()
                             {
                                 action = Some(HistoryRowAction::ComparerRequest);
@@ -922,7 +927,7 @@ impl PerseidApp {
                                     egui::Button::new("Send to Comparer (response)"),
                                 )
                                 .on_hover_text("Add the highlighted response to Comparer item 2")
-                                .on_disabled_hover_text("The highlighted exchange has no response")
+                                .on_disabled_hover_text(response_unavailable)
                                 .clicked()
                             {
                                 action = Some(HistoryRowAction::ComparerResponse);
@@ -930,7 +935,7 @@ impl PerseidApp {
                             }
                             ui.add_enabled_ui(can_send, |ui| {
                                 ui.menu_button("Send to Decoder (request)", |ui| {
-                                    if let Some(bytes) = full_item.as_ref().and_then(|item| view::captured_message_bytes(item, false)) {
+                                    if let Some(bytes) = full_item.and_then(|item| view::captured_message_bytes(item, false)) {
                                         super::message_view::decoder_send_menu(
                                             ui,
                                             &bytes,
@@ -941,7 +946,7 @@ impl PerseidApp {
                             });
                             ui.add_enabled_ui(has_response, |ui| {
                                 ui.menu_button("Send to Decoder (response)", |ui| {
-                                    if let Some(bytes) = full_item.as_ref().and_then(|item| view::captured_message_bytes(item, true)) {
+                                    if let Some(bytes) = full_item.and_then(|item| view::captured_message_bytes(item, true)) {
                                         super::message_view::decoder_send_menu(
                                             ui,
                                             &bytes,
@@ -985,7 +990,7 @@ impl PerseidApp {
                                 ui.ctx().copy_text(request_url(item));
                                 ui.close();
                             }
-                            if let Some(item) = &full_item { super::curl::context_menu(ui, item); }
+                            if let Some(item) = full_item { super::curl::context_menu(ui, item); }
                         });
                     });
                 });

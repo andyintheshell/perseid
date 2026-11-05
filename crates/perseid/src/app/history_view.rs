@@ -104,6 +104,13 @@ impl<T, D> HistoryTable<T, D> {
         self.detail_requested = None;
     }
 
+    pub fn mark_stale(&mut self) {
+        // Keep the installed window and any pending read during retention.
+        // A completed older read is followed by another refresh.
+        self.refresh = true;
+        self.selected_index = None;
+    }
+
     fn poll(&mut self) {
         if let Some(receiver) = self.pending.take() {
             match receiver.try_recv() {
@@ -496,6 +503,10 @@ mod tests {
         }
         settle(&mut app);
         assert_eq!(app.http_table.total(), 150);
+        app.http_table.selected_index = Some(149);
+        app.select_id(9999);
+        assert_eq!(app.http_table.selected_index, None);
+        app.selected = None;
         app.move_selection(1);
         settle(&mut app);
         assert_eq!(app.selected, Some(1));
@@ -590,6 +601,10 @@ mod tests {
         }
         settle(&mut app);
         assert_eq!(app.ws_table.total(), 150);
+        app.ws_table.selected_index = Some(149);
+        app.select_websocket_id(9999);
+        assert_eq!(app.ws_table.selected_index, None);
+        app.websocket_selected = None;
         app.move_websocket_selection(1);
         settle(&mut app);
         assert_eq!(app.websocket_selected, Some(1));
@@ -606,6 +621,27 @@ mod tests {
         assert!(app.websocket_selected.is_none());
         drop(app);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn retention_refresh_preserves_window_and_pending_read() {
+        let mut table = HistoryTable::<u64, Vec<u8>>::default();
+        table.activate(1);
+        table.page = Some(page(0, 3));
+        table.refresh = false;
+        let (sender, receiver) = mpsc::channel();
+        table.pending = Some(receiver);
+        table.mark_stale();
+        assert_eq!(table.row(2), Some(&2));
+        assert!(!table.cancel.load(Ordering::Relaxed));
+        assert!(table.pending.is_some());
+        sender.send(Ok(page(0, 4))).unwrap();
+        table.poll();
+        assert_eq!(table.total(), 4);
+        assert!(
+            table.needs_page(),
+            "a sweep during an older read must schedule another refresh"
+        );
     }
 
     #[test]

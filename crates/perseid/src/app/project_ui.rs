@@ -2836,6 +2836,7 @@ pub(super) mod tests {
         assert_eq!(app.current_project_path(), Some(path.clone()));
         assert!(app.scope.is_empty());
         assert_eq!(app.history.len(), 1);
+        assert!(!super::super::util::captured_hosts(&app.history).is_empty());
         assert!(app.proxy.as_ref().unwrap().is_running());
         app.shutdown_project();
         drop(app);

@@ -229,7 +229,11 @@ impl HistoryFilter {
             item,
             scope,
             search,
-            site_map::request_parameter_count(&item.request, &item.request_body).count,
+            if self.enabled && self.parameterized_only {
+                site_map::request_parameter_count(&item.request, &item.request_body).count
+            } else {
+                0
+            },
         )
     }
 

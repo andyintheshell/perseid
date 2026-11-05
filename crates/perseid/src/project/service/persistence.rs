@@ -160,11 +160,14 @@ pub(super) fn apply_capture_batch(
                             }
                         }
                         let response = match &end.result {
-                            ExchangeResult::Response { body } => body.data().to_vec(),
-                            _ => Vec::new(),
+                            ExchangeResult::Response { body } => Some(body),
+                            _ => None,
                         };
-                        record.summary = Some(super::super::history::HttpSummary::from_item(
-                            &record.to_history_item(end.request_body.data().to_vec(), response),
+                        record.summary = Some(super::super::history::HttpSummary::from_parts(
+                            &record.request,
+                            &end.request_body,
+                            record.response.as_ref(),
+                            response,
                         ));
                         http.insert(*id, codec::encode(&record)?.as_slice())?;
                         in_flight.remove(*id)?;
