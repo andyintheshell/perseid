@@ -38,7 +38,7 @@ jobs:
         run: |
           ffmpeg -version
           ffmpeg -hide_banner -devices 2>&1 | grep -F 'x11grab'
-          ffmpeg -hide_banner -encoders 2>&1 | grep -F 'libx264'
+          ffmpeg -hide_banner -encoders 2>&1 | grep -F 'libx264rgb'
           img2webp -version
           webpinfo -version
 
@@ -62,8 +62,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload diagnostic recording and logs on failure
-        if: failure()
+      - name: Upload source recording and logs for review
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perseid-demo-diagnostics

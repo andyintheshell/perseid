@@ -82,7 +82,7 @@ ffmpeg -hide_banner -loglevel error -y -f x11grab -framerate 1 \
 [[ -s "$out/x11-startup.png" ]] || { echo 'X11 startup capture is empty.' >&2; exit 1; }
 
 ffmpeg -hide_banner -loglevel error -y -f x11grab -framerate 30 -video_size 1600x1024 \
-    -draw_mouse 1 -i "${DISPLAY}+0,0" -c:v libx264 -preset ultrafast -crf 18 \
+    -draw_mouse 1 -i "${DISPLAY}+0,0" -c:v libx264rgb -preset ultrafast -crf 0 \
     "$out/demo-recording.mp4" >"$out/recording.log" 2>&1 &
 record_pid=$!
 sleep 2
@@ -130,10 +130,10 @@ tab_y=63
 row_2=245
 row_3=272
 row_5=326
-menu_repeater=25
-menu_intruder=58
-menu_response_decoder=130
-menu_response_comparer=213
+menu_repeater=131
+menu_intruder=96
+menu_response_decoder=305
+menu_response_comparer=236
 # A submenu starts level with its parent menu item. Both use the same 24 px
 # button height and 4 px spacing, so the second item is 35 px below it.
 submenu_second_item=35
@@ -161,9 +161,10 @@ open_history_menu "$row_5"
 click_at 550 $((row_5 + menu_repeater)) 1
 sleep 1.3
 
-click_at 225 256 1
+# Focus the inline request editor (there is no separate preserved-body panel).
+click_at 225 300 1
 sleep 0.8
-xdotool key --clearmodifiers Home
+xdotool key --clearmodifiers ctrl+Home
 for _ in {1..21}; do
     xdotool key --clearmodifiers Right
     sleep 0.02
@@ -216,7 +217,7 @@ sleep 0.9
 open_history_menu "$row_2"
 click_at 550 $((row_2 + menu_response_decoder)) 1
 sleep 0.8
-click_at 780 $((row_2 + menu_response_decoder + submenu_second_item)) 1
+click_at 900 $((row_2 + menu_response_decoder + submenu_second_item)) 1
 sleep 1.5
 
 click_at 500 200 1
@@ -290,17 +291,20 @@ kill -INT "$record_pid"
 wait "$record_pid" || true
 record_pid=''
 [[ -s "$out/demo-recording.mp4" ]] || { echo 'Recording is empty.' >&2; exit 1; }
-# Encode an animated WebP straight from the recording. GIF quantization was
-# the main source of size and dithering; WebP keeps text sharp at roughly half
-# the bytes. The intermediate JPEG frames are high quality and let img2webp
-# drop unchanged regions while preserving the pointer and UI text.
+# Keep the RGB capture, intermediate PNGs, and WebP encoding lossless. Lossy
+# JPEG/WebP encoding leaves block noise and stale delta-frame patches in light
+# editor backgrounds, especially after switching tools. Downscale only once.
 mkdir -p "$work/frames"
 ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" \
-    -vf 'fps=12,scale=1280:820:flags=lanczos' -q:v 2 \
-    "$work/frames/frame-%05d.jpg"
-img2webp -loop 0 -mixed -d 83 -q 65 -m 6 -sharp_yuv \
-    -o "$out/perseid-demo.webp" "$work/frames"/frame-*.jpg
+    -vf 'fps=12,scale=1280:820:flags=lanczos' \
+    "$work/frames/frame-%05d.png"
+img2webp -loop 0 -lossless -d 83 -q 100 -m 6 \
+    -o "$out/perseid-demo.webp" "$work/frames"/frame-*.png
 [[ -s "$out/perseid-demo.webp" ]] || { echo 'WebP is empty.' >&2; exit 1; }
+if webpinfo -summary "$out/perseid-demo.webp" | grep 'Format: Lossy' >/dev/null; then
+    echo 'Demo WebP must use only lossless frames to avoid background artifacts.' >&2
+    exit 1
+fi
 dimensions="$(webpinfo -summary "$out/perseid-demo.webp" | awk '/Canvas size/ { print $3 "x" $5; exit }')"
 if [[ "$dimensions" != '1280x820' ]]; then
     echo "Demo WebP must be 1280x820 (got ${dimensions:-unknown})." >&2

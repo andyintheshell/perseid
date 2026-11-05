@@ -181,18 +181,22 @@ records a real desktop session under Xvfb. The
 [storyboard](demo-gif-script.md) is aimed at first-time users: it follows one
 captured export through Repeater, Intruder, Decoder, and Comparer, using the
 synthetic target's base64 responses. The pointer travels between controls
-instead of jumping. The capture is downscaled to 1280×820 at 12 fps and encoded
-as an animated WebP with `img2webp`; the workflow keeps it under two minutes and
-2.5 MB so it stays practical for the README. Before publishing, the workflow
+instead of jumping. Lossless RGB capture and PNG intermediates avoid compression
+noise before downscaling to 1280×820 at 12 fps. The animation is encoded with
+`img2webp` in lossless mode to prevent patchy backgrounds and ghosting from lossy
+delta frames; the workflow rejects lossy WebP frames and keeps it under two
+minutes and 2.5 MB so it stays practical for the README. Before publishing, the workflow
 verifies that the edited Repeater and Intruder requests reached the local
 target.
 
 The current approved recording is checked in as
 [`images/perseid-demo.webp`](images/perseid-demo.webp) (1280×820, about 87
-seconds, 1.6 MB) and used as the [project README](../README.md) hero image. To
+seconds, 2.2 MB) and used as the [project README](../README.md) hero image. To
 update it, run the workflow manually, download `perseid-demo-webp` from the
 run, review it, and replace that file. The artifact expires after 30 days.
-Failed runs upload diagnostic logs and the partial recording for seven days.
+The workflow uploads available source recordings and diagnostic logs for seven
+days so successful runs can be reviewed too. Failed runs may contain only a
+partial recording, or no artifacts if they fail before recording starts.
 All traffic and values in this workflow are synthetic; the workflow does not
 use local files or data from your machine. Animated WebP is supported by
 current Chrome, Firefox, Safari, and Edge, and renders in GitHub Markdown.
