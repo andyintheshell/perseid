@@ -113,7 +113,7 @@ therefore works when the proxy is stopped and avoids re-entering interception,
 match/replace, or scope policy. Responses are captured with the same byte limit
 as proxy traffic and delivered to the UI over a channel.
 
-Intruder sits on that same direct client. Its engine parses `$$` positions once,
+Intruder sits on that same direct client. Its engine parses `§` positions once,
 renders each attack sequence lazily, and keeps at most the configured number of
 requests in flight. Sniper, Battering ram, Pitchfork, and Cluster bomb differ
 only in how payload indices map to positions; rendering then substitutes those
@@ -191,7 +191,7 @@ effective-entropy result window with per-analysis settings. **Comparer** is a
 real two-item diff workspace: one shared item collection, word/byte comparison,
 and paired Text/Hex result panes.
 **Intruder** is a real fuzzing workspace:
-an editable raw request with `$$` position highlighting, Add/Clear/Auto marker
+an editable raw request with `§` position highlighting, Add/Clear/Auto marker
 actions, one payload set per relevant position, all four Burp attack types, a
 target bar with optional `Host` synchronization, bounded concurrency, and a
 result table with request/response inspection. **Repeater** is a real editor

@@ -118,7 +118,7 @@ fn request_text(
                 .code_editor()
                 .desired_width(f32::INFINITY)
                 .min_size(egui::vec2(0.0, min_height))
-                .hint_text("Paste or edit a raw HTTP request, then wrap values in $$")
+                .hint_text("Paste or edit a raw HTTP request, then wrap values in §")
                 .layouter(&mut layouter)
                 .show(ui);
             if show_invisibles {
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn searching_and_wrapping_preserve_intruder_markers_and_unicode() {
         let ctx = egui::Context::default();
-        let original = format!("POST / HTTP/1.1\r\n\r\n$$é中文$$ {}needle", "x".repeat(200));
+        let original = format!("POST / HTTP/1.1\r\n\r\n§é中文§ {}needle", "x".repeat(200));
         let mut text = original.clone();
         let mut search = message_view::MessageSearch::default();
         search.query = "中文".into();

@@ -178,7 +178,7 @@ move_cursor 1180 470
 sleep 2.2
 
 # Back to history, then run a three-payload Intruder attack against the export
-# endpoint. Auto $$ marks only the query value.
+# endpoint. Auto § marks only the query value.
 click_at "$proxy_tab_x" "$tab_y" 1
 sleep 1.0
 click_at 438 "$row_3" 1

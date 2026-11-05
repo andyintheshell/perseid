@@ -90,6 +90,39 @@ fn item(host: &str, body: Vec<u8>, encoding: Option<&str>, content_type: &str) -
 }
 
 #[test]
+fn captured_head_markers_are_rejected_without_replacing_the_draft() {
+    for literal in ["§", "§value§"] {
+        for in_header in [false, true] {
+            let mut capture = item("example.com", b"body".to_vec(), None, "text/plain");
+            if in_header {
+                capture
+                    .request
+                    .headers
+                    .push(("X-Literal".into(), literal.into()));
+            } else {
+                capture.request.path = format!("/?q={literal}");
+                capture.request.uri = format!("http://example.com/?q={literal}");
+            }
+            let mut app = PerseidApp::test_app();
+            let before = serde_json::to_value(app.intruder_workspace()).unwrap();
+            app.send_history_to_intruder(&capture);
+            let error = app.intruder.error.as_deref().unwrap();
+            assert!(error.contains("captured request line or headers contain literal §"));
+            assert!(error.contains("Use Repeater"));
+            assert!(matches!(app.main_tab, MainTab::Intruder));
+            assert!(app.intruder_engine.is_none());
+            let mut after = serde_json::to_value(app.intruder_workspace()).unwrap();
+            after["error"] = before["error"].clone();
+            assert_eq!(after, before);
+            assert!(crate::view::replay_request_head(&capture).contains(literal));
+            // Repeater does not interpret payload markers and remains usable.
+            app.send_history_to_repeater(&capture);
+            assert!(app.repeater_workspace()[0].request.contains(literal));
+        }
+    }
+}
+
+#[test]
 fn captured_bodies_round_trip_both_tools_and_workspace_json() {
     let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gzip.write_all(b"a=1\r\n").unwrap();
@@ -97,6 +130,7 @@ fn captured_bodies_round_trip_both_tools_and_workspace_json() {
         (b"a=1".to_vec(), None, "application/x-www-form-urlencoded"),
         (b"a=1\r\n".to_vec(), None, "text/plain"),
         (b"literal $$value$$".to_vec(), None, "text/plain"),
+        ("literal §value§ and §".as_bytes().to_vec(), None, "text/plain"),
         (vec![0, 255, 128, 13, 10], None, "application/octet-stream"),
         (gzip.finish().unwrap(), Some("gzip"), "text/plain"),
         (b"--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\n\r\n\0\xff\r\n--boundary--\r\n".to_vec(), None, "multipart/form-data; boundary=boundary"),
@@ -110,7 +144,7 @@ fn captured_bodies_round_trip_both_tools_and_workspace_json() {
             app.scope_enforce = false;
             if intruder {
                 app.send_history_to_intruder(&capture);
-                app.intruder.request = app.intruder.request.replace("q=base", "q=$$base$$");
+                app.intruder.request = app.intruder.request.replace("q=base", "q=§base§");
                 app.intruder.payload_sets[0].text = "base".into();
                 let saved = serde_json::to_vec(&app.intruder_workspace()).unwrap();
                 app.apply_intruder_workspace(&serde_json::from_slice(&saved).unwrap());
@@ -293,12 +327,15 @@ fn legacy_binary_and_conflicting_drafts_restore_without_losing_user_bytes() {
 }
 
 #[test]
-fn captured_single_dollars_survive_adjacent_positions_and_workspace_restore() {
+fn captured_literal_signs_survive_adjacent_positions_and_workspace_restore() {
     for legacy in [false, true] {
         for (body, expected) in [
             ("price=$5", "price=$9"),
             ("price=5$", "price=9$"),
             ("price=$5$", "price=$9$"),
+            ("price=§5", "price=§9"),
+            ("price=5§", "price=9§"),
+            ("price=§5§", "price=§9§"),
         ] {
             let (host, received, task) = receiver();
             let capture = item(&host, body.as_bytes().to_vec(), None, "text/plain");
@@ -314,9 +351,14 @@ fn captured_single_dollars_survive_adjacent_positions_and_workspace_restore() {
                 saved.body_escaped = false;
                 app.apply_intruder_workspace(&saved);
             }
-            assert!(app.intruder.body_escaped);
+            assert_eq!(app.intruder.body_escaped, body.contains('§'));
             assert_eq!(
-                crate::app::replay_body::bytes(&app.intruder.request, true, false).unwrap(),
+                crate::app::replay_body::bytes(
+                    &app.intruder.request,
+                    app.intruder.body_escaped,
+                    false,
+                )
+                .unwrap(),
                 body.as_bytes()
             );
             let start = app.intruder.request.rfind('5').unwrap();
@@ -358,7 +400,7 @@ fn binary_body_edits_and_payloads_survive_workspace_restore_and_real_sends() {
                     .len(),
                 0
             );
-            app.intruder.request = app.intruder.request.replace("\\xFF", "$$\\xFF$$");
+            app.intruder.request = app.intruder.request.replace("\\xFF", "§\\xFF§");
             app.intruder.payload_sets[0].text = "é\\x00$$".into();
             let saved = serde_json::to_vec(&app.intruder_workspace()).unwrap();
             app.apply_intruder_workspace(&serde_json::from_slice(&saved).unwrap());
@@ -395,7 +437,7 @@ fn captured_text_can_be_edited_and_sent_in_both_tools() {
         if intruder {
             app.send_history_to_intruder(&capture);
             assert!(!app.intruder.body_escaped);
-            app.intruder.request = app.intruder.request.replace("a=original", "a=$$original$$");
+            app.intruder.request = app.intruder.request.replace("a=original", "a=§original§");
             app.intruder.payload_sets[0].text = "edited".into();
             let saved = app.intruder_workspace();
             app.apply_intruder_workspace(&saved);

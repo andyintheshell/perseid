@@ -53,7 +53,7 @@ browser required.**
 | **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
 | **WebSocket history** | Capture and inspect text and binary frames for `ws://` and decrypted `wss://` connections; no message editing or replay yet. |
 | **Repeater** | Editable HTTP/HTTPS requests, multiple tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
-| **Intruder** | `$$` payload positions, editable payload sets, Sniper, Battering ram, Pitchfork, and Cluster bomb modes, bounded concurrency, and response inspection. |
+| **Intruder** | `§` payload positions, editable payload sets, Sniper, Battering ram, Pitchfork, and Cluster bomb modes, bounded concurrency, and response inspection. |
 | **Decoder** | Stacked encoding/decoding panels, selection-aware transforms, Smart decode, and 31 common hashes. |
 | **Comparer** | Text and hex comparison, word- and byte-level diffs, synchronized scrolling, and inputs from history, files, or the clipboard. |
 | **Sequencer** | Manual and live token sampling with character- and bit-level randomness tests, effective-entropy estimates, and per-analysis settings. |

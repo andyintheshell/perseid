@@ -13,7 +13,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | --- | --- |
 | **Target** | A Burp-style site map derived from history, a shared scope list, and an explicit empty scanner-issues view. |
 | **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
-| **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
+| **Intruder** | Editable requests with `§` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests and messages on live WebSocket connections. |
 | **Sequencer** | Token sampling and character- or bit-level randomness analysis. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
@@ -516,10 +516,10 @@ Proxy history.
 1. Right-click a history exchange and choose **Send to Intruder**, or open
    Intruder and paste or edit a raw request. Review the **Target** scheme and
    host.
-2. Wrap each value to fuzz in `$$`, for example
-   `GET /product?id=$$1$$ HTTP/1.1`. Select text and click **Add $$** to wrap it,
-   or place the cursor and use **Add $$** for an empty position (`$$$$`).
-   **Clear $$** removes every marker. **Auto $$** marks query values,
+2. Wrap each value to fuzz in `§`, for example
+   `GET /product?id=§1§ HTTP/1.1`. Select text and click **Add §** to wrap it,
+   or place the cursor and use **Add §** for an empty position (`§§`).
+   **Clear §** removes every marker. **Auto §** marks query values,
    `application/x-www-form-urlencoded` body values, and cookie values.
 3. Edit the payload list on the right, one value per line. **Load from file**
    appends a UTF-8 text file (up to 16 MiB) to the selected set. Blank lines are
@@ -539,11 +539,15 @@ Proxy history.
    a finished attack, elapsed time.
 
 Markers are literal delimiters, not part of the request: they are removed when
-the request is generated. An unclosed `$$` is an error. Sniper uses the text
+the request is generated. An unclosed `§` is an error. Sniper uses the text
 inside each marker as that position's base value. The other attack types replace
 every marked position.
 
-`$$` can appear anywhere in the request, including headers and bodies. Keep the
+Captured request lines or headers containing literal `§` are rejected on import
+into Intruder, leaving the current draft unchanged; use Repeater to replay them
+without interpreting those characters as positions.
+
+`§` can appear anywhere in the request, including headers and bodies. Keep the
 **Update Host header** option on when the target bar changes so the request stays
 consistent; turning it off allows virtual-host testing.
 
@@ -589,8 +593,8 @@ acknowledgement button. For bodies that are not valid UTF-8, the editor uses
 lossless byte escapes: `\xFF` represents byte FF and `\\` represents a literal
 backslash. The request subtitle identifies this notation. Valid UTF-8 characters
 remain readable. Intruder uses this notation for captured bodies containing
-literal `$` too, displaying dollars as `\x24` so they cannot become payload
-positions or merge with adjacent markers accidentally. You can mark positions
+literal `§` too, displaying section signs as `\xC2\xA7` so they cannot become
+payload positions accidentally. Dollar signs remain literal text. You can mark positions
 in binary bodies as well as text; select whole byte escapes. Payload values
 remain UTF-8 text, not byte-escape
 source. Invalid or unfinished escapes block sending rather than changing bytes.

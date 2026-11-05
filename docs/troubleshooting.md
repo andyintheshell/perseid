@@ -190,8 +190,8 @@ the total project-store size. See
 
 The workspace reports the first validation error above the request editor:
 
-- **No positions or an unclosed marker:** wrap each fuzzed value in `$$`.
-  Select text and click **Add $$**, or use **Auto $$** for common parameters.
+- **No positions or an unclosed marker:** wrap each fuzzed value in `§`.
+  Select text and click **Add §**, or use **Auto §** for common parameters.
 - **A payload set is empty or missing:** Pitchfork and Cluster bomb need one
   non-empty set per position. Sniper and Battering ram use the shared set.
 - **The request count is invalid:** the number of generated requests overflowed
