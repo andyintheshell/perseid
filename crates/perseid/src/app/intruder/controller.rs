@@ -35,6 +35,17 @@ impl PerseidApp {
     }
 
     pub(in crate::app) fn send_history_to_intruder(&mut self, item: &crate::history::HistoryItem) {
+        let head = view::replay_request_head(item);
+        // The head has no reversible byte-escape mode. Reject literal section
+        // signs before replacing the draft or stopping an existing attack.
+        if head.contains(crate::proxy::MARKER) {
+            self.intruder.error = Some(
+                "Cannot import into Intruder: the captured request line or headers contain literal § characters. Use Repeater to replay this request without changing those characters. The current Intruder draft is unchanged."
+                    .into(),
+            );
+            self.main_tab = MainTab::Intruder;
+            return;
+        }
         if self.intruder.running
             && let Some(engine) = &self.intruder_engine
         {
@@ -46,12 +57,8 @@ impl PerseidApp {
         } else {
             item.request.scheme.clone()
         };
-        self.intruder.load_template(
-            scheme,
-            item.request.host.clone(),
-            view::replay_request_head(item),
-            None,
-        );
+        self.intruder
+            .load_template(scheme, item.request.host.clone(), head, None);
         super::super::replay_body::inline(
             Some(&BodyWorkspace::from_body(&item.request_body)),
             &mut self.intruder.request,

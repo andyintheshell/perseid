@@ -90,6 +90,39 @@ fn item(host: &str, body: Vec<u8>, encoding: Option<&str>, content_type: &str) -
 }
 
 #[test]
+fn captured_head_markers_are_rejected_without_replacing_the_draft() {
+    for literal in ["§", "§value§"] {
+        for in_header in [false, true] {
+            let mut capture = item("example.com", b"body".to_vec(), None, "text/plain");
+            if in_header {
+                capture
+                    .request
+                    .headers
+                    .push(("X-Literal".into(), literal.into()));
+            } else {
+                capture.request.path = format!("/?q={literal}");
+                capture.request.uri = format!("http://example.com/?q={literal}");
+            }
+            let mut app = PerseidApp::test_app();
+            let before = serde_json::to_value(app.intruder_workspace()).unwrap();
+            app.send_history_to_intruder(&capture);
+            let error = app.intruder.error.as_deref().unwrap();
+            assert!(error.contains("captured request line or headers contain literal §"));
+            assert!(error.contains("Use Repeater"));
+            assert!(matches!(app.main_tab, MainTab::Intruder));
+            assert!(app.intruder_engine.is_none());
+            let mut after = serde_json::to_value(app.intruder_workspace()).unwrap();
+            after["error"] = before["error"].clone();
+            assert_eq!(after, before);
+            assert!(crate::view::replay_request_head(&capture).contains(literal));
+            // Repeater does not interpret payload markers and remains usable.
+            app.send_history_to_repeater(&capture);
+            assert!(app.repeater_workspace()[0].request.contains(literal));
+        }
+    }
+}
+
+#[test]
 fn captured_bodies_round_trip_both_tools_and_workspace_json() {
     let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gzip.write_all(b"a=1\r\n").unwrap();

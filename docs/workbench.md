@@ -543,6 +543,10 @@ the request is generated. An unclosed `§` is an error. Sniper uses the text
 inside each marker as that position's base value. The other attack types replace
 every marked position.
 
+Captured request lines or headers containing literal `§` are rejected on import
+into Intruder, leaving the current draft unchanged; use Repeater to replay them
+without interpreting those characters as positions.
+
 `§` can appear anywhere in the request, including headers and bodies. Keep the
 **Update Host header** option on when the target bar changes so the request stays
 consistent; turning it off allows virtual-host testing.
