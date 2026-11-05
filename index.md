@@ -1,10 +1,14 @@
 # Perseid screenshot gallery
 
-Generated from `9c25f65d7ce138997cccce2ddf6dc8cdfa84fd41` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/42053444481) (attempt 1).
+Generated from `b5f0a195e30e1de0c823bb3ccd06080e95103507` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/42055024401) (attempt 1).
 
 ## Proxy - HTTP history
 
 ![Proxy - HTTP history](perseid-main.png)
+
+## Proxy - HTTP history context menu
+
+![Proxy - HTTP history context menu](perseid-http-history-context-menu.png)
 
 ## Projects - File menu
 
