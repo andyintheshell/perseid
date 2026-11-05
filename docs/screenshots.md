@@ -192,7 +192,9 @@ The current approved recording is checked in as
 seconds, 1.5 MB) and used as the [project README](../README.md) hero image. To
 update it, run the workflow manually, download `perseid-demo-webp` from the
 run, review it, and replace that file. The artifact expires after 30 days.
-Failed runs upload diagnostic logs and the partial recording for seven days.
+All runs upload source recordings and diagnostic logs for seven days so the
+workflow can be reviewed even after a successful run. Failed runs may only
+contain a partial recording.
 All traffic and values in this workflow are synthetic; the workflow does not
 use local files or data from your machine. Animated WebP is supported by
 current Chrome, Firefox, Safari, and Edge, and renders in GitHub Markdown.
