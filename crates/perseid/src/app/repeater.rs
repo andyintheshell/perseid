@@ -29,8 +29,9 @@ pub(super) struct RepeaterTab {
     title: String,
     scheme: String,
     host: String,
-    /// The full raw request: request line, headers, blank line, body.
+    /// Request line and headers, plus a UTF-8 body only outside preserved mode.
     request: String,
+    preserved_body: Option<crate::project::BodyWorkspace>,
     /// Seed warning, for example when the captured body was truncated.
     note: Option<String>,
     response: Option<RepeaterReply>,
@@ -88,6 +89,23 @@ impl RepeaterTab {
         &self.request
     }
 
+    pub(super) fn request_views(&self) -> MessageViews {
+        let (head, text) = split_raw_request(&self.request);
+        let body = self
+            .preserved_body
+            .as_ref()
+            .map_or(text.as_bytes(), |body| body.data.as_slice());
+        view::editor_views(head, body)
+    }
+
+    pub(super) fn searchable_request(&self) -> std::borrow::Cow<'_, str> {
+        if self.preserved_body.is_some() {
+            self.request_views().raw.into()
+        } else {
+            self.request.as_str().into()
+        }
+    }
+
     pub(super) fn response_raw(&self) -> Option<&str> {
         self.response.as_ref().map(|reply| reply.views.raw.as_str())
     }
@@ -115,6 +133,7 @@ impl RepeaterTab {
             scheme: "https".to_string(),
             host: String::new(),
             request: "GET / HTTP/1.1\nHost: \n\n".to_string(),
+            preserved_body: None,
             note: None,
             response: None,
             pending: None,
@@ -142,19 +161,14 @@ impl RepeaterTab {
         } else {
             item.request.scheme.clone()
         };
-        let note = view::seeded_body_note(&item.request_body, "sending");
-
         Self {
             id,
             title,
             scheme,
             host: item.request.host.clone(),
-            // `request_views` applies the same decoded, bounded representation
-            // as the Proxy detail pane. That keeps the seed readable for
-            // compressed text and avoids copying a huge captured body into the
-            // editor.
-            request: view::request_views(item).raw,
-            note,
+            request: view::replay_request_head(item),
+            preserved_body: Some(crate::project::BodyWorkspace::from_body(&item.request_body)),
+            note: None,
             response: None,
             pending: None,
             pending_since: None,
@@ -803,8 +817,15 @@ impl PerseidApp {
         let raw = tab.request.clone();
         let scheme = tab.scheme.clone();
         let host = tab.host.clone();
-        let (head, body) = split_raw_request(&raw);
-        let request = match RepeaterRequest::parse(head, body.as_bytes().to_vec(), &scheme, &host) {
+        let body = match super::replay_body::bytes(&tab.preserved_body, &raw) {
+            Ok(body) => body,
+            Err(error) => {
+                self.repeater_tabs[index].error = Some(error);
+                return;
+            }
+        };
+        let (head, _) = split_raw_request(&raw);
+        let request = match RepeaterRequest::parse(head, body.to_vec(), &scheme, &host) {
             Ok(request) => request,
             Err(err) => {
                 let tab = &mut self.repeater_tabs[index];
@@ -875,6 +896,7 @@ pub(super) fn parse_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
+    super::replay_body::controls(ui, &mut tab.preserved_body, &mut tab.request);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Request").strong().color(theme::TEXT));
         ui.label(
@@ -1017,6 +1039,7 @@ impl PerseidApp {
                 scheme: tab.scheme.clone(),
                 host: tab.host.clone(),
                 request: tab.request.clone(),
+                preserved_body: tab.preserved_body.clone(),
                 note: tab.note.clone(),
                 response: tab
                     .response
@@ -1049,6 +1072,7 @@ impl PerseidApp {
             tab.scheme = workspace.scheme.clone();
             tab.host = workspace.host.clone();
             tab.request = workspace.request.clone();
+            tab.preserved_body = workspace.preserved_body.clone();
             tab.note = workspace.note.clone();
             tab.response = workspace.response.as_ref().map(|response| RepeaterReply {
                 views: (&response.views).into(),
@@ -1351,7 +1375,7 @@ mod tests {
         assert_eq!(tab.title, "#7 GET /search");
         assert_eq!(tab.scheme, "https");
         assert_eq!(tab.host, "example.com");
-        assert_eq!(tab.request, view::request_views(&item).raw);
+        assert_eq!(tab.request, view::replay_request_head(&item));
         assert!(tab.note.is_none());
     }
 
@@ -1372,12 +1396,13 @@ mod tests {
     }
 
     #[test]
-    fn seeding_from_history_notes_binary_bodies_before_sending() {
+    fn seeding_from_history_preserves_binary_bodies_outside_the_editor() {
         let item = history_item(1, "POST", "/upload", "https", vec![0xff, 0x00]);
         let tab = RepeaterTab::from_history(1, &item);
-        let note = tab.note.expect("binary body needs a note");
-        assert!(note.contains("Seeded from history"));
-        assert!(note.ends_with("Review the body before sending."));
+        assert!(tab.request.ends_with("\n\n"));
+        assert!(tab.request_views().hex.contains("ff"));
+        assert!(tab.searchable_request().contains("�·"));
+        assert_eq!(tab.preserved_body.unwrap().data, vec![0xff, 0x00]);
     }
 
     #[test]

@@ -493,11 +493,12 @@ impl SearchState {
 
         if self.options.repeater {
             for tab in sources.repeater_tabs {
+                let request = tab.searchable_request();
                 if !engine::host_in_scope(self.options, scope, tab.host())
                     || !engine::matches_document(
                         &matcher,
                         self.options,
-                        tab.request(),
+                        &request,
                         tab.response_raw(),
                     )
                 {
@@ -532,8 +533,20 @@ impl SearchState {
             let plan = sources.intruder.search_plan();
             for result in sources.intruder.search_results() {
                 let request = plan
-                    .and_then(|plan| plan.render_sequence(result.sequence).ok())
-                    .map(|rendered| rendered.raw)
+                    .and_then(|plan| {
+                        let rendered = plan.render_sequence(result.sequence).ok()?;
+                        if plan.preserved_body.is_none() {
+                            return Some(rendered.raw);
+                        }
+                        let (head, text) = crate::proxy::split_raw_request(&rendered.raw);
+                        Some(
+                            crate::view::editor_views(
+                                head,
+                                plan.preserved_body.as_deref().unwrap_or(text.as_bytes()),
+                            )
+                            .raw,
+                        )
+                    })
                     .unwrap_or_default();
                 let response = engine::repeater_response_raw(&result.result);
                 if !engine::matches_document(&matcher, self.options, &request, response.as_deref())
@@ -768,7 +781,7 @@ fn build_detail(sources: &SearchSources<'_>, key: SearchKey) -> Option<SearchDet
             let response = tab.response_views().cloned();
             Some(SearchDetailCache {
                 key,
-                request: engine::request_views_from_raw(tab.request()),
+                request: tab.request_views(),
                 has_request: true,
                 has_response: response.is_some(),
                 response: response.unwrap_or_default(),

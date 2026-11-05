@@ -23,6 +23,11 @@ impl PerseidApp {
             )
             .show(ui, |ui| {
                 let state = &mut self.intruder;
+                crate::app::replay_body::controls(
+                    ui,
+                    &mut state.preserved_body,
+                    &mut state.request,
+                );
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Request").strong().color(theme::TEXT));
                     ui.label(

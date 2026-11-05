@@ -35,6 +35,7 @@ mod project_ui;
 mod proxy;
 mod proxy_control;
 mod repeater;
+mod replay_body;
 mod rules;
 mod scale;
 #[cfg(feature = "screenshots")]

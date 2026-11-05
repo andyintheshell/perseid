@@ -355,7 +355,9 @@ async fn run_attack(
         let (head, body) = split_raw_request(&rendered.raw);
         let request = match RepeaterRequest::parse(
             head,
-            body.as_bytes().to_vec(),
+            plan.preserved_body
+                .clone()
+                .unwrap_or_else(|| body.as_bytes().to_vec()),
             &plan.scheme,
             &plan.host,
         ) {

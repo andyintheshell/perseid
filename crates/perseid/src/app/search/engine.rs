@@ -16,7 +16,7 @@ use crate::history::{History, HistoryItem};
 use crate::project::ProjectSnapshot;
 use crate::proxy::RepeaterResult;
 use crate::site_map;
-use crate::view::{self, MessageViews};
+use crate::view;
 use crate::websocket_history::{WebSocketHistory, WebSocketMessageItem};
 
 /// Upper bound on highlight ranges produced for one message. A one-character
@@ -333,7 +333,8 @@ pub(super) fn split_message(raw: &str) -> (&str, &[u8]) {
 }
 
 /// Build editor views for a raw request held by Repeater or Intruder.
-pub(super) fn request_views_from_raw(raw: &str) -> MessageViews {
+#[cfg(test)]
+pub(super) fn request_views_from_raw(raw: &str) -> view::MessageViews {
     let (head, body) = split_message(raw);
     view::editor_views(head, body)
 }
