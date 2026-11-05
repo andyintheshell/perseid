@@ -498,6 +498,7 @@ impl SearchState {
                         &matcher,
                         self.options,
                         tab.request(),
+                        tab.preserved_body_bytes(),
                         tab.response_raw(),
                     )
                 {
@@ -536,8 +537,13 @@ impl SearchState {
                     .map(|rendered| rendered.raw)
                     .unwrap_or_default();
                 let response = engine::repeater_response_raw(&result.result);
-                if !engine::matches_document(&matcher, self.options, &request, response.as_deref())
-                {
+                if !engine::matches_document(
+                    &matcher,
+                    self.options,
+                    &request,
+                    plan.and_then(|plan| plan.preserved_body.as_deref()),
+                    response.as_deref(),
+                ) {
                     continue;
                 }
                 let scheme = if sources.intruder.search_scheme().is_empty() {
@@ -768,7 +774,7 @@ fn build_detail(sources: &SearchSources<'_>, key: SearchKey) -> Option<SearchDet
             let response = tab.response_views().cloned();
             Some(SearchDetailCache {
                 key,
-                request: engine::request_views_from_raw(tab.request()),
+                request: tab.request_views(),
                 has_request: true,
                 has_response: response.is_some(),
                 response: response.unwrap_or_default(),
@@ -1103,6 +1109,70 @@ mod tests {
             state.detail.as_ref().map(|detail| detail.key),
             state.selected
         );
+    }
+
+    #[test]
+    fn replay_search_uses_full_preserved_bytes_and_location_filters() {
+        let mut app = PerseidApp::test_app();
+        let mut data = vec![b'x'; crate::view::TEXT_PREVIEW_LIMIT + 1024];
+        data.extend_from_slice(b"needle\0\xff");
+        let body = crate::project::BodyWorkspace::from_body(&CapturedBody::from_bytes(data));
+        let request = "POST /?q=$$base$$ HTTP/1.1\r\nHost: example.com\r\n\r\n";
+        app.apply_repeater_workspace(
+            &[crate::project::RepeaterWorkspace {
+                id: 1,
+                host: "example.com".into(),
+                request: request.into(),
+                preserved_body: Some(body.clone()),
+                ..Default::default()
+            }],
+            0,
+        );
+        app.apply_intruder_workspace(&crate::project::IntruderWorkspace {
+            host: "example.com".into(),
+            last_plan: Some(crate::project::IntruderPlanWorkspace {
+                host: "example.com".into(),
+                scheme: "http".into(),
+                template: request.into(),
+                preserved_body: Some(body),
+                payload_sets: vec![vec!["base".into()]],
+                concurrency: 1,
+                ..Default::default()
+            }),
+            results: vec![crate::project::IntruderResultWorkspace {
+                sequence: 1,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let sources = sources(
+            &app.history,
+            &app.websocket_history,
+            &app.repeater_tabs,
+            &app.intruder,
+        );
+        for (query, regex) in [("needle", false), (r"(?-u:\x00\xff)", true)] {
+            for (headers_only, negative, count) in [
+                (false, false, 2),
+                (true, false, 0),
+                (false, true, 0),
+                (true, true, 2),
+            ] {
+                let mut state = search_state(query);
+                state.options.regex = regex;
+                state.options.negative = negative;
+                state.options.request_body = !headers_only;
+                state.options.response_headers = false;
+                state.options.response_body = false;
+                state.run(&sources, &BTreeSet::new());
+                assert!(state.error.is_none(), "{:?}", state.error);
+                assert_eq!(
+                    state.results.len(),
+                    count,
+                    "{query}, headers={headers_only}, negative={negative}"
+                );
+            }
+        }
     }
 
     #[test]

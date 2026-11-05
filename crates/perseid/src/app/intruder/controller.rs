@@ -16,6 +16,10 @@ use crate::view;
 use super::super::{MainTab, PerseidApp};
 use super::state::{IntruderState, PayloadSet, authority_from_uri, result_size};
 
+#[cfg(test)]
+#[path = "replay_tests.rs"]
+mod replay_tests;
+
 impl PerseidApp {
     /// Send the selected HTTP exchange to the Intruder workspace.
     pub(in crate::app) fn send_selected_to_intruder(&mut self) {
@@ -42,14 +46,13 @@ impl PerseidApp {
         } else {
             item.request.scheme.clone()
         };
-        let note = view::seeded_body_note(&item.request_body, "starting an attack");
-
         self.intruder.load_template(
             scheme,
             item.request.host.clone(),
-            view::format_request(item),
-            note,
+            view::replay_request_head(item),
+            None,
         );
+        self.intruder.preserved_body = Some(BodyWorkspace::from_body(&item.request_body));
         self.main_tab = MainTab::Intruder;
     }
 
@@ -117,6 +120,12 @@ impl PerseidApp {
         }
         self.intruder.error = None;
         self.intruder.notice = None;
+        if let Err(error) =
+            super::super::replay_body::bytes(&self.intruder.preserved_body, &self.intruder.request)
+        {
+            self.intruder.error = Some(error);
+            return;
+        }
 
         let positions = match marker_ranges(&self.intruder.request) {
             Ok(positions) => positions.len(),
@@ -149,7 +158,9 @@ impl PerseidApp {
         let (head, body) = split_raw_request(&rendered.raw);
         let request = match RepeaterRequest::parse(
             head,
-            body.as_bytes().to_vec(),
+            plan.preserved_body
+                .clone()
+                .unwrap_or_else(|| body.as_bytes().to_vec()),
             &plan.scheme,
             &plan.host,
         ) {
@@ -235,6 +246,9 @@ fn attack_from_record(attack: IntruderAttackRecord) -> AttackType {
 
 fn plan_workspace(plan: &IntruderPlan) -> IntruderPlanWorkspace {
     IntruderPlanWorkspace {
+        preserved_body: plan.preserved_body.as_ref().map(|bytes| {
+            BodyWorkspace::from_body(&crate::proxy::CapturedBody::from_bytes(bytes.clone()))
+        }),
         attack: attack_record(plan.attack),
         scheme: plan.scheme.clone(),
         host: plan.host.clone(),
@@ -247,6 +261,7 @@ fn plan_workspace(plan: &IntruderPlan) -> IntruderPlanWorkspace {
 
 fn plan_from_workspace(plan: &IntruderPlanWorkspace) -> IntruderPlan {
     IntruderPlan {
+        preserved_body: plan.preserved_body.as_ref().map(|body| body.data.clone()),
         attack: attack_from_record(plan.attack),
         scheme: plan.scheme.clone(),
         host: plan.host.clone(),
@@ -337,6 +352,7 @@ impl PerseidApp {
     pub(in crate::app) fn intruder_workspace(&self) -> IntruderWorkspace {
         let state = &self.intruder;
         IntruderWorkspace {
+            preserved_body: state.preserved_body.clone(),
             scheme: state.scheme.clone(),
             host: state.host.clone(),
             request: state.request.clone(),
@@ -387,6 +403,7 @@ impl PerseidApp {
         state.scheme = workspace.scheme.clone();
         state.host = workspace.host.clone();
         state.request = workspace.request.clone();
+        state.preserved_body = workspace.preserved_body.clone();
         state.attack = attack_from_record(workspace.attack);
         state.payload_sets = if workspace.payload_sets.is_empty() {
             vec![PayloadSet::default()]

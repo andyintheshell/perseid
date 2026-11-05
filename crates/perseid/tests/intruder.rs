@@ -97,6 +97,7 @@ async fn cookie_jar_adds_missing_cookies_without_overwriting_payloads() {
 
 fn plan(addr: std::net::SocketAddr, template: &str, payloads: &[&str]) -> IntruderPlan {
     IntruderPlan {
+        preserved_body: None,
         attack: AttackType::Sniper,
         scheme: "http".to_string(),
         host: addr.to_string(),
@@ -283,6 +284,7 @@ fn invalid_plans_are_rejected_before_an_attack_starts() {
     })
     .unwrap();
     let base = IntruderPlan {
+        preserved_body: None,
         attack: AttackType::Sniper,
         scheme: "http".to_string(),
         host: "127.0.0.1:1".to_string(),

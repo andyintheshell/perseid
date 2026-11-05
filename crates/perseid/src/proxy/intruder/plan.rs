@@ -71,6 +71,8 @@ impl AttackType {
 /// editing the request cannot change a running attack underneath the engine.
 #[derive(Clone, Debug)]
 pub struct IntruderPlan {
+    /// Captured bytes sent independently of the header-only template.
+    pub preserved_body: Option<Vec<u8>>,
     pub attack: AttackType,
     pub scheme: String,
     pub host: String,
@@ -104,6 +106,9 @@ pub struct RenderedRequest {
 impl IntruderPlan {
     /// Parse the template and validate payload sets and request count.
     pub fn prepare(&self) -> Result<PreparedIntruderPlan<'_>, IntruderError> {
+        if self.preserved_body.is_some() && !split_raw_request(&self.template).1.is_empty() {
+            return Err(IntruderError::PreservedBodyConflict);
+        }
         let positions = marker_ranges(&self.template)?;
         if positions.is_empty() {
             return Err(IntruderError::NoPositions);
@@ -250,7 +255,14 @@ impl PreparedIntruderPlan<'_> {
             cursor = range.end + MARKER.len();
         }
         raw.push_str(&plan.template[cursor..]);
-        if raw.len() > MAX_REQUEST_BYTES {
+        if plan.preserved_body.is_some() && !split_raw_request(&raw).1.is_empty() {
+            return Err(IntruderError::PreservedBodyConflict);
+        }
+        if raw
+            .len()
+            .saturating_add(plan.preserved_body.as_ref().map_or(0, Vec::len))
+            > MAX_REQUEST_BYTES
+        {
             return Err(IntruderError::RequestTooLarge { sequence });
         }
 
@@ -395,10 +407,12 @@ pub fn auto_mark(template: &str) -> (String, usize) {
 /// Split an edited raw request into its head (including the blank line) and
 /// body. Both CRLF and LF messages are accepted.
 pub fn split_raw_request(raw: &str) -> (&str, &str) {
-    if let Some(position) = raw.find("\r\n\r\n") {
-        (&raw[..position + 4], &raw[position + 4..])
-    } else if let Some(position) = raw.find("\n\n") {
-        (&raw[..position + 2], &raw[position + 2..])
+    if let Some((position, len)) = ["\r\n\r\n", "\n\n"]
+        .into_iter()
+        .filter_map(|delimiter| raw.find(delimiter).map(|pos| (pos, delimiter.len())))
+        .min_by_key(|(pos, _)| *pos)
+    {
+        (&raw[..position + len], &raw[position + len..])
     } else {
         (raw, "")
     }
@@ -514,6 +528,10 @@ pub fn update_host_header(raw: &str, host: &str) -> String {
 /// Why a plan or generated request is invalid.
 #[derive(Debug, thiserror::Error)]
 pub enum IntruderError {
+    #[error(
+        "the template or generated request contains body text that conflicts with the preserved body; remove body text or header/body boundaries introduced by payloads, or replace the preserved body"
+    )]
+    PreservedBodyConflict,
     #[error("the request has an unclosed $$ position marker at byte {offset}")]
     UnbalancedMarker { offset: usize },
     #[error("add at least one payload position by wrapping a value in $$")]

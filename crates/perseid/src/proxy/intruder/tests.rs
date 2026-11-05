@@ -2,8 +2,47 @@ use std::ops::Range;
 
 use super::*;
 
+#[test]
+fn preserved_bodies_are_not_templates_and_conflicting_text_is_rejected() {
+    let mut plan = plan(
+        AttackType::Sniper,
+        "POST /?q=$$x$$ HTTP/1.1\n\n",
+        &[&["ok"]],
+    );
+    plan.preserved_body = Some(b"$$literal$$\0\xff".to_vec());
+    assert!(plan.render_sequence(1).unwrap().raw.ends_with("\n\n"));
+    plan.payload_sets = vec![vec!["x\n\nbody".into()]];
+    let error = plan.render_sequence(1).unwrap_err().to_string();
+    assert!(error.contains("generated request"));
+    assert!(error.contains("payloads"));
+    assert!(matches!(
+        plan.render_sequence(1),
+        Err(IntruderError::PreservedBodyConflict)
+    ));
+    plan.template.push_str("ignored?");
+    assert!(matches!(
+        plan.prepare(),
+        Err(IntruderError::PreservedBodyConflict)
+    ));
+}
+
+#[test]
+fn preserved_body_counts_toward_the_request_size_limit() {
+    let mut plan = plan(
+        AttackType::Sniper,
+        "POST /?q=$$x$$ HTTP/1.1\n\n",
+        &[&["ok"]],
+    );
+    plan.preserved_body = Some(vec![0; 8 * 1024 * 1024]);
+    assert!(matches!(
+        plan.render_sequence(1),
+        Err(IntruderError::RequestTooLarge { sequence: 1 })
+    ));
+}
+
 fn plan(attack: AttackType, template: &str, sets: &[&[&str]]) -> IntruderPlan {
     IntruderPlan {
+        preserved_body: None,
         attack,
         scheme: "http".to_string(),
         host: "127.0.0.1:1".to_string(),
@@ -199,6 +238,7 @@ fn update_host_header_replaces_or_inserts_a_header() {
 #[test]
 fn request_counts_fail_instead_of_overflowing() {
     let plan = IntruderPlan {
+        preserved_body: None,
         attack: AttackType::ClusterBomb,
         scheme: "http".to_string(),
         host: "127.0.0.1".to_string(),

@@ -1793,6 +1793,7 @@ pub(super) mod tests {
                 }],
             },
             repeater: vec![RepeaterWorkspace {
+                preserved_body: None,
                 id: 2,
                 title: "Login".to_string(),
                 scheme: "https".to_string(),
@@ -1813,6 +1814,7 @@ pub(super) mod tests {
                 response_view: MessageViewRecord::Raw,
             }],
             intruder: IntruderWorkspace {
+                preserved_body: None,
                 scheme: "https".to_string(),
                 host: "example.test".to_string(),
                 request: "POST /login HTTP/1.1\r\nHost: example.test\r\n\r\nuser=§a§".to_string(),
@@ -1848,6 +1850,7 @@ pub(super) mod tests {
                 detail_view: MessageViewRecord::Raw,
                 attack_id: Some(9),
                 last_plan: Some(IntruderPlanWorkspace {
+                    preserved_body: None,
                     attack: IntruderAttackRecord::ClusterBomb,
                     scheme: "https".to_string(),
                     host: "example.test".to_string(),

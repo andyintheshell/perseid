@@ -342,7 +342,7 @@ are independent for each pane; Hex keeps its fixed columns and disables both
 toggles without discarding their text-view settings. The editable Repeater,
 Intercept, and Intruder message panes use the same search and wrapping controls.
 
-History and Repeater views decode gzip, deflate, and Brotli bodies for
+History and Repeater response views decode gzip, deflate, and Brotli bodies for
 inspection. Displayed `Content-Encoding` is removed after successful decoding;
 `Content-Length` is adjusted only when the complete decoded length is known.
 Unsupported or invalid encodings fall back to captured wire bytes. The proxy
@@ -574,6 +574,37 @@ them only in memory.
    on macOS).
 4. Inspect the status, timing, size, and Pretty/Raw/Hex response. Keep separate
    tabs for variants you want to compare manually.
+
+### Captured bodies and editable requests
+
+**Send to Repeater** and **Send to Intruder** retain the captured request body
+as bytes, independently of Pretty/Raw/Hex previews and their 256 KiB text limit.
+The request editor initially contains **headers only**; the preserved-body label
+shows the retained byte count. Unchanged complete bodies, including binary,
+multipart, trailing CRLF, and gzip, are sent without decoding or adding newlines.
+`Content-Encoding` is retained. Intruder positions in this mode affect only the
+request line and headers; body bytes (including literal `$$`) are not templates.
+
+To edit a body, explicitly choose **Replace captured body with empty editable
+text**, then enter the replacement after the header separator. This discards
+the captured bytes and removes `Content-Encoding` and `Content-Length`; it does
+not decode or transcode the original body. Replacement text is sent as UTF-8.
+There is no implicit decoded-editing conversion or binary-body import in the
+replacement text editor. Keep preserved mode to replay existing encoded bytes;
+do not paste a decoded display view under the original encoding header.
+
+Incomplete or truncated captures block both Send and Start attack (including
+keyboard shortcuts) until explicitly replaced or acknowledged with **Use
+captured prefix (acknowledge missing bytes)**. Acknowledging sends only the
+retained prefix; it cannot recover missing bytes or repair a partial gzip or
+multipart body. Preserved bytes and this decision survive project save/reopen.
+
+Replay is **not exact wire-header replay**: heads are reconstructed, transport
+negotiation can change the HTTP version, hop-by-hop headers are removed,
+`Content-Length` is recalculated, and supported `Accept-Encoding` values are
+normalized. Optional cookie-jar behavior still applies. The existing 8 MiB
+request and 64 KiB head limits remain in force; preview limits do not truncate
+replay bodies to fit those limits.
 
 For an origin-form line such as `GET /admin HTTP/1.1`, the target bar selects
 the connection destination. An absolute-form line such as
