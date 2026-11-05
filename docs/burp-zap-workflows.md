@@ -65,7 +65,7 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
-| Proxy capture and HTTP history | **Working**: live history uses a bounded snapshot; the stored HTTP browser pages all retained rows and loads details/notes on demand. Search scans all stored HTTP and WebSocket records. Temporary and opt-in saved retention evict oldest eligible captures. | Maintain; selective item deletion |
+| Proxy capture and HTTP history | **Working**: one virtual HTTP table covers all retained rows in RAM or disk, with bounded metadata windows and lazy details/notes. Search scans all stored HTTP and WebSocket records. Temporary and opt-in saved retention evict oldest eligible captures. | Maintain |
 | Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. WebSocket messages can be held and edited as text or hex. Large, streaming, and binary HTTP bodies are limited. | Maintain |
 | Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map indexes all retained HTTP endpoints with bounded host/folder navigation, Contents pages, display filters, and lazy details/tool sends. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve discovery separately |
 | Repeater / manual request editor | **Working** for HTTP/HTTPS and live WebSocket connections: editable tabs seeded from history, replay, and Pretty/Raw/Hex inspection. Persistent projects save HTTP tabs and their last responses; WebSocket tabs are session-only. Direct HTTP sends bypass proxy scope and rewriting. | Maintain |
@@ -101,8 +101,8 @@ For current feature details, see the [README](../README.md), [Burp parity matrix
 Milestone 3 is complete for the release scope, including redb-backed project history/workspace state as well as
 search, Repeater, Decoder, and Comparer. The storage foundation has landed, and
 Search scans all stored HTTP/WebSocket history plus current Repeater and
-Intruder results. Stored HTTP history and the site map page across retained
-records/endpoints with lazy details; the live history tables remain bounded snapshots.
+Intruder results. Unified HTTP/WebSocket history tables and the site map page across
+all retained records/endpoints with bounded metadata windows and lazy details.
 The rankings put Repeater first, and editable HTTP/HTTPS replay now exists: a
 request can be seeded from history, edited in its own tab, sent directly to the
 target, and inspected in Pretty/Raw/Hex. Intruder extends that
@@ -115,8 +115,8 @@ product stopped after capture or forced payload edits into an external script.
 
 Full-store WebSocket table navigation is implemented. Remaining M3 issues moved to M4:
 recent projects, structured history filters, application settings, site map
-annotations, and remaining Decoder transfers. Normal quit protection is
-implemented; crash recovery and byte-preserving Hex transfers remain gaps.
+annotations. Decoder transfers, including byte-preserving Hex transfers, and
+normal quit protection are implemented; crash recovery remains a gap.
 Comparer now closes the "change one thing and compare" loop with a shared item list and paired
 diff views. WebSocket replay uses live connections; project files already
 preserve Repeater request tabs and responses, Intruder results, and the other

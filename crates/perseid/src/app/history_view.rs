@@ -128,7 +128,11 @@ impl<T, D> HistoryTable<T, D> {
             match receiver.try_recv() {
                 Ok(Ok(Some(item))) => self.detail = Some((id, item)),
                 Ok(Ok(None)) => {
-                    self.error = Some("The selected capture was deleted or cleared.".into())
+                    // Retention can delete a selection outside the recent cache.
+                    // This is not a reader failure: refresh metadata so the
+                    // controller can clear the missing selection and keep paging.
+                    self.detail = None;
+                    self.mark_stale();
                 }
                 Ok(Err(error)) => self.error = Some(error.to_string()),
                 Err(TryRecvError::Empty) => self.detail_pending = Some((id, receiver)),
@@ -527,6 +531,26 @@ mod tests {
         app.filter.clear();
         settle(&mut app);
         assert_eq!(app.http_table.total(), 150);
+        app.select_id(1);
+        settle(&mut app);
+        app.project
+            .handle()
+            .unwrap()
+            .set_retention(crate::project::RetentionLimits::new(1, 0))
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        // Reproduce a retention refresh with an evicted selection that the
+        // recent cache cannot report to the retention sweep.
+        app.http_table.mark_stale();
+        app.http_table.invalidate_detail();
+        settle(&mut app);
+        assert!(app.http_table.error.is_none());
+        assert_eq!(app.http_table.total(), 1);
+        assert!(app.selected.is_none());
+        app.move_selection(1);
+        settle(&mut app);
+        assert_eq!(app.selected, Some(150));
         app.clear_history();
         app.project
             .handle()
@@ -615,12 +639,54 @@ mod tests {
         app.move_websocket_selection(1000);
         settle(&mut app);
         assert_eq!(app.websocket_selected, Some(150));
+        app.select_websocket_id(1);
+        settle(&mut app);
+        app.project
+            .handle()
+            .unwrap()
+            .set_retention(crate::project::RetentionLimits::new(1, 0))
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        app.ws_table.mark_stale();
+        app.ws_table.invalidate_detail();
+        settle(&mut app);
+        assert!(app.ws_table.error.is_none());
+        assert_eq!(app.ws_table.total(), 1);
+        assert!(app.websocket_selected.is_none());
+        app.move_websocket_selection(1);
+        settle(&mut app);
+        assert_eq!(app.websocket_selected, Some(150));
         app.websocket_filter = "no-matching-host".into();
         settle(&mut app);
         assert_eq!(app.ws_table.total(), 0);
         assert!(app.websocket_selected.is_none());
         drop(app);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn missing_detail_refreshes_metadata_without_blocking_paging() {
+        let mut table = HistoryTable::<u64, Vec<u8>>::default();
+        table.page = Some(page(0, 3000));
+        table.refresh = false;
+        table.selected_index = Some(1);
+        table.detail = Some((1, vec![0, 255]));
+        let (sender, receiver) = mpsc::channel();
+        table.detail_pending = Some((1, receiver));
+        table.detail_requested = Some(1);
+        sender.send(Ok(None)).unwrap();
+        table.poll();
+        assert!(table.error.is_none());
+        assert!(table.detail.is_none());
+        assert!(table.selected_index.is_none());
+        assert!(table.needs_page());
+        assert_eq!(table.row(2), Some(&2));
+        // Do not repeat the same missing detail read while metadata refreshes.
+        assert_eq!(table.detail_requested, Some(1));
+        table.refresh = false;
+        table.wanted = 1500;
+        assert!(table.needs_page());
     }
 
     #[test]
