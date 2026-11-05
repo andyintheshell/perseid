@@ -339,7 +339,8 @@ view, including the displayed dump in Hex. `Enter` moves to the next highlight;
 scrolls the current highlight into view without changing the message. A query
 stays with its pane when selecting another message or switching views.
 
-The **Wrap lines** toggle (`↩`), immediately left of `\n`, is on by default.
+The **Wrap lines** toggle (text lines with a bent arrow), immediately left of
+`\n`, is on by default.
 Turn it off to scroll long lines horizontally. Wrapping and whitespace settings
 are independent for each pane; Hex keeps its fixed columns and disables both
 toggles without discarding their text-view settings. The editable Repeater,

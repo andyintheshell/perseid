@@ -528,9 +528,44 @@ pub(super) fn wrap_lines(ui: &egui::Ui) -> bool {
 
 fn wrap_toggle_button(ui: &mut egui::Ui, key: egui::Id, enabled: bool) {
     let selected = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(true));
+    let icon = egui::Atom::paint(egui::vec2(16.0, 16.0), |ui, args| {
+        // Text lines with the second line bending back onto the next row.
+        // Paint the icon instead of relying on a font's Return-key glyph.
+        let origin = args.rect.min;
+        let point = |x, y| origin + egui::vec2(x, y);
+        let stroke = Stroke::new(1.2, args.fallback_text_color);
+        let painter = ui.painter();
+        for (y, end) in [(3.0, 14.0), (7.0, 11.0), (12.0, 5.0)] {
+            painter.line_segment([point(1.0, y), point(end, y)], stroke);
+        }
+        painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+            [
+                point(11.0, 7.0),
+                point(15.0, 7.0),
+                point(15.0, 12.0),
+                point(11.0, 12.0),
+            ],
+            false,
+            Color32::TRANSPARENT,
+            stroke,
+        ));
+        painter.line_segment([point(11.0, 12.0), point(8.0, 12.0)], stroke);
+        painter.add(egui::Shape::line(
+            vec![point(10.0, 10.0), point(8.0, 12.0), point(10.0, 14.0)],
+            stroke,
+        ));
+    });
     let response = ui
-        .add_enabled(enabled, egui::Button::selectable(selected, "↩"))
+        .add_enabled(enabled, egui::Button::selectable(selected, icon))
         .on_hover_text("Wrap lines");
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::Role::Button,
+            response.enabled(),
+            selected,
+            "Wrap lines",
+        )
+    });
     if response.clicked() {
         ui.data_mut(|data| data.insert_temp(key, !selected));
     }
@@ -985,6 +1020,32 @@ mod tests {
     use egui::{Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect};
 
     #[test]
+    fn wrapping_icon_uses_painted_text_lines_and_a_return_curve_at_both_scales() {
+        for scale in [1.0, 2.0] {
+            let ctx = Context::default();
+            ctx.set_pixels_per_point(scale);
+            for selected in [true, false] {
+                for enabled in [true, false] {
+                    let output = ctx.run_ui(RawInput::default(), |ui| {
+                        let key = ui.make_persistent_id("perseid.message.wrap");
+                        ui.data_mut(|data| data.insert_temp(key, selected));
+                        wrap_toggle_button(ui, key, enabled);
+                        assert_eq!(wrap_lines(ui), selected);
+                    });
+                    let curve_start = wrap_icon_position(&output);
+                    let text_lines = output.shapes.iter().filter(|shape| {
+                        matches!(&shape.shape, egui::Shape::LineSegment { points, .. }
+                            if points[0].y == points[1].y && points[0].x < curve_start.x)
+                    });
+                    assert_eq!(text_lines.count(), 3);
+                    assert!(text_position(&output, "↩").is_none());
+                    output.drop_without_applying_deltas();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wrapping_toggle_is_default_on_pane_local_and_preserved_through_hex() {
         let ctx = Context::default();
         let mut mode = MessageView::Raw;
@@ -1006,7 +1067,7 @@ mod tests {
             )
         };
         let output = frame(vec![], &mut mode);
-        let wrap = text_position(&output, "↩").unwrap();
+        let wrap = wrap_icon_position(&output);
         let invisible = text_position(&output, "\\n").unwrap();
         assert!(wrap.x < invisible.x);
         output.drop_without_applying_deltas();
@@ -1055,7 +1116,7 @@ mod tests {
             )
         };
         let output = frame(vec![], true);
-        let wrap = text_position(&output, "↩").unwrap();
+        let wrap = wrap_icon_position(&output);
         let invisible = text_position(&output, "\\n").unwrap();
         assert!(wrap.x < invisible.x);
         output.drop_without_applying_deltas();
@@ -2051,6 +2112,17 @@ mod tests {
             ctx.any_popup_open(),
             "right-clicking a captured request should open the menu with Copy as curl"
         );
+    }
+
+    fn wrap_icon_position(output: &egui::FullOutput) -> Pos2 {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::CubicBezier(curve) => Some(curve.points[0]),
+                _ => None,
+            })
+            .expect("painted line-wrapping icon")
     }
 
     fn text_position(output: &egui::FullOutput, label: &str) -> Option<Pos2> {
