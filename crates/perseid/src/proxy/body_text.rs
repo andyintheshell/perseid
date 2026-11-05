@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 
-pub(crate) fn encode(data: &[u8], escape_dollars: bool) -> String {
+pub(crate) fn encode(data: &[u8], escape_markers: bool) -> String {
     let mut out = String::new();
     let mut rest = data;
     while !rest.is_empty() {
@@ -23,7 +23,7 @@ pub(crate) fn encode(data: &[u8], escape_dollars: bool) -> String {
         {
             match ch {
                 '\\' => out.push_str("\\\\"),
-                '$' if escape_dollars => out.push_str("\\x24"),
+                '§' if escape_markers => out.push_str("\\xC2\\xA7"),
                 _ => out.push(ch),
             }
         }
@@ -74,13 +74,13 @@ mod tests {
     fn every_byte_and_literal_escape_round_trip() {
         for data in [
             (0..=255).collect::<Vec<u8>>(),
-            "中文\\xFF$$\r\n".as_bytes().to_vec(),
+            "中文\\xFF$$§§\r\n".as_bytes().to_vec(),
         ] {
-            for dollars in [false, true] {
-                let text = encode(&data, dollars);
+            for markers in [false, true] {
+                let text = encode(&data, markers);
                 assert_eq!(decode(&text, true).unwrap().as_ref(), data);
-                if dollars {
-                    assert!(!text.contains("$$"));
+                if markers {
+                    assert!(!text.contains('§'));
                 }
             }
         }

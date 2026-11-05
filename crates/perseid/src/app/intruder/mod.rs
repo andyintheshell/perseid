@@ -5,7 +5,7 @@
 //! and the payload list on the right. Starting an attack opens a resizable
 //! result table with the selected response beside it.
 //!
-//! Positions are written as `$$value$$` in the raw request. The markers are
+//! Positions are written as `§value§` in the raw request. The markers are
 //! part of the editable text, so copying, pasting, and normal editing keep
 //! working. Intruder reuses the direct Repeater transport and sends traffic
 //! straight to the target instead of through the proxy listener. When scope

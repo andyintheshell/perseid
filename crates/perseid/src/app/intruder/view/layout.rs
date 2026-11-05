@@ -1,10 +1,10 @@
-//! Request-editor layout: keep `$$` markers visible and highlight positions.
+//! Request-editor layout: keep `§` markers visible and highlight positions.
 
 use egui::{Color32, FontId};
 
 use crate::theme;
 
-/// Build the request editor layout while keeping `$$` visible and marking the
+/// Build the request editor layout while keeping `§` visible and marking the
 /// enclosed position. The text is appended verbatim so selection, copying, and
 /// editing still operate on the raw request.
 pub(super) fn request_layout_job(

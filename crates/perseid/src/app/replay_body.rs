@@ -20,8 +20,9 @@ pub(super) fn inline(
         *incomplete = true;
         return false;
     }
-    // Even one literal dollar can merge with an adjacent inserted $$ marker.
-    *escaped = std::str::from_utf8(&body.data).is_err() || (intruder && body.data.contains(&b'$'));
+    // Literal section signs must not become payload-position markers.
+    *escaped = std::str::from_utf8(&body.data).is_err()
+        || (intruder && body.data.windows(2).any(|pair| pair == "§".as_bytes()));
     if *escaped {
         raw.push_str(&body_text::encode(&body.data, intruder));
     } else {
@@ -56,7 +57,7 @@ mod tests {
             vec![],
             b"a=1\r\n".to_vec(),
             (0..=255).collect(),
-            "中文\\xFF$$".as_bytes().to_vec(),
+            "中文\\xFF$$§§".as_bytes().to_vec(),
         ] {
             for intruder in [false, true] {
                 let body = BodyWorkspace::from_body(&CapturedBody::from_bytes(data.clone()));

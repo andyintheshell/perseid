@@ -2,8 +2,8 @@
 
 use std::ops::Range;
 
-/// The pair of dollar signs around a payload position.
-pub const MARKER: &str = "$$";
+/// The section sign delimiting a payload position.
+pub const MARKER: &str = "§";
 
 /// Bound on simultaneous in-flight attack requests. The UI offers the same
 /// range, and the engine clamps values from library callers.
@@ -78,7 +78,7 @@ pub struct IntruderPlan {
     pub attack: AttackType,
     pub scheme: String,
     pub host: String,
-    /// Raw request with `$$` delimiters around each payload position.
+    /// Raw request with `§` delimiters around each payload position.
     pub template: String,
     /// Payload values. Sniper and Battering ram use only the first set.
     pub payload_sets: Vec<Vec<String>>,
@@ -254,7 +254,7 @@ impl PreparedIntruderPlan<'_> {
         let body_start = split_raw_request(&plan.template).0.len();
         for (index, range) in self.positions.iter().enumerate() {
             // `range` covers the content between the delimiters. Keep the text
-            // before the opening `$$`, then emit the payload (or the original
+            // before the opening `§`, then emit the payload (or the original
             // base value) and skip both delimiters.
             let open = range.start - MARKER.len();
             raw.push_str(&plan.template[cursor..open]);
@@ -293,10 +293,10 @@ impl PreparedIntruderPlan<'_> {
     }
 }
 
-/// Return the byte ranges between each pair of `$$` markers.
+/// Return the byte ranges between each pair of `§` markers.
 ///
 /// An odd number of markers is rejected rather than guessing where a position
-/// should end. Ranges are UTF-8 boundaries because the delimiters are ASCII.
+/// should end. Ranges are UTF-8 boundaries because matches cover whole markers.
 pub fn marker_ranges(template: &str) -> Result<Vec<Range<usize>>, IntruderError> {
     let mut ranges = Vec::new();
     let mut search = 0;
@@ -318,9 +318,9 @@ pub fn clear_markers(template: &str) -> String {
     template.replace(MARKER, "")
 }
 
-/// Wrap the selection in `$$`, or remove the enclosing markers.
+/// Wrap the selection in `§`, or remove the enclosing markers.
 ///
-/// An empty selection inserts `$$$$` and returns the empty range between the
+/// An empty selection inserts `§§` and returns the empty range between the
 /// two delimiters. The returned range is always the new payload-position
 /// content, so the caller can keep the editor selection on it.
 pub fn toggle_marker(template: &str, selection: Range<usize>) -> (String, Range<usize>) {
@@ -347,7 +347,7 @@ pub fn toggle_marker(template: &str, selection: Range<usize>) -> (String, Range<
     }
 
     // The selection itself may include the delimiters, as when the user
-    // selects `$$value$$` and clicks Add $$ to remove the position.
+    // selects `§value§` and clicks Add § to remove the position.
     if template[start..end].starts_with(MARKER)
         && template[start..end].ends_with(MARKER)
         && end - start >= MARKER.len() * 2
@@ -557,9 +557,9 @@ pub enum IntruderError {
         "the template or generated request contains body text that conflicts with the preserved body; remove body text or header/body boundaries introduced by payloads, or replace the preserved body"
     )]
     PreservedBodyConflict,
-    #[error("the request has an unclosed $$ position marker at byte {offset}")]
+    #[error("the request has an unclosed § position marker at byte {offset}")]
     UnbalancedMarker { offset: usize },
-    #[error("add at least one payload position by wrapping a value in $$")]
+    #[error("add at least one payload position by wrapping a value in §")]
     NoPositions,
     #[error("payload set {position} is empty")]
     EmptyPayloadSet { position: usize },

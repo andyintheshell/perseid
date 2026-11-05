@@ -103,7 +103,7 @@ promise.
   Sequencer landed ahead of this milestone. WebSockets support plain `ws://`,
   decrypted `wss://`, complete text/binary message reassembly, masking removal,
   a bounded UI history snapshot, and Pretty/Raw/Hex inspection. WebSocket
-  message interception, editing, and live-connection replay are available. Intruder supports `$$`
+  message interception, editing, and live-connection replay are available. Intruder supports `§`
   positions, editable and file-loaded payload sets, all four attack modes, up
   to 32 concurrent requests, live result inspection, and
   enforced-scope checks for every generated request. Payload processing rules

@@ -1118,7 +1118,7 @@ mod tests {
         let mut data = vec![b'x'; crate::view::TEXT_PREVIEW_LIMIT + 1024];
         data.extend_from_slice(b"needle\0\xff");
         let body = crate::project::BodyWorkspace::from_body(&CapturedBody::from_bytes(data));
-        let request = "POST /?q=$$base$$ HTTP/1.1\r\nHost: example.com\r\n\r\n";
+        let request = "POST /?q=§base§ HTTP/1.1\r\nHost: example.com\r\n\r\n";
         app.apply_repeater_workspace(
             &[crate::project::RepeaterWorkspace {
                 id: 1,

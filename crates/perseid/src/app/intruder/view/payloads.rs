@@ -73,7 +73,7 @@ impl PerseidApp {
                             if positions == 0 {
                                 ui.label(
                                     RichText::new(
-                                        "Add at least one $$ position to the request first.",
+                                        "Add at least one § position to the request first.",
                                     )
                                     .small()
                                     .color(theme::TEXT_MUTED),

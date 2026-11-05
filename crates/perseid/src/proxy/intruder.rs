@@ -4,7 +4,7 @@
 //! proxy stopped and never pass through interception or rewrite policy. The
 //! engine applies the optional scope list in [`IntruderPlan::scope`] to every
 //! generated request; the desktop workspace fills it when scope enforcement is
-//! on and also preflights the first request. A request template uses `$$`
+//! on and also preflights the first request. A request template uses `§`
 //! around each payload position. Marker contents
 //! are the base values: Sniper leaves untargeted positions at their base value,
 //! while the other attack types replace every marked position.
