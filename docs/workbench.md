@@ -212,8 +212,9 @@ is a quick way to verify the path without a browser or CA trust.
   **Delete item** permanently removes the finished exchange and its captured
   bodies from the active project, including Notes and cached Search/site-map
   views. It does not delete copies already sent to other tools. Deletion is
-  disabled while the exchange is in flight or a project operation is pending;
-  storage errors leave the row intact and show an error notice.
+  disabled while the exchange is in flight or a blocking project operation
+  (such as saving or switching projects) is pending; storage errors leave the
+  row intact and show an error notice.
 - The text filter matches method, host, path, URI, status, MIME type, and file
   extension—not response-body contents. The filter bar opens a Burp-style
   display-filter dialog with in-scope, missing-response, parameterized-request,

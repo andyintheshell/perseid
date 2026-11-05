@@ -786,7 +786,11 @@ impl PerseidApp {
                             if ui
                                 .add_enabled(
                                     !item.request.host.is_empty()
-                                        && !self.scope.contains(&item.request.host),
+                                        && (self.scope.is_empty()
+                                            || !site_map::host_in_scope(
+                                                &item.request.host,
+                                                &self.scope,
+                                            )),
                                     egui::Button::new("Add to scope"),
                                 )
                                 .on_hover_text("Add this host to Target scope")
@@ -888,10 +892,19 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::Notes);
                                 ui.close();
                             }
-                            if ui.add_enabled(!item.is_in_flight() && !self.project.is_busy(), egui::Button::new("Delete item"))
-                                .on_hover_text("Permanently remove this exchange from the active project")
-                                .on_disabled_hover_text("Wait for the exchange and pending project operations to finish")
-                                .clicked() {
+                            if ui
+                                .add_enabled(
+                                    !item.is_in_flight() && !self.project.is_busy(),
+                                    egui::Button::new("Delete item"),
+                                )
+                                .on_hover_text(
+                                    "Permanently remove this exchange from the active project",
+                                )
+                                .on_disabled_hover_text(
+                                    "Wait for the exchange and blocking project operations to finish",
+                                )
+                                .clicked()
+                            {
                                 action = Some(HistoryRowAction::Delete);
                                 ui.close();
                             }
@@ -1170,6 +1183,51 @@ mod decoder_transfer_tests {
             },
         ] {
             frame(ctx, app, vec![event]).drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn add_to_scope_menu_respects_existing_scope_rules() {
+        for (host, rule, can_add) in [
+            ("api.example.test", None, true),
+            ("api.example.test", Some("api.example.test"), false),
+            ("api.example.test", Some("example.test"), false),
+            ("API.EXAMPLE.TEST:8080", Some("example.test"), false),
+            ("notexample.test", Some("example.test"), true),
+            ("api.other.test", Some("example.test"), true),
+        ] {
+            let mut app = PerseidApp::test_app();
+            app.main_tab = MainTab::Proxy;
+            app.proxy_section = ProxySection::HttpHistory;
+            app.scope.extend(rule.map(str::to_owned));
+            app.history.apply(ProxyEvent::Started {
+                id: 1,
+                timestamp: SystemTime::UNIX_EPOCH,
+                request: RequestInfo {
+                    method: "GET".into(),
+                    uri: format!("http://{host}/scope-test"),
+                    scheme: "http".into(),
+                    host: host.into(),
+                    path: "/scope-test".into(),
+                    version: "HTTP/1.1".into(),
+                    headers: vec![],
+                },
+            });
+            let mut expected = app.scope.clone();
+            if can_add {
+                expected.insert(host.into());
+            }
+            let ctx = egui::Context::default();
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+            click(
+                &ctx,
+                &mut app,
+                "/scope-test",
+                egui::PointerButton::Secondary,
+            );
+            click(&ctx, &mut app, "Add to scope", egui::PointerButton::Primary);
+            assert_eq!(app.scope, expected, "host {host}, rule {rule:?}");
         }
     }
 

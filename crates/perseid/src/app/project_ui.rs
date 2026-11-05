@@ -305,11 +305,16 @@ impl ProjectUi {
     }
 
     pub(super) fn delete_http_item(&mut self, id: u64) {
-        if let Some(handle) = self.handle() {
-            let receiver = handle.delete_http(id);
-            self.pending
-                .push(PendingProject::DeleteHttp { id, receiver });
-        }
+        let Some(handle) = self.handle() else {
+            self.notify_error(format!(
+                "Could not delete the exchange: {}",
+                ProjectError::ServiceUnavailable
+            ));
+            return;
+        };
+        let receiver = handle.delete_http(id);
+        self.pending
+            .push(PendingProject::DeleteHttp { id, receiver });
     }
 
     pub(super) fn clear_ws_history(&mut self) {
@@ -2176,6 +2181,42 @@ pub(super) mod tests {
             response: None,
             phase: Phase::InFlight,
         }
+    }
+
+    #[test]
+    fn unavailable_persistence_keeps_the_row_and_detail_when_deleting() {
+        let mut app = PerseidApp::test_app();
+        let mut item = history_item();
+        item.phase = Phase::Finished {
+            duration: Duration::ZERO,
+            result: ExchangeResult::Response {
+                body: CapturedBody::default(),
+            },
+        };
+        app.history.load(vec![item]);
+        app.selected = Some(1);
+        app.ensure_detail(1);
+        app.inspector
+            .apply_workspace(&crate::project::InspectorWorkspace {
+                notes: vec![crate::project::InspectorNoteWorkspace {
+                    id: 1,
+                    text: "Keep this note".into(),
+                }],
+                ..Default::default()
+            });
+        app.project.handle = None;
+
+        app.delete_selected_http_item();
+
+        assert!(app.history.get(1).is_some());
+        assert_eq!(app.selected, Some(1));
+        assert_eq!(app.detail.as_ref().map(|detail| detail.id), Some(1));
+        assert_eq!(app.inspector.note(1), Some("Keep this note"));
+        assert!(app.project.pending.is_empty());
+        let (notice, error) = app.project.notice().unwrap();
+        assert!(error);
+        assert!(notice.contains("Could not delete the exchange"));
+        assert!(notice.contains("the project writer is not available"));
     }
 
     #[test]

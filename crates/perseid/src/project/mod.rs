@@ -62,6 +62,8 @@ pub enum ProjectError {
     RecordTooLarge { size: usize, limit: usize },
     #[error("this is not a valid Perseid project: {0}; select another project or restore a backup")]
     InvalidProject(String),
+    #[error("{0}")]
+    OperationRejected(String),
     #[error("could not load the {component}: {source}")]
     Snapshot {
         component: &'static str,

@@ -800,7 +800,12 @@ fn deleting_in_flight_http_is_rejected_without_losing_the_capture() {
     let project = ProjectHandle::temporary().unwrap();
     let id = capture_all(&project, &[started(1, "GET")])[0];
     wait(project.flush()).unwrap();
-    assert!(wait(project.delete_http(id)).is_err());
+    let error = wait(project.delete_http(id)).unwrap_err();
+    assert!(matches!(error, ProjectError::OperationRejected(_)));
+    assert_eq!(
+        error.to_string(),
+        "Wait for the exchange to finish before deleting it"
+    );
     assert!(project.get_http(id).unwrap().unwrap().is_in_flight());
     capture_all(&project, &[finished(1, b"", b"done")]);
     wait(project.flush()).unwrap();

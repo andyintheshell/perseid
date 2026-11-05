@@ -26,11 +26,7 @@ impl PerseidApp {
         if self.history.get(id).is_none_or(|item| item.is_in_flight()) || self.project.is_busy() {
             return;
         }
-        if self.project.handle().is_some() {
-            self.project.delete_http_item(id);
-        } else {
-            self.remove_http_item(id);
-        }
+        self.project.delete_http_item(id);
     }
 
     /// Apply only after storage acknowledges deletion; failed writes retain the row.

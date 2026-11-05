@@ -554,7 +554,7 @@ pub(super) fn delete_http(db: &Database, meta: &mut ProjectMeta, id: u64) -> Res
             .transpose()?;
         if let Some(record) = record {
             if tx.open_table(schema::HTTP_IN_FLIGHT)?.get(id)?.is_some() {
-                return Err(ProjectError::InvalidProject(
+                return Err(ProjectError::OperationRejected(
                     "Wait for the exchange to finish before deleting it".into(),
                 ));
             }
