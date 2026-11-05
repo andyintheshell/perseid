@@ -75,7 +75,9 @@ pub(in crate::app) struct IntruderState {
     pub(super) scheme: String,
     pub(super) host: String,
     pub(super) request: String,
-    pub(super) preserved_body: Option<crate::project::BodyWorkspace>,
+    pub(super) body_escaped: bool,
+    pub(super) body_incomplete: bool,
+    pub(super) legacy_body: Option<crate::project::BodyWorkspace>,
     pub(super) attack: AttackType,
     pub(super) payload_sets: Vec<PayloadSet>,
     pub(super) payload_file_dialog: Option<PayloadFileDialog>,
@@ -112,7 +114,9 @@ impl IntruderState {
             scheme: "https".to_string(),
             host: String::new(),
             request: "GET / HTTP/1.1\nHost: \n\n".to_string(),
-            preserved_body: None,
+            body_escaped: false,
+            body_incomplete: false,
+            legacy_body: None,
             attack: AttackType::Sniper,
             payload_sets: vec![PayloadSet::default()],
             payload_file_dialog: None,
@@ -167,7 +171,9 @@ impl IntruderState {
         self.scheme = scheme;
         self.host = host;
         self.request = request;
-        self.preserved_body = None;
+        self.body_escaped = false;
+        self.body_incomplete = false;
+        self.legacy_body = None;
         self.payload_file_dialog = None;
         self.payload_sets.clear();
         self.payload_sets.push(PayloadSet::default());
@@ -267,7 +273,8 @@ impl IntruderState {
             scheme: self.scheme.clone(),
             host: self.host.trim().to_string(),
             template: self.request.clone(),
-            preserved_body: self.preserved_body.as_ref().map(|body| body.data.clone()),
+            preserved_body: None,
+            body_escaped: self.body_escaped,
             payload_sets,
             concurrency: self.concurrency,
             scope: Vec::new(),
@@ -463,10 +470,10 @@ impl IntruderState {
             .find(|result| result.sequence == sequence)?;
         let request = self.last_plan.as_ref().and_then(|plan| {
             let rendered = plan.render_sequence(sequence).ok()?;
-            let (head, body) = split_raw_request(&rendered.raw);
+            let (head, _) = split_raw_request(&rendered.raw);
             Some(view::editor_views(
                 head,
-                plan.preserved_body.as_deref().unwrap_or(body.as_bytes()),
+                &plan.body_bytes(&rendered.raw).ok()?,
             ))
         });
         let (response, status, length) = match &result.result {

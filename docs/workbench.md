@@ -578,26 +578,34 @@ them only in memory.
 ### Captured bodies and editable requests
 
 **Send to Repeater** and **Send to Intruder** retain the captured request body
-as bytes, independently of Pretty/Raw/Hex previews and their 256 KiB text limit.
-The request editor initially contains **headers only**; the preserved-body label
-shows the retained byte count. Unchanged complete bodies, including binary,
-multipart, trailing CRLF, and gzip, are sent without decoding or adding newlines.
-`Content-Encoding` is retained. Intruder positions in this mode affect only the
-request line and headers; body bytes (including literal `$$`) are not templates.
+without using Pretty/Raw/Hex previews or their 256 KiB text limit. Complete
+UTF-8 bodies appear directly below the headers and can be edited immediately,
+including after reopening an older saved project. Empty bodies need no extra
+controls. Intruder supports payload positions in these editable bodies.
 
-To edit a body, explicitly choose **Replace captured body with empty editable
-text**, then enter the replacement after the header separator. This discards
-the captured bytes and removes `Content-Encoding` and `Content-Length`; it does
-not decode or transcode the original body. Replacement text is sent as UTF-8.
-There is no implicit decoded-editing conversion or binary-body import in the
-replacement text editor. Keep preserved mode to replay existing encoded bytes;
-do not paste a decoded display view under the original encoding header.
+Binary and incomplete bodies also appear directly in the same request editor.
+There is no separate preserved-body section, replacement button, or prefix
+acknowledgement button. For bodies that are not valid UTF-8, the editor uses
+lossless byte escapes: `\xFF` represents byte FF and `\\` represents a literal
+backslash. The request subtitle identifies this notation. Valid UTF-8 characters
+remain readable. Intruder uses this notation for captured bodies containing
+literal `$` too, displaying dollars as `\x24` so they cannot become payload
+positions or merge with adjacent markers accidentally. You can mark positions
+in binary bodies as well as text; select whole byte escapes. Payload values
+remain UTF-8 text, not byte-escape
+source. Invalid or unfinished escapes block sending rather than changing bytes.
 
-Incomplete or truncated captures block both Send and Start attack (including
-keyboard shortcuts) until explicitly replaced or acknowledged with **Use
-captured prefix (acknowledge missing bytes)**. Acknowledging sends only the
-retained prefix; it cannot recover missing bytes or repair a partial gzip or
-multipart body. Preserved bytes and this decision survive project save/reopen.
+Unchanged bodies, including multipart, trailing CRLF, and gzip, are sent without
+decoding or adding newlines. `Content-Encoding` is retained. If replacing gzip
+bytes with plain text, remove or update that header yourself; there is no implicit
+decompression or transcoding. `Content-Length` is recalculated when sending.
+
+Incomplete or truncated captures are visible but block both Send and Start
+attack (including keyboard shortcuts) with an error until you edit or replace
+the body in the request editor. Header-only edits do not unblock them. Editing
+does not recover missing bytes or automatically repair partial gzip/multipart
+data. Draft bytes, byte-escape mode, and incomplete status survive save/reopen;
+older header-only workspaces are imported into the full-message editor.
 
 Replay is **not exact wire-header replay**: heads are reconstructed, transport
 negotiation can change the HTTP version, hop-by-hop headers are removed,
@@ -654,9 +662,9 @@ Parallel requests can race when a server rotates a cookie, so reduce concurrency
 or disable updates for such applications. The jar is not a login macro and will
 not re-authenticate an expired session.
 
-Captured history seeds use the decoded, bounded message representation, so
-compressed, binary, or large bodies can be lossy. Review seed warnings before
-sending. Responses retain up to `--capture-limit` body bytes and report
+Captured HTTP history seeds use the captured bytes, not decoded or bounded
+display previews; see [Captured bodies and editable requests](#captured-bodies-and-editable-requests).
+Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
 with up to eight concurrent sends. Request tabs and their most recent responses
 are saved with a persistent project; pending sends are not.

@@ -52,7 +52,13 @@ impl PerseidApp {
             view::replay_request_head(item),
             None,
         );
-        self.intruder.preserved_body = Some(BodyWorkspace::from_body(&item.request_body));
+        super::super::replay_body::inline(
+            Some(&BodyWorkspace::from_body(&item.request_body)),
+            &mut self.intruder.request,
+            &mut self.intruder.body_escaped,
+            &mut self.intruder.body_incomplete,
+            true,
+        );
         self.main_tab = MainTab::Intruder;
     }
 
@@ -120,9 +126,11 @@ impl PerseidApp {
         }
         self.intruder.error = None;
         self.intruder.notice = None;
-        if let Err(error) =
-            super::super::replay_body::bytes(&self.intruder.preserved_body, &self.intruder.request)
-        {
+        if let Err(error) = super::super::replay_body::bytes(
+            &self.intruder.request,
+            self.intruder.body_escaped,
+            self.intruder.body_incomplete,
+        ) {
             self.intruder.error = Some(error);
             return;
         }
@@ -155,12 +163,16 @@ impl PerseidApp {
                 return;
             }
         };
-        let (head, body) = split_raw_request(&rendered.raw);
+        let (head, _) = split_raw_request(&rendered.raw);
         let request = match RepeaterRequest::parse(
             head,
-            plan.preserved_body
-                .clone()
-                .unwrap_or_else(|| body.as_bytes().to_vec()),
+            match plan.body_bytes(&rendered.raw) {
+                Ok(body) => body,
+                Err(error) => {
+                    self.intruder.error = Some(error);
+                    return;
+                }
+            },
             &plan.scheme,
             &plan.host,
         ) {
@@ -246,6 +258,7 @@ fn attack_from_record(attack: IntruderAttackRecord) -> AttackType {
 
 fn plan_workspace(plan: &IntruderPlan) -> IntruderPlanWorkspace {
     IntruderPlanWorkspace {
+        body_escaped: plan.body_escaped,
         preserved_body: plan.preserved_body.as_ref().map(|bytes| {
             BodyWorkspace::from_body(&crate::proxy::CapturedBody::from_bytes(bytes.clone()))
         }),
@@ -261,6 +274,7 @@ fn plan_workspace(plan: &IntruderPlan) -> IntruderPlanWorkspace {
 
 fn plan_from_workspace(plan: &IntruderPlanWorkspace) -> IntruderPlan {
     IntruderPlan {
+        body_escaped: plan.body_escaped,
         preserved_body: plan.preserved_body.as_ref().map(|body| body.data.clone()),
         attack: attack_from_record(plan.attack),
         scheme: plan.scheme.clone(),
@@ -352,7 +366,9 @@ impl PerseidApp {
     pub(in crate::app) fn intruder_workspace(&self) -> IntruderWorkspace {
         let state = &self.intruder;
         IntruderWorkspace {
-            preserved_body: state.preserved_body.clone(),
+            preserved_body: state.legacy_body.clone(),
+            body_escaped: state.body_escaped,
+            body_incomplete: state.body_incomplete,
             scheme: state.scheme.clone(),
             host: state.host.clone(),
             request: state.request.clone(),
@@ -403,7 +419,18 @@ impl PerseidApp {
         state.scheme = workspace.scheme.clone();
         state.host = workspace.host.clone();
         state.request = workspace.request.clone();
-        state.preserved_body = workspace.preserved_body.clone();
+        state.body_escaped = workspace.body_escaped;
+        state.body_incomplete = workspace.body_incomplete;
+        let imported = super::super::replay_body::inline(
+            workspace.preserved_body.as_ref(),
+            &mut state.request,
+            &mut state.body_escaped,
+            &mut state.body_incomplete,
+            true,
+        );
+        state.legacy_body = (!imported)
+            .then(|| workspace.preserved_body.clone())
+            .flatten();
         state.attack = attack_from_record(workspace.attack);
         state.payload_sets = if workspace.payload_sets.is_empty() {
             vec![PayloadSet::default()]

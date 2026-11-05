@@ -498,7 +498,7 @@ impl SearchState {
                         &matcher,
                         self.options,
                         tab.request(),
-                        tab.preserved_body_bytes(),
+                        Some(&tab.request_body_bytes()),
                         tab.response_raw(),
                     )
                 {
@@ -541,7 +541,8 @@ impl SearchState {
                     &matcher,
                     self.options,
                     &request,
-                    plan.and_then(|plan| plan.preserved_body.as_deref()),
+                    plan.and_then(|plan| plan.body_bytes(&request).ok())
+                        .as_deref(),
                     response.as_deref(),
                 ) {
                     continue;
