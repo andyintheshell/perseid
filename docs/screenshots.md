@@ -188,8 +188,8 @@ verifies that the edited Repeater and Intruder requests reached the local
 target.
 
 The current approved recording is checked in as
-[`images/perseid-demo.webp`](images/perseid-demo.webp) (1280×820, about 84
-seconds, 1.5 MB) and used as the [project README](../README.md) hero image. To
+[`images/perseid-demo.webp`](images/perseid-demo.webp) (1280×820, about 85
+seconds, 1.4 MB) and used as the [project README](../README.md) hero image. To
 update it, run the workflow manually, download `perseid-demo-webp` from the
 run, review it, and replace that file. The artifact expires after 30 days.
 All runs upload source recordings and diagnostic logs for seven days so the
