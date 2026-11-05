@@ -207,10 +207,10 @@ cargo run -p perseid --locked -- --listen 127.0.0.1:8081 --ui-scale 1.5
 | `--listen <ADDR>` | `127.0.0.1:8080` | Proxy listen address; keep it on loopback. |
 | `--capture-limit <BYTES>` | `1048576` (1 MiB) | Body bytes retained per request/response. |
 | `--intercept-limit <BYTES>` | `1048576` (1 MiB) | Maximum body size eligible for buffering/editing or rewriting. |
-| `--history-limit <N>` | `2000` | Maximum number of HTTP exchanges or WebSocket messages held in each UI history cache / loaded project snapshot. Does not cap saved project files. Also the default for `--temporary-retention-limit`. |
-| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Per-cache in-memory UI budget for HTTP and WebSocket history. In persistent projects this bounds the opened snapshot, not disk retention. Also the default for `--temporary-retention-bytes`. |
-| `--temporary-retention-limit <N>` | `--history-limit` | Maximum combined HTTP + WebSocket records retained by a temporary project. `0` disables the count limit. Oldest eligible records are evicted first; saved projects have separate opt-in settings. |
-| `--temporary-retention-bytes <BYTES>` | `--history-bytes` | Maximum retained HTTP request/response body bytes plus WebSocket payload bytes in a temporary project. `0` disables the byte limit. The newest record is always kept. |
+| `--history-limit <N>` | `128` | Maximum records in each recent UI cache; never deletes or hides stored captures. |
+| `--history-bytes <BYTES>` | 64 MiB | Body budget for each recent UI cache, independent of project retention. |
+| `--temporary-retention-limit <N>` | `0` (unlimited) | Opt-in combined HTTP/WebSocket record limit for temporary projects. Oldest eligible records are deleted first. |
+| `--temporary-retention-bytes <BYTES>` | `0` (unlimited) | Opt-in retained-body/payload limit for temporary projects. The newest record is always kept. |
 | `--no-proxy` | Off | Open the UI without starting the proxy. |
 | `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA store lives; use the active certificate/key paths shown in the UI. |
 | `--no-tls-intercept` | Off | Keep HTTPS tunnels opaque; the CA is still prepared. |
@@ -236,18 +236,17 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-Perseid `0.2.0` introduced saved projects. The live history tables open
-only a bounded newest-first snapshot of stored history; older records stay in the
-project file and can be found by Search. **Browse stored history…** in HTTP
-history pages through all retained HTTP exchanges and loads details/notes on demand.
+Perseid `0.2.0` introduced saved projects. HTTP and WebSocket history now use
+one virtual table per protocol for all retained captures, with background metadata
+windows and on-demand details, in both temporary and saved projects.
 Target's site map also covers all retained HTTP endpoints, with background
 indexing, paged tree/Contents navigation, and lazy exchange details.
-Temporary projects evict the
-oldest captured records and released body bytes when they exceed the configurable
-aggregate retention limits, which default to the history flags. New and Open ask
+Temporary projects retain captures in RAM without automatic deletion by default;
+save to disk before RAM is exhausted. There is no automatic memory-pressure pause.
+Optional aggregate retention limits delete the oldest eligible records. New and Open ask
 Save/Discard/Cancel before replacing a temporary project with unsaved work; a
 failed open keeps the current project and running proxy. Saved retention defaults
-to unlimited; **Project storage…** enables combined record/body limits. These
+to unlimited; **Settings > Automatic deletion…** enables combined record/body limits. These
 are logical limits, not a physical file-size cap or secure erasure. Projects
 are not encrypted. Schema-v1 projects migrate atomically to v2 on open; older
 applications cannot reopen upgraded files. To remove a saved project, switch

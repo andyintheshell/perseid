@@ -134,10 +134,20 @@ impl PerseidApp {
             if up {
                 self.move_selection(-1);
             }
-            if home && !self.visible.is_empty() {
+            if home && self.http_table.active {
+                self.http_table.select_row = Some(0);
+                self.http_table.wanted = 0;
+            } else if home && !self.visible.is_empty() {
                 self.select_id(self.visible[0]);
             }
-            if end && !self.visible.is_empty() {
+            if end && self.http_table.active {
+                if self.http_table.total() == 0 {
+                    return;
+                }
+                let index = self.http_table.total().saturating_sub(1);
+                self.http_table.select_row = Some(index);
+                self.http_table.wanted = index;
+            } else if end && !self.visible.is_empty() {
                 self.select_id(self.visible[self.visible.len() - 1]);
             }
         } else {
@@ -147,10 +157,20 @@ impl PerseidApp {
             if up {
                 self.move_websocket_selection(-1);
             }
-            if home && !self.websocket_visible.is_empty() {
+            if home && self.ws_table.active {
+                self.ws_table.select_row = Some(0);
+                self.ws_table.wanted = 0;
+            } else if home && !self.websocket_visible.is_empty() {
                 self.select_websocket_id(self.websocket_visible[0]);
             }
-            if end && !self.websocket_visible.is_empty() {
+            if end && self.ws_table.active {
+                if self.ws_table.total() == 0 {
+                    return;
+                }
+                let index = self.ws_table.total().saturating_sub(1);
+                self.ws_table.select_row = Some(index);
+                self.ws_table.wanted = index;
+            } else if end && !self.websocket_visible.is_empty() {
                 self.select_websocket_id(self.websocket_visible[self.websocket_visible.len() - 1]);
             }
         }
@@ -226,6 +246,53 @@ mod tests {
         app.target_section = TargetSection::SiteMap;
         app.site_map_ui.set_visible_ids(vec![10, 20, 30]);
         app
+    }
+
+    #[test]
+    fn end_ignores_empty_virtual_history_and_selects_the_last_loaded_index() {
+        let mut app = PerseidApp::test_app();
+        app.main_tab = MainTab::Proxy;
+        let ctx = egui::Context::default();
+        for websocket in [false, true] {
+            app.proxy_section = if websocket {
+                ProxySection::WebSocketsHistory
+            } else {
+                ProxySection::HttpHistory
+            };
+            app.http_table.active = true;
+            app.ws_table.active = true;
+            keyboard_frame(&ctx, &mut app, vec![key(Key::End)]);
+            assert_eq!(app.http_table.select_row, None);
+            assert_eq!(app.ws_table.select_row, None);
+            if websocket {
+                app.ws_table.page = Some(crate::project::HistoryPage {
+                    offset: 0,
+                    rows: Vec::new(),
+                    total: 42,
+                    selected_index: None,
+                    selected_id: None,
+                });
+            } else {
+                app.http_table.page = Some(crate::project::HistoryPage {
+                    offset: 0,
+                    rows: Vec::new(),
+                    total: 42,
+                    selected_index: None,
+                    selected_id: None,
+                });
+            }
+            keyboard_frame(&ctx, &mut app, vec![key(Key::End)]);
+            assert_eq!(
+                if websocket {
+                    app.ws_table.select_row
+                } else {
+                    app.http_table.select_row
+                },
+                Some(41)
+            );
+            app.http_table.select_row = None;
+            app.http_table.page = None;
+        }
     }
 
     #[test]

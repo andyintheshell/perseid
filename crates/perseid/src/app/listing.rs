@@ -11,6 +11,9 @@ impl PerseidApp {
     }
 
     pub(super) fn rebuild_http_visible(&mut self) {
+        if self.rebuild_stored_http() {
+            return;
+        }
         let key = HttpVisibleKey {
             quick_search: self.filter.clone(),
             filter: self.history_filter.clone(),
@@ -46,6 +49,9 @@ impl PerseidApp {
     }
 
     pub(super) fn rebuild_websocket_visible(&mut self) {
+        if self.rebuild_stored_ws() {
+            return;
+        }
         let key = (
             self.websocket_filter.clone(),
             self.websocket_history.revision(),

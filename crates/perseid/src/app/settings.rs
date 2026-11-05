@@ -17,6 +17,16 @@ impl PerseidApp {
         let mut open = self.settings.open;
         if open {
             egui::Window::new("Settings").open(&mut open).default_width(640.0).resizable(true).show(ctx, |ui| {
+            ui.heading("Project");
+            ui.label("All captures are kept unless you delete them or enable automatic deletion.");
+            if let Some(status) = self.project.status() {
+                let limits = status.retention;
+                if limits.max_records > 0 || limits.max_body_bytes > 0 {
+                    ui.colored_label(theme::AMBER, "Automatic deletion is enabled for this project.");
+                }
+            }
+            if ui.button("Automatic deletion…").clicked() { self.open_project_storage(); }
+            ui.separator();
             ui.heading("Sessions");
             ui.separator();
             ui.add_space(8.0);

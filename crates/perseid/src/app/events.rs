@@ -144,6 +144,7 @@ impl PerseidApp {
         if self
             .selected
             .is_some_and(|id| self.history.get(id).is_none())
+            && !self.http_table.active
             && !(self.main_tab == MainTab::Target && self.target_section == TargetSection::SiteMap)
         {
             self.selected = None;
@@ -152,6 +153,7 @@ impl PerseidApp {
         if self
             .websocket_selected
             .is_some_and(|id| self.websocket_history.get(id).is_none())
+            && !self.ws_table.active
         {
             self.websocket_selected = None;
             self.websocket_detail = None;

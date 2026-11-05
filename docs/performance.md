@@ -41,23 +41,16 @@ The 2,000-entry test added about 6.5 MiB over idle. Both large-response tests
 stayed under 109 MiB peak even though the wire body was 8 MiB, because capture
 stops at 1 MiB and the detail views render bounded previews.
 
-Each HTTP and WebSocket history UI cache has a retained-body budget. The default
-is half of physical memory, measured once at startup, with a 256 MiB fallback if
-the platform does not report installed memory (`--history-bytes` overrides it).
-On the 5.3 GiB benchmark VM this resolves to about 2.65 GiB per cache across
-request and response bodies, so a worst case of 2,000 HTTP exchanges with two
-full 1 MiB bodies each still cannot retain the full 4 GiB in that cache. The
-HTTP and WebSocket caches have separate budgets. The temporary redb project has
-its own aggregate retention limits: combined record count across HTTP and
-WebSocket messages, and retained HTTP body/WebSocket payload bytes. By default
-both mirror the history settings, so the same numbers bound the UI cache and
-the temporary store; `--temporary-retention-limit` and
-`--temporary-retention-bytes` change them independently, and `0` disables a
-dimension. Saved projects default to unlimited retention, with opt-in combined
-record/body limits under **Project storage…**. Limits exclude headers and
-workbench data and do not cap physical file size; freed redb pages can be reused
-without shrinking the file. The stored HTTP browser reads at most 500 metadata
-rows per page and hydrates only the selected detail on a background worker.
+Recent HTTP and WebSocket UI caches now default to 128 records and 64 MiB of
+bodies each. Both virtual history tables retain at most 1,000 metadata rows
+and one selected full capture, independently of the recent caches. Filtering
+precedes pagination and scans all metadata in short transactions; exact counts
+therefore cost O(N) per query. Legacy HTTP records without persisted parameter/title
+summaries read bodies transiently during scans. New captures persist these summaries.
+Temporary project storage remains RAM-only and defaults to unlimited retention;
+cache limits are not a process-memory cap. Save to disk before exhausting RAM.
+Opt-in temporary limits use `--temporary-retention-*`; saved policies are under
+**Settings > Automatic deletion…**. Neither policy caps physical file size.
 These additions have not been included in the historical M0 benchmark. That workload retained only
 125 KiB, so the UI-cache budget did not bind in the measurements above.
 

@@ -456,7 +456,7 @@ pub fn read_ws_connection(
     read_ws_connection_from(&table, id)
 }
 
-fn read_ws_connection_from(
+pub(super) fn read_ws_connection_from(
     table: &redb::ReadOnlyTable<u64, &[u8]>,
     id: u64,
 ) -> Result<Option<WebSocketConnectionInfo>> {
@@ -468,7 +468,7 @@ fn read_ws_connection_from(
     Ok(Some(record.to_info()))
 }
 
-fn placeholder_connection(id: u64) -> WebSocketConnectionInfo {
+pub(super) fn placeholder_connection(id: u64) -> WebSocketConnectionInfo {
     WebSocketConnectionInfo {
         id,
         url: "<connection metadata unavailable>".to_string(),
@@ -1097,6 +1097,121 @@ mod tests {
         ));
         assert!(matches!(
             list_ws(&db, None, 10),
+            Err(ProjectError::UnsupportedRecord { .. })
+        ));
+    }
+
+    #[test]
+    fn unified_pages_filter_before_windowing_and_load_binary_details_lazily() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        let db = Arc::new(memory_db());
+        for id in 1..=1205 {
+            let mut record = completed_http(id, id, 1000, "GET", "example.com", "/", 200);
+            record.summary = Some(super::super::history::HttpSummary {
+                parameters: (id % 2) as usize,
+                title: format!("title-{id}"),
+            });
+            record.response_body = BodyCaptureRecord {
+                observed_len: 3,
+                stored_len: 3,
+                truncated: false,
+                complete: true,
+            };
+            insert_http(&db, &record, 1000, b"", &[0, 255, 42]);
+            insert_ws(
+                &db,
+                &ws_record(id, id, 1000, 10, WsOpcodeRecord::Binary, 3),
+                None,
+                &[0, 255, 42],
+            );
+        }
+        let snapshot = super::super::ProjectSnapshot { db: db.clone() };
+        let cancel = AtomicBool::new(false);
+        let page = snapshot
+            .http_history_page(500, 100, Some(1203), &cancel, |row| {
+                row.summary.parameters == 1
+            })
+            .unwrap();
+        assert_eq!(page.total, 603);
+        assert_eq!(page.rows.len(), 100);
+        assert_eq!(page.rows[0].item.id, 1001);
+        assert_eq!(page.selected_index, Some(601));
+        assert_eq!(page.rows[0].summary.title, "title-1001");
+        assert!(
+            page.rows
+                .iter()
+                .all(|row| row.item.response_body().unwrap().data().is_empty())
+        );
+        let full = snapshot.get_http(1).unwrap().unwrap();
+        assert_eq!(full.response_body().unwrap().data(), &[0, 255, 42]);
+        let ws = snapshot
+            .ws_history_page(1000, 5000, Some(1), &cancel, |_| true)
+            .unwrap();
+        assert_eq!(ws.total, 1205);
+        assert_eq!(ws.rows.len(), 205);
+        assert_eq!(ws.rows[0].id, 1001);
+        assert_eq!(ws.selected_index, Some(0));
+        assert!(
+            ws.rows
+                .iter()
+                .all(|row| row.payload.data().is_empty() && row.payload.total_len() == 3)
+        );
+        assert_eq!(
+            snapshot.get_ws(1).unwrap().unwrap().payload.data(),
+            &[0, 255, 42]
+        );
+        assert!(load_http_snapshot(&db, 0, 0).unwrap().0.is_empty());
+        assert!(load_ws_snapshot(&db, 0, 0).unwrap().0.is_empty());
+        assert_eq!(
+            snapshot
+                .http_history_page(0, usize::MAX, None, &cancel, |_| true)
+                .unwrap()
+                .rows
+                .len(),
+            1000
+        );
+    }
+
+    #[test]
+    fn unified_pages_bound_arrivals_cancel_and_validate_versions() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let db = Arc::new(memory_db());
+        let record = completed_http(1, 1, 1000, "GET", "example.com", "/", 200);
+        insert_http(&db, &record, 1000, b"", b"legacy");
+        let snapshot = super::super::ProjectSnapshot { db: db.clone() };
+        let cancel = AtomicBool::new(false);
+        let page = snapshot
+            .http_history_page(0, 10, None, &cancel, |_| {
+                let next = completed_http(2, 2, 2000, "GET", "example.com", "/new", 200);
+                insert_http(&db, &next, 2000, b"", b"");
+                true
+            })
+            .unwrap();
+        assert_eq!(page.total, 1, "arrivals must not extend a running query");
+        cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            snapshot
+                .http_history_page(0, 10, None, &cancel, |_| panic!("cancelled"))
+                .unwrap()
+                .total,
+            0
+        );
+        cancel.store(false, Ordering::Relaxed);
+        let mut future = record;
+        future.record_version = schema::RECORD_VERSION + 1;
+        insert_http(&db, &future, 1000, b"", b"");
+        assert!(matches!(
+            snapshot.http_history_page(0, 10, None, &cancel, |_| true),
+            Err(ProjectError::UnsupportedRecord { .. })
+        ));
+        let mut ws = ws_record(1, 1, 1000, 10, WsOpcodeRecord::Text, 0);
+        ws.record_version = schema::RECORD_VERSION + 1;
+        insert_ws(&db, &ws, None, b"");
+        assert!(matches!(
+            snapshot.ws_history_page(0, 10, None, &cancel, |_| true),
             Err(ProjectError::UnsupportedRecord { .. })
         ));
     }

@@ -74,20 +74,18 @@ sharing one.
 
 ### Browse older history
 
-Opening a project loads a bounded newest-first live snapshot controlled by
-`--history-limit` and `--history-bytes`. In **Proxy > HTTP history**, choose
-**Browse stored history…** for all retained HTTP exchanges. **Older**, **Newer**,
-and **Newest** navigate metadata pages of up to 500 rows, newest first. Select
-a row to load request/response details, Pretty/Raw/Hex views, and Inspector
-notes on demand; send it directly to Repeater, Intruder, or Comparer. Pages
-stay in place during capture; **Newest** refreshes to include new arrivals.
-Live-table filters do not apply in this browser. **Search** filters all retained
-HTTP/WebSocket records, including decoded bodies. The site map also covers all
-retained HTTP history; only the live HTTP/WebSocket tables use the bounded snapshot.
+The HTTP and WebSocket history tables cover every retained capture in the
+current project, in capture-time order. Scroll or use Home/End and arrow keys
+to navigate; filters apply to the full history before windowing. Metadata loads
+in bounded background windows, and selecting a row loads its complete captured
+bytes and Inspector details on demand. Tool sends wait for full details rather
+than using metadata-only bodies. UI-cache eviction never deletes or hides a
+stored capture. **Search** also searches retained bodies; the site map covers
+all retained HTTP endpoints.
 
 ### Retention and file size
 
-**Project storage…** in the HTTP history toolbar configures a saved project's
+**Settings > Automatic deletion…** configures a saved project's
 combined HTTP/WebSocket record count and retained body/payload byte limits.
 Both default to **0 (unlimited)**. **Apply retention limits** immediately removes
 the oldest eligible records and applies the policy to future captures. Limits
@@ -96,7 +94,7 @@ copy first if you need the records. The status bar reports eviction counts, and
 the live caches refresh after committed evictions.
 
 Temporary projects use `--temporary-retention-limit` and
-`--temporary-retention-bytes`, defaulting to the history flags. For both modes,
+`--temporary-retention-bytes`, both defaulting to **0 (unlimited)**. For both modes,
 zero disables a dimension. Limits are soft: in-flight HTTP exchanges and each
 stream's newest record are kept, even if they exceed a limit. Byte accounting
 excludes headers, indexes, workbench snapshots, and database overhead.
@@ -225,14 +223,12 @@ is a quick way to verify the path without a browser or CA trust.
   display filter. Filters only hide rows; captured exchanges stay in the
   project. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
-- The in-memory history view is bounded by exchange count and retained-body
-  bytes. These limits evict rows from the UI cache and do not prune saved-project
-  files. Temporary redb storage has separate aggregate count and body-byte
-  retention limits, which default to the history limits and can be configured
-  independently; older records are evicted when those limits are exceeded.
-  Older saved records remain on disk even when evicted from the UI cache.
+- Recent in-memory caches have independent count and body-byte limits. Eviction
+  never hides stored records from the virtual tables. Temporary redb retention
+  is unlimited by default; optional aggregate limits delete the oldest eligible
+  captures independently of those cache sizes.
 - The status bar shows in-flight requests, held messages, dropped capture events,
-  rejected connections, and UI-cache evictions. A dropped-event warning means
+  rejected connections, and storage-deletion counts. A dropped-event warning means
   the history may be incomplete even if the client received its response.
 
 ### Copy as curl
@@ -846,8 +842,8 @@ separate Space, matching the system green-button behavior.
 | --- | --- |
 | Captured bodies | 1 MiB retained per request/response by default; forwarding can stream larger bodies. |
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
-| History UI cache | 2,000 HTTP exchanges and 2,000 WebSocket messages; each cache uses the configured retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). These are UI-cache limits; the temporary store has separate aggregate retention settings. |
-| Temporary retention | Combined HTTP + WebSocket records default to `--history-limit`; retained HTTP body + WebSocket payload bytes default to `--history-bytes`. Override with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest records are evicted first; each stream's newest record and any in-flight exchange are always kept, so the limits can be exceeded temporarily. |
+| History UI cache | 128 records and 64 MiB of bodies per recent cache by default, independent of project retention. Metadata windows hold at most 1,000 rows per table plus one selected full capture. |
+| Temporary retention | Unlimited by default. Opt into combined record/body limits with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest eligible records are deleted first; each stream's newest record and in-flight HTTP are always kept. |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
@@ -857,9 +853,9 @@ separate Space, matching the system green-button behavior.
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
-| Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
+| Temporary storage growth | Unbounded by default; save to disk before exhausting RAM. No automatic memory-pressure pause. Optional retention limits exclude headers, indexes, workbench data, and database overhead. |
 | Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Files are unencrypted; saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
-| Project history view | Opening loads a bounded newest snapshot. **Browse stored history…** pages all retained HTTP rows and loads details/notes on demand; Search scans all retained HTTP/WebSocket records. The site map pages all retained HTTP endpoints with lazy details; the live WebSocket table remains cache-based. |
+| Project history view | Both HTTP and WebSocket tables cover all retained records, filtering before loading bounded metadata windows. Selected bodies load lazily. Search covers stored bodies; the site map pages all retained HTTP endpoints. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |

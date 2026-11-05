@@ -45,6 +45,7 @@ impl PerseidApp {
             .and_then(|id| {
                 self.history
                     .get(id)
+                    .or_else(|| self.http_table.item(id))
                     .or_else(|| self.site_map_ui.stored.item(id))
             })
             .filter(|item| !item.is_tunnel())

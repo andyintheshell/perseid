@@ -118,7 +118,7 @@ Projects remain RAM-only until explicitly saved; `.perseid` files live at the
 user-selected path, independently of the installation and local CA directory.
 Installers/upgrades/uninstallers must not remove user projects or copies.
 Saved projects autosave, default to unlimited retention, and offer opt-in
-combined record/body limits under **Project storage…**. Limits exclude
+combined record/body limits under **Settings > Automatic deletion…**. Limits exclude
 workbench snapshots and database overhead and do not cap physical file size.
 There is no automatic compaction; Save Copy writes retained data to a fresh file
 and may be smaller.

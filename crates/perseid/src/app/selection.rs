@@ -4,13 +4,16 @@ use super::*;
 
 impl PerseidApp {
     pub(super) fn selected_http_item(&self, id: u64) -> Option<&crate::history::HistoryItem> {
-        self.history
-            .get(id)
-            .or_else(|| self.site_map_ui.stored.item(id))
+        self.http_table.item(id).or_else(|| {
+            self.history
+                .get(id)
+                .or_else(|| self.site_map_ui.stored.item(id))
+        })
     }
 
     pub(super) fn clear_history(&mut self) {
         self.site_map_ui.stored = Default::default();
+        self.http_table = Default::default();
         self.history.clear();
         self.title_cache.borrow_mut().clear();
         self.selected = None;
@@ -23,7 +26,11 @@ impl PerseidApp {
 
     pub(super) fn delete_selected_http_item(&mut self) {
         let Some(id) = self.selected else { return };
-        if self.history.get(id).is_none_or(|item| item.is_in_flight()) || self.project.is_busy() {
+        if self
+            .selected_http_item(id)
+            .is_none_or(|item| item.is_in_flight())
+            || self.project.is_busy()
+        {
             return;
         }
         self.project.delete_http_item(id);
@@ -33,7 +40,8 @@ impl PerseidApp {
     pub(super) fn remove_http_item(&mut self, id: u64) {
         self.history.remove_stored(&[id]);
         self.site_map_ui.stored = Default::default();
-        self.project.history_browser = Default::default();
+        self.http_table.invalidate();
+        self.http_table.invalidate_detail();
         self.title_cache.borrow_mut().clear();
         if self.selected == Some(id) {
             self.selected = None;
@@ -45,6 +53,7 @@ impl PerseidApp {
     }
 
     pub(super) fn clear_websocket_history(&mut self) {
+        self.ws_table = Default::default();
         self.websocket_history.clear();
         self.websocket_live_ids.clear();
         self.websocket_selected = None;
@@ -55,11 +64,17 @@ impl PerseidApp {
     }
 
     pub(super) fn selected_row_index(&self) -> Option<usize> {
+        if self.http_table.active {
+            return self.http_table.selected_index;
+        }
         self.selected
             .and_then(|id| self.visible.iter().position(|&visible| visible == id))
     }
 
     pub(super) fn selected_websocket_row_index(&self) -> Option<usize> {
+        if self.ws_table.active {
+            return self.ws_table.selected_index;
+        }
         self.websocket_selected.and_then(|id| {
             self.websocket_visible
                 .iter()
@@ -68,6 +83,15 @@ impl PerseidApp {
     }
 
     pub(super) fn move_selection(&mut self, delta: isize) {
+        if self.http_table.active {
+            if let Some(index) =
+                moved_row_index(self.http_table.total(), self.selected_row_index(), delta)
+            {
+                self.http_table.wanted = index;
+                self.http_table.select_row = Some(index);
+            }
+            return;
+        }
         match moved_row_index(self.visible.len(), self.selected_row_index(), delta) {
             Some(next) => self.select_id(self.visible[next]),
             None => self.selected = None,
@@ -75,6 +99,17 @@ impl PerseidApp {
     }
 
     pub(super) fn move_websocket_selection(&mut self, delta: isize) {
+        if self.ws_table.active {
+            if let Some(index) = moved_row_index(
+                self.ws_table.total(),
+                self.selected_websocket_row_index(),
+                delta,
+            ) {
+                self.ws_table.wanted = index;
+                self.ws_table.select_row = Some(index);
+            }
+            return;
+        }
         match moved_row_index(
             self.websocket_visible.len(),
             self.selected_websocket_row_index(),
@@ -86,6 +121,12 @@ impl PerseidApp {
     }
 
     pub(super) fn select_id(&mut self, id: u64) {
+        self.http_table.selected_index = self.http_table.page.as_ref().and_then(|page| {
+            page.rows
+                .iter()
+                .position(|row| row.item.id == id)
+                .map(|index| page.offset + index)
+        });
         if self.selected != Some(id) {
             self.selected = Some(id);
             self.detail = None;
@@ -94,6 +135,12 @@ impl PerseidApp {
     }
 
     pub(super) fn select_websocket_id(&mut self, id: u64) {
+        self.ws_table.selected_index = self.ws_table.page.as_ref().and_then(|page| {
+            page.rows
+                .iter()
+                .position(|row| row.id == id)
+                .map(|index| page.offset + index)
+        });
         if self.websocket_selected != Some(id) {
             self.websocket_selected = Some(id);
             self.websocket_detail = None;

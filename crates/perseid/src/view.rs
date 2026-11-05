@@ -7,7 +7,7 @@ use egui::Color32;
 
 use crate::decode::{self, DecodeError};
 use crate::history::HistoryItem;
-use crate::proxy::{CapturedBody, WebSocketDirection, WebSocketOpcode};
+use crate::proxy::{CapturedBody, ResponseHead, WebSocketDirection, WebSocketOpcode};
 use crate::websocket_history::WebSocketMessageItem;
 use crate::{pretty, theme};
 
@@ -357,11 +357,17 @@ pub(crate) fn request_body_for_search(item: &HistoryItem) -> Cow<'_, [u8]> {
 /// Decoded response-body bytes for searching. See
 /// [`request_body_for_search`] for the representation rules.
 pub(crate) fn response_body_for_search(item: &HistoryItem) -> Cow<'_, [u8]> {
-    match decode_response(item) {
+    response_body_for_search_from_parts(item.response.as_ref(), item.response_body())
+}
+
+pub(crate) fn response_body_for_search_from_parts<'a>(
+    head: Option<&ResponseHead>,
+    body: Option<&'a CapturedBody>,
+) -> Cow<'a, [u8]> {
+    let encoding = head.and_then(|head| header_value(&head.headers, "content-encoding"));
+    match body.map_or(Ok(None), |body| decode_for(body, encoding)) {
         Ok(Some(decoded)) => Cow::Owned(decoded.bytes),
-        _ => item
-            .response_body()
-            .map_or(Cow::Borrowed(&[][..]), |body| Cow::Borrowed(body.data())),
+        _ => body.map_or(Cow::Borrowed(&[][..]), |body| Cow::Borrowed(body.data())),
     }
 }
 

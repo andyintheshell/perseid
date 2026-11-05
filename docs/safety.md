@@ -24,16 +24,15 @@ aids, not permission to test an arbitrary host.
   have a specific reason and understand the exposure.
 - Captured request and response bodies are capped by `--capture-limit`
   (1 MiB per message by default).
-- The HTTP and WebSocket history **UI caches** each accept up to
-  `--history-limit` (2000 entries by default) and receive the configured
-  `--history-bytes` budget (half of physical memory by default, with a
-  256 MiB fallback if installed memory is unavailable). The temporary
-  in-memory redb project additionally evicts the oldest captured records when
-  it exceeds `--temporary-retention-limit` combined HTTP/WebSocket records or
-  `--temporary-retention-bytes` retained body/payload bytes; both default to
-  the history settings and can be disabled with `0`. In a saved project,
-   retention defaults to unlimited; opt-in logical record/body limits are under
-   **Proxy > HTTP history > Project storage…**. They do not cap physical disk use.
+- Recent HTTP and WebSocket **UI caches** default to 128 records and 64 MiB of
+  bodies each (`--history-limit` / `--history-bytes`). Eviction only drops cached
+  copies; both tables still show all retained captures. Temporary retention
+  defaults to unlimited and is independent of these caches. Opt into deletion
+  with `--temporary-retention-limit` / `--temporary-retention-bytes`. Saved-project
+  policies remain under **Settings > Automatic deletion…** and do not cap physical
+  disk use. Temporary project RAM can grow without bound; save to disk early.
+  No memory-pressure pause or guaranteed lossless recording is provided. Queue
+  overflow and storage errors are reported, but may lose captures.
 - The proxy accepts at most 128 client connections and 64 CONNECT tunnels at
   once by default. Excess connections are closed; excess CONNECT requests get
   a 503 response. Both limits are library configuration, not browser settings.
@@ -78,10 +77,9 @@ aids, not permission to test an arbitrary host.
 Perseid has two project modes:
 
 - **Temporary (default):** captured history and project-scoped workbench state
-  stay in an in-memory redb project. The oldest captured records are evicted
-  when the temporary store exceeds its aggregate count or retained-body limits
-  (`--temporary-retention-limit`/`--temporary-retention-bytes`, defaulting to
-  `--history-limit`/`--history-bytes`). Data is discarded on exit unless you
+  stay in an in-memory redb project. Automatic deletion is off unless aggregate
+  limits are explicitly supplied (`--temporary-retention-limit` /
+  `--temporary-retention-bytes`). Data is discarded on exit unless you
   use **File > Save Project As…**. **New Project** and **Open Project** ask
   Save/Discard/Cancel before replacing a temporary project that has unsaved
   records or workbench edits; Save opens Save As and only continues after a
@@ -92,7 +90,7 @@ Perseid has two project modes:
   user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
   project-scoped workbench state are committed automatically. **Save Project
   Copy…** creates another file. There is no encryption at rest. Saved projects
-  default to unlimited retention; **Project storage…** can opt into oldest-first
+  default to unlimited retention; **Settings > Automatic deletion…** can opt into oldest-first
   combined HTTP/WebSocket record-count and retained-body-byte limits. Applying
   lower limits removes eligible records immediately and persists the policy.
   In-flight HTTP and each stream's newest record are retained even over budget.
@@ -103,15 +101,15 @@ and their last responses, Intruder configuration and results, Decoder panels,
 Comparer items and result-window state, Search state and structured result rows,
 Sequencer samples/settings/analysis, and TLS interception and pass-through hosts.
 It does not include running attacks or sends, held interception messages, pending
-network operations, or proxy lifecycle state. Opening a project loads only a
-bounded newest-first history snapshot; older records remain in the file and can
-be found by Search; **Browse stored history…** pages through all retained HTTP
-records and loads details and notes on demand. The site map covers all retained
+network operations, or proxy lifecycle state. HTTP and WebSocket history load
+bounded metadata windows over every retained record, hydrating selected bodies
+on demand. The site map covers all retained
 HTTP endpoints using a disposable disk index and bounded pages. Its private
 temporary directory contains sensitive URL/title summaries and is removed on
 normal exit; a crash can leave it in the OS temporary directory. If
-a stored HTTP, WebSocket, or workspace snapshot cannot be decoded, the open fails
-visibly and the previously open project and running proxy stay active. The project does not
+a requested recent-history or workspace snapshot cannot be decoded, the open fails visibly and the previous
+project stays active. History corruption encountered later is reported in the
+history view. The project does not
 include the local TLS CA certificate or private key.
 
 New project files are created owner-only (`0600`) on Unix; Windows uses the

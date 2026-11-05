@@ -71,6 +71,8 @@ pub struct HttpExchangeRecord {
     pub phase: HttpPhaseRecord,
     pub request_body: BodyCaptureRecord,
     pub response_body: BodyCaptureRecord,
+    #[serde(default)]
+    pub(crate) summary: Option<super::history::HttpSummary>,
 }
 
 impl HttpExchangeRecord {
@@ -91,6 +93,7 @@ impl HttpExchangeRecord {
             phase: HttpPhaseRecord::InFlight,
             request_body: BodyCaptureRecord::empty(),
             response_body: BodyCaptureRecord::empty(),
+            summary: None,
         }
     }
 
