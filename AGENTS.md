@@ -1,5 +1,10 @@
 # Agent guidance
 
+## Independent implementation
+
+Do not inspect, decompile, or use Burp Suite internals or non-public source code.
+Implement Perseid independently; do not copy Burp Suite code.
+
 ## Responses
 
 Be concise in all responses. Avoid unnecessary narration, repetition, and explanations. Preserve complete code, exact commands, error messages, security considerations, and important implementation details. Do not sacrifice correctness or testing to reduce tokens.

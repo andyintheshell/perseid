@@ -14,6 +14,11 @@ the easiest to review.
 - Never include captured credentials, tokens, personal data, or other
   sensitive traffic in issues, pull requests, or test fixtures.
 
+## Independent implementation
+
+Do not inspect, decompile, or use Burp Suite internals or non-public source code.
+Implement Perseid independently; do not copy Burp Suite code.
+
 ## Development setup
 
 The manifest minimum is Rust 1.95 (edition 2024). `rust-toolchain.toml` and CI
