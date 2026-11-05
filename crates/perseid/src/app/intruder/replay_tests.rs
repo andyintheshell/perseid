@@ -293,6 +293,51 @@ fn legacy_binary_and_conflicting_drafts_restore_without_losing_user_bytes() {
 }
 
 #[test]
+fn captured_single_dollars_survive_adjacent_positions_and_workspace_restore() {
+    for legacy in [false, true] {
+        for (body, expected) in [
+            ("price=$5", "price=$9"),
+            ("price=5$", "price=9$"),
+            ("price=$5$", "price=$9$"),
+        ] {
+            let (host, received, task) = receiver();
+            let capture = item(&host, body.as_bytes().to_vec(), None, "text/plain");
+            let mut app = PerseidApp::test_app();
+            app.scope_enforce = false;
+            app.send_history_to_intruder(&capture);
+            if legacy {
+                let mut saved = app.intruder_workspace();
+                saved.request = crate::view::replay_request_head(&capture);
+                saved.preserved_body = Some(crate::project::BodyWorkspace::from_body(
+                    &capture.request_body,
+                ));
+                saved.body_escaped = false;
+                app.apply_intruder_workspace(&saved);
+            }
+            assert!(app.intruder.body_escaped);
+            assert_eq!(
+                crate::app::replay_body::bytes(&app.intruder.request, true, false).unwrap(),
+                body.as_bytes()
+            );
+            let start = app.intruder.request.rfind('5').unwrap();
+            let (request, _) = crate::proxy::toggle_marker(&app.intruder.request, start..start + 1);
+            app.intruder.request = request;
+            app.intruder.payload_sets[0].text = "9".into();
+            let saved = serde_json::to_vec(&app.intruder_workspace()).unwrap();
+            app.apply_intruder_workspace(&serde_json::from_slice(&saved).unwrap());
+            let plan = app.intruder.build_plan();
+            let rendered = plan.render_sequence(1).unwrap();
+            assert_eq!(plan.body_bytes(&rendered.raw).unwrap(), expected.as_bytes());
+            app.start_intruder_attack();
+            assert!(app.intruder.error.is_none(), "{:?}", app.intruder.error);
+            let (_, actual) = received.recv_timeout(Duration::from_secs(10)).unwrap();
+            assert_eq!(actual, expected.as_bytes());
+            task.join().unwrap();
+        }
+    }
+}
+
+#[test]
 fn binary_body_edits_and_payloads_survive_workspace_restore_and_real_sends() {
     for intruder in [false, true] {
         let (host, received, task) = receiver();

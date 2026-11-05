@@ -589,9 +589,10 @@ acknowledgement button. For bodies that are not valid UTF-8, the editor uses
 lossless byte escapes: `\xFF` represents byte FF and `\\` represents a literal
 backslash. The request subtitle identifies this notation. Valid UTF-8 characters
 remain readable. Intruder uses this notation for captured bodies containing
-literal `$$` too, displaying dollars as `\x24` so they cannot become payload
-positions accidentally. You can mark positions in binary bodies as well as text;
-select whole byte escapes. Payload values remain UTF-8 text, not byte-escape
+literal `$` too, displaying dollars as `\x24` so they cannot become payload
+positions or merge with adjacent markers accidentally. You can mark positions
+in binary bodies as well as text; select whole byte escapes. Payload values
+remain UTF-8 text, not byte-escape
 source. Invalid or unfinished escapes block sending rather than changing bytes.
 
 Unchanged bodies, including multipart, trailing CRLF, and gzip, are sent without

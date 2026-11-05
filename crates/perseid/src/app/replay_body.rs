@@ -20,8 +20,8 @@ pub(super) fn inline(
         *incomplete = true;
         return false;
     }
-    *escaped = std::str::from_utf8(&body.data).is_err()
-        || (intruder && body.data.windows(2).any(|pair| pair == b"$$"));
+    // Even one literal dollar can merge with an adjacent inserted $$ marker.
+    *escaped = std::str::from_utf8(&body.data).is_err() || (intruder && body.data.contains(&b'$'));
     if *escaped {
         raw.push_str(&body_text::encode(&body.data, intruder));
     } else {
