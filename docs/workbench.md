@@ -332,6 +332,19 @@ project. Clearing history also clears them.
 | **Raw** | Reconstructed message text with line numbers and syntax highlighting. Binary/control bytes may be displayed lossily. |
 | **Hex** | A bounded byte-offset dump. In history and Repeater, this uses the same decoded body representation as the text views. Drag across the hex or ASCII columns to select bytes; **Copy selection** copies them as space-separated hexadecimal. |
 
+Each message pane has a bottom **Search** field, previous/next arrows, and a
+highlight count. Search is literal and case-insensitive against the displayed
+view, including the displayed dump in Hex. `Enter` moves to the next highlight;
+`Shift`+`Enter` moves to the previous one. Navigation wraps at either end and
+scrolls the current highlight into view without changing the message. A query
+stays with its pane when selecting another message or switching views.
+
+The **Wrap lines** toggle (`↩`), immediately left of `\n`, is on by default.
+Turn it off to scroll long lines horizontally. Wrapping and whitespace settings
+are independent for each pane; Hex keeps its fixed columns and disables both
+toggles without discarding their text-view settings. The editable Repeater,
+Intercept, and Intruder message panes use the same search and wrapping controls.
+
 History and Repeater views decode gzip, deflate, and Brotli bodies for
 inspection. Displayed `Content-Encoding` is removed after successful decoding;
 `Content-Length` is adjusted only when the complete decoded length is known.
