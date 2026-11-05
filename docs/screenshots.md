@@ -29,6 +29,10 @@ file extensions; the search field beside it narrows the visible rows directly.
 As in Burp, CSS and image responses plus common static extensions are hidden by
 default.
 
+Message panes have a bottom search bar with previous/next arrows and a highlight
+count. The selected wrap toggle sits immediately left of `\n`; wrapping starts
+enabled.
+
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
 
 Right-click an exchange to send it to another tool, add its host to scope,
