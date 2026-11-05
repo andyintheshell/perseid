@@ -87,7 +87,7 @@ fn request_text(
     wrap: bool,
     show_invisibles: bool,
 ) -> egui::text_edit::TextEditOutput {
-    let min_height = ui.available_height().max(0.0);
+    let min_height = ui.available_height().max(160.0);
     let font = FontId::monospace(crate::highlight::MESSAGE_FONT_SIZE);
     let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
         let width = if wrap { wrap_width } else { f32::INFINITY };
@@ -139,6 +139,34 @@ impl IntruderState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_panels_preserve_the_request_editor_minimum_height() {
+        let ctx = egui::Context::default();
+        for wrap in [true, false] {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 100.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    assert!(ui.available_height() < 160.0);
+                    let output = request_text(
+                        ui,
+                        &mut String::new(),
+                        &message_view::MessageSearch::default(),
+                        wrap,
+                        false,
+                    );
+                    assert!(output.response.rect.height() >= 160.0);
+                },
+            )
+            .drop_without_applying_deltas();
+        }
+    }
 
     #[test]
     fn searching_and_wrapping_preserve_intruder_markers_and_unicode() {

@@ -504,14 +504,15 @@ fn message_numbered(
         .inner
 }
 
-/// Keep this setting on the pane, not the message or view mode.
-pub(super) fn invisible_toggle(ui: &mut egui::Ui, enabled: bool) -> bool {
+/// Pane-local editor controls. Binary drafts disable whitespace markers, but
+/// their editable hex text still supports wrapping (unlike the fixed Hex view).
+pub(super) fn invisible_toggle(ui: &mut egui::Ui, allow_invisibles: bool) -> bool {
     let key = ui.make_persistent_id("perseid.message.invisibles");
     let wrap_key = ui.make_persistent_id("perseid.message.wrap");
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let shown = invisible_toggle_button(ui, key, enabled);
-            wrap_toggle_button(ui, wrap_key, enabled);
+            let shown = invisible_toggle_button(ui, key, allow_invisibles);
+            wrap_toggle_button(ui, wrap_key, true);
             shown
         })
         .inner
@@ -1027,6 +1028,57 @@ mod tests {
         mode = MessageView::Pretty;
         frame(vec![], &mut mode).drop_without_applying_deltas();
         assert!(!wrapping);
+    }
+
+    #[test]
+    fn binary_editor_can_reenable_wrapping_without_enabling_whitespace() {
+        let ctx = Context::default();
+        let mut wrapping = true;
+        let mut frame = |events, allow_invisibles| {
+            ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let key = ui.make_persistent_id("perseid.message.invisibles");
+                    ui.data_mut(|data| {
+                        if data.get_temp::<bool>(key).is_none() {
+                            data.insert_temp(key, true);
+                        }
+                    });
+                    assert_eq!(invisible_toggle(ui, allow_invisibles), allow_invisibles);
+                    assert_eq!(ui.data(|data| data.get_temp::<bool>(key)), Some(true));
+                    wrapping = wrap_lines(ui);
+                },
+            )
+        };
+        let output = frame(vec![], true);
+        let wrap = text_position(&output, "↩").unwrap();
+        let invisible = text_position(&output, "\\n").unwrap();
+        assert!(wrap.x < invisible.x);
+        output.drop_without_applying_deltas();
+        for allow_invisibles in [true, false] {
+            frame(
+                vec![Event::PointerMoved(wrap), button(wrap, true)],
+                allow_invisibles,
+            )
+            .drop_without_applying_deltas();
+            frame(vec![button(wrap, false)], allow_invisibles).drop_without_applying_deltas();
+            // Clicking the disabled binary whitespace toggle must not change
+            // the saved text-mode preference or the wrapping preference.
+            if !allow_invisibles {
+                frame(
+                    vec![Event::PointerMoved(invisible), button(invisible, true)],
+                    false,
+                )
+                .drop_without_applying_deltas();
+                frame(vec![button(invisible, false)], false).drop_without_applying_deltas();
+            }
+        }
+        frame(vec![], true).drop_without_applying_deltas();
+        assert!(wrapping);
     }
 
     fn search_frame(

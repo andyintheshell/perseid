@@ -631,7 +631,8 @@ impl PerseidApp {
             .default_size((ui.available_width() * 0.5).max(260.0))
             .min_size(180.0)
             .show(ui, |ui| {
-                let ws = self.repeater_tabs[index].websocket.as_mut().unwrap();
+                let tab = &mut self.repeater_tabs[index];
+                let ws = tab.websocket.as_mut().unwrap();
                 ui.label(match ws.opcode {
                     WebSocketOpcode::Text => "Text message",
                     WebSocketOpcode::Binary => "Binary message (hex bytes)",
@@ -639,7 +640,7 @@ impl PerseidApp {
                 super::message_view::invisible_toggle(ui, ws.opcode == WebSocketOpcode::Text);
                 super::message_view::message_editor_with_limit(
                     ui,
-                    connection_id,
+                    tab.id,
                     &mut ws.draft,
                     match ws.opcode {
                         WebSocketOpcode::Text => send_limit,
@@ -1098,6 +1099,89 @@ mod tests {
         assert!(parse_hex_bytes("0").is_err());
         assert!(parse_hex_bytes("gg").is_err());
         assert!(parse_hex_bytes("é").is_err());
+    }
+
+    #[test]
+    fn websocket_tabs_on_one_connection_keep_independent_editor_cursors() {
+        use egui::text::{CCursor, CCursorRange};
+        use egui::text_edit::TextEditState;
+
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.repeater_tabs = [11, 12]
+            .into_iter()
+            .map(|id| {
+                let mut tab = RepeaterTab::new(id);
+                tab.websocket = Some(WebSocketReplay {
+                    connection_id: 7,
+                    live_connection_id: None,
+                    url: "ws://example.com/".into(),
+                    direction: WebSocketDirection::ToServer,
+                    opcode: WebSocketOpcode::Text,
+                    draft: "abcdef".into(),
+                    selected_message: None,
+                    truncated: false,
+                });
+                tab
+            })
+            .collect();
+        let frame = |app: &mut PerseidApp, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 500.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.websocket_repeater_view(ui),
+            )
+        };
+        let mut editors = Vec::new();
+        for index in 0..2 {
+            app.repeater_active = index;
+            let output = frame(&mut app, vec![]);
+            let pos = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == "abcdef" => {
+                        Some(shape.pos + egui::vec2(2.0, 5.0))
+                    }
+                    _ => None,
+                })
+                .expect("draft must be visible");
+            output.drop_without_applying_deltas();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+                .drop_without_applying_deltas();
+            }
+            let id = ctx.memory(|memory| memory.focused()).unwrap();
+            let mut state = TextEditState::load(&ctx, id).unwrap();
+            let range = CCursorRange::one(CCursor::new(index + 1));
+            state.cursor.set_char_range(Some(range));
+            state.store(&ctx, id);
+            editors.push((id, range));
+        }
+        assert_ne!(editors[0].0, editors[1].0);
+        for (index, (id, range)) in editors.into_iter().enumerate() {
+            app.repeater_active = index;
+            frame(&mut app, vec![]).drop_without_applying_deltas();
+            let state = TextEditState::load(&ctx, id).unwrap();
+            assert_eq!(state.cursor.char_range(), Some(range));
+        }
     }
 
     #[test]
