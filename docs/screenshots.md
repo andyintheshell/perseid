@@ -31,6 +31,11 @@ default.
 
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
 
+Right-click an exchange to send it to another tool, add its host to scope,
+open Notes, delete the item, or copy its URL or curl command.
+
+![HTTP history context menu with tool shortcuts and Delete item](images/perseid-http-history-context-menu.png)
+
 ## Projects
 
 Perseid starts with a temporary in-memory project (`Untitled (temporary)` in

@@ -22,6 +22,7 @@ class PublishScreenshotsTests(unittest.TestCase):
         images = self.root / label
         images.mkdir()
         (images / "perseid-main.png").write_bytes(label.encode())
+        (images / "perseid-http-history-context-menu.png").write_bytes(label.encode())
         env = os.environ.copy()
         env.update({
             "SCREENSHOTS_REMOTE": str(self.remote),
@@ -46,6 +47,14 @@ class PublishScreenshotsTests(unittest.TestCase):
         first_index = self.show(first, "index.md").decode()
         self.assertIn("Generated from `first`", first_index)
         self.assertIn("![Proxy - HTTP history](perseid-main.png)", first_index)
+        self.assertEqual(self.show(first, "perseid-http-history-context-menu.png"), b"first")
+        headings = [line for line in first_index.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[:3], [
+            "## Proxy - HTTP history",
+            "## Proxy - HTTP history context menu",
+            "## Projects - File menu",
+        ])
+        self.assertIn("![Proxy - HTTP history context menu](perseid-http-history-context-menu.png)", first_index)
         self.assertIn("![Repeater - WebSockets](perseid-repeater-websockets.png)", first_index)
         self.assertNotIn("screenshots-preview/", first_index)
         subprocess.run(["git", "--git-dir", str(self.remote), "merge-base", "--is-ancestor", first, second], check=True)

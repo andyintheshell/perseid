@@ -765,7 +765,21 @@ impl PerseidApp {
                         if response.clicked() || response.secondary_clicked() {
                             clicked = Some(id);
                         }
-                        response.context_menu(|ui| {
+                        let menu = egui::Popup::context_menu(&response);
+                        #[cfg(feature = "screenshots")]
+                        let menu = if self.http_context_menu_forced_open
+                            && self.selected == Some(id)
+                            && response.rect.is_finite()
+                            && response.rect.is_positive()
+                        {
+                            // Render the real row menu without synthetic pointer input.
+                            // The initial table sizing pass has no row rectangle yet.
+                            // Forced-open state is not stored, so it cannot leak into later scenes.
+                            menu.open(true).at_position(response.rect.center())
+                        } else {
+                            menu
+                        };
+                        menu.show(|ui| {
                             ui.add(
                                 Label::new(RichText::new(request_url(item)).strong()).truncate(),
                             );
@@ -1083,6 +1097,57 @@ mod decoder_transfer_tests {
             .shapes
             .iter()
             .find_map(|shape| find(&shape.shape, label))
+    }
+
+    #[cfg(feature = "screenshots")]
+    #[test]
+    fn history_context_menu_screenshot_renders_actions_without_leaking_to_other_scenes() {
+        let mut app = PerseidApp::test_app();
+        app.history = crate::history::History::new(100, 1024 * 1024);
+        app.prepare_screenshot_base().unwrap();
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let render = |app: &mut PerseidApp| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 820.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.main_content(ui),
+            )
+        };
+        app.prepare_screenshot_scene(1).unwrap();
+        for _ in 0..4 {
+            render(&mut app).drop_without_applying_deltas();
+        }
+        let output = render(&mut app);
+        for label in [
+            "Add to scope",
+            "Send to Repeater",
+            "Add notes",
+            "Delete item",
+            "Copy URL",
+        ] {
+            let pos =
+                label_pos(&output, label).unwrap_or_else(|| panic!("missing menu action {label}"));
+            assert!(
+                ctx.content_rect().contains(pos),
+                "menu action {label} is offscreen"
+            );
+        }
+        output.drop_without_applying_deltas();
+        for index in [2, 0] {
+            app.prepare_screenshot_scene(index).unwrap();
+            for _ in 0..4 {
+                render(&mut app).drop_without_applying_deltas();
+            }
+            let output = render(&mut app);
+            assert!(label_pos(&output, "Delete item").is_none());
+            output.drop_without_applying_deltas();
+        }
     }
 
     fn click(ctx: &egui::Context, app: &mut PerseidApp, label: &str, button: egui::PointerButton) {
