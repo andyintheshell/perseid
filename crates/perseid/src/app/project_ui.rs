@@ -127,16 +127,24 @@ enum PendingProject {
     ClearHttp {
         receiver: Receiver<std::result::Result<CommitReceipt, ProjectError>>,
     },
+    DeleteHttp {
+        id: u64,
+        receiver: Receiver<std::result::Result<CommitReceipt, ProjectError>>,
+    },
     ClearWs {
         receiver: Receiver<std::result::Result<CommitReceipt, ProjectError>>,
     },
 }
 
 impl PendingProject {
-    fn is_file_operation(&self) -> bool {
+    fn is_blocking_operation(&self) -> bool {
         matches!(
             self,
-            Self::Save { .. } | Self::PrepareOpen { .. } | Self::Open { .. } | Self::New { .. }
+            Self::Save { .. }
+                | Self::PrepareOpen { .. }
+                | Self::Open { .. }
+                | Self::New { .. }
+                | Self::DeleteHttp { .. }
         )
     }
 }
@@ -161,6 +169,7 @@ enum ProjectCompletion {
         restart_proxy: bool,
     },
     ClearedHttp(std::result::Result<CommitReceipt, ProjectError>),
+    DeletedHttp(u64, std::result::Result<CommitReceipt, ProjectError>),
     ClearedWs(std::result::Result<CommitReceipt, ProjectError>),
 }
 
@@ -264,7 +273,10 @@ impl ProjectUi {
         self.quit_flush.is_some()
             || self.switch_flush.is_some()
             || self.retention_pending.is_some()
-            || self.pending.iter().any(PendingProject::is_file_operation)
+            || self
+                .pending
+                .iter()
+                .any(PendingProject::is_blocking_operation)
     }
 
     fn notify(&mut self, text: impl Into<String>) {
@@ -290,6 +302,14 @@ impl ProjectUi {
         };
         let receiver = handle.clear_http();
         self.pending.push(PendingProject::ClearHttp { receiver });
+    }
+
+    pub(super) fn delete_http_item(&mut self, id: u64) {
+        if let Some(handle) = self.handle() {
+            let receiver = handle.delete_http(id);
+            self.pending
+                .push(PendingProject::DeleteHttp { id, receiver });
+        }
     }
 
     pub(super) fn clear_ws_history(&mut self) {
@@ -751,6 +771,15 @@ impl ProjectUi {
                     Err(TryRecvError::Empty) => keep.push(PendingProject::ClearHttp { receiver }),
                     Err(TryRecvError::Disconnected) => completed.push(
                         ProjectCompletion::ClearedHttp(Err(ProjectError::ServiceUnavailable)),
+                    ),
+                },
+                PendingProject::DeleteHttp { id, receiver } => match receiver.try_recv() {
+                    Ok(result) => completed.push(ProjectCompletion::DeletedHttp(id, result)),
+                    Err(TryRecvError::Empty) => {
+                        keep.push(PendingProject::DeleteHttp { id, receiver })
+                    }
+                    Err(TryRecvError::Disconnected) => completed.push(
+                        ProjectCompletion::DeletedHttp(id, Err(ProjectError::ServiceUnavailable)),
                     ),
                 },
                 PendingProject::ClearWs { receiver } => match receiver.try_recv() {
@@ -1380,6 +1409,12 @@ impl PerseidApp {
                             .notify_error(format!("Could not clear the project history: {err}"));
                     }
                 }
+                ProjectCompletion::DeletedHttp(id, result) => match result {
+                    Ok(_) => self.remove_http_item(id),
+                    Err(err) => self
+                        .project
+                        .notify_error(format!("Could not delete the exchange: {err}")),
+                },
                 ProjectCompletion::ClearedWs(result) => {
                     if let Err(err) = result {
                         self.project.notify_error(format!(
@@ -2141,6 +2176,29 @@ pub(super) mod tests {
             response: None,
             phase: Phase::InFlight,
         }
+    }
+
+    #[test]
+    fn failed_item_deletion_keeps_the_row_selection_and_reports_the_error() {
+        let mut app = PerseidApp::test_app();
+        app.history.load(vec![history_item()]);
+        app.selected = Some(1);
+        // In-flight exchanges cannot even queue a deletion from the UI.
+        app.delete_selected_http_item();
+        assert!(!app.project.is_busy());
+        let (tx, receiver) = std::sync::mpsc::channel();
+        app.project
+            .pending
+            .push(PendingProject::DeleteHttp { id: 1, receiver });
+        assert!(app.project.is_busy());
+        tx.send(Err(ProjectError::ServiceUnavailable)).unwrap();
+        app.poll_project();
+        assert!(app.history.get(1).is_some());
+        assert_eq!(app.selected, Some(1));
+        assert!(!app.project.is_busy());
+        let (notice, error) = app.project.notice().unwrap();
+        assert!(error);
+        assert!(notice.contains("Could not delete the exchange"));
     }
 
     fn websocket_item() -> WebSocketMessageItem {

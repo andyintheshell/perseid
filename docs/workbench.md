@@ -204,11 +204,16 @@ is a quick way to verify the path without a browser or CA trust.
   `CONNECT` transport tunnels do not get their own rows. Right-click a row to
   open a Burp-style menu: add the host to scope; send the request to Intruder
   or Repeater, response tokens to Sequencer, or either message to Comparer or
-  Decoder; open per-exchange Notes; clear history; browse stored history; or
+  Decoder; open per-exchange Notes; delete the selected item; clear history; browse stored history; or
   copy the URL or a curl command. Unavailable tool actions are disabled.
   The site map already includes captured URLs automatically. Unsupported Burp
-  actions (including per-item deletion, highlighting, and browser integration)
+  actions (including highlighting and browser integration)
   are omitted.
+  **Delete item** permanently removes the finished exchange and its captured
+  bodies from the active project, including Notes and cached Search/site-map
+  views. It does not delete copies already sent to other tools. Deletion is
+  disabled while the exchange is in flight or a project operation is pending;
+  storage errors leave the row intact and show an error notice.
 - The text filter matches method, host, path, URI, status, MIME type, and file
   extension—not response-body contents. The filter bar opens a Burp-style
   display-filter dialog with in-scope, missing-response, parameterized-request,

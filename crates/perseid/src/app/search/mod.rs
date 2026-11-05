@@ -302,6 +302,17 @@ impl SearchState {
         self.clear_source(SearchSource::ProxyHttp);
     }
 
+    pub(super) fn remove_http_item(&mut self, id: u64) {
+        self.cancel_job();
+        let matches = |key: SearchKey| key.source == SearchSource::ProxyHttp && key.id == id;
+        self.results.retain(|hit| !matches(hit.key));
+        self.keys.retain(|key| !matches(*key));
+        if self.selected.is_some_and(matches) {
+            self.selected = self.results.first().map(|hit| hit.key);
+            self.detail = None;
+        }
+    }
+
     pub(super) fn clear_websocket_source(&mut self) {
         self.clear_source(SearchSource::ProxyWebSocket);
     }
@@ -1218,6 +1229,38 @@ mod tests {
         assert_eq!(state.selected, Some(repeater));
         assert_eq!(state.results.len(), 1);
         assert!(state.keys.contains(&repeater));
+    }
+
+    #[test]
+    fn deleting_one_http_hit_preserves_other_http_and_tool_results() {
+        let http = SearchKey {
+            source: SearchSource::ProxyHttp,
+            id: 1,
+        };
+        let other = SearchKey {
+            source: SearchSource::ProxyHttp,
+            id: 2,
+        };
+        let ws = SearchKey {
+            source: SearchSource::ProxyWebSocket,
+            id: 1,
+        };
+        let keys = [http, other, ws];
+        let mut state = SearchState {
+            results: keys
+                .iter()
+                .map(|key| SearchHit::text(*key, None, None, "h", "u", None, 0))
+                .collect(),
+            keys: keys.into_iter().collect(),
+            selected: Some(http),
+            ..Default::default()
+        };
+        state.remove_http_item(1);
+        assert_eq!(state.selected, Some(other));
+        assert_eq!(state.results.len(), 2);
+        assert_eq!(state.keys, HashSet::from([other, ws]));
+        state.remove_http_item(99);
+        assert_eq!(state.results.len(), 2);
     }
 
     #[test]

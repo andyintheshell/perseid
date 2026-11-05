@@ -21,6 +21,7 @@ use crate::site_map;
 enum HistoryRowAction {
     AddToScope,
     Notes,
+    Delete,
     Repeater,
     Intruder,
     Sequencer,
@@ -873,6 +874,13 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::Notes);
                                 ui.close();
                             }
+                            if ui.add_enabled(!item.is_in_flight() && !self.project.is_busy(), egui::Button::new("Delete item"))
+                                .on_hover_text("Permanently remove this exchange from the active project")
+                                .on_disabled_hover_text("Wait for the exchange and pending project operations to finish")
+                                .clicked() {
+                                action = Some(HistoryRowAction::Delete);
+                                ui.close();
+                            }
                             ui.separator();
                             if ui
                                 .button("Clear history")
@@ -907,6 +915,7 @@ impl PerseidApp {
             self.select_id(id);
         }
         match action {
+            Some(HistoryRowAction::Delete) => self.delete_selected_http_item(),
             Some(HistoryRowAction::AddToScope) => {
                 if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
                     self.scope.insert(item.request.host.clone());
@@ -1194,6 +1203,7 @@ mod decoder_transfer_tests {
                 "Send to Decoder (request)",
                 "Send to Decoder (response)",
                 "Add notes",
+                "Delete item",
                 "Clear history",
                 "Browse stored history…",
                 "Copy URL",
@@ -1225,6 +1235,19 @@ mod decoder_transfer_tests {
             assert_eq!(panels.len(), 1);
             assert!(panels[0].data.ends_with(expected));
             assert!(panels[0].data.windows(4).any(|bytes| bytes == b"\r\n\r\n"));
+            app.main_tab = MainTab::Proxy;
+            frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+            click(&ctx, &mut app, "/path", egui::PointerButton::Secondary);
+            click(&ctx, &mut app, "Delete item", egui::PointerButton::Primary);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while app.history.get(1).is_some() && std::time::Instant::now() < deadline {
+                app.poll_project();
+                std::thread::yield_now();
+            }
+            assert!(app.history.get(1).is_none());
+            assert!(app.selected.is_none());
+            assert!(app.detail.is_none());
+            assert_eq!(app.decoder_workspace().len(), 1);
         }
     }
 }

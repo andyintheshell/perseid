@@ -723,6 +723,93 @@ fn clearing_history_is_persisted() {
 }
 
 #[test]
+fn deleting_one_http_exchange_removes_bodies_indexes_and_survives_reopen() {
+    use redb::ReadableTable;
+    let project = ProjectHandle::temporary().expect("project");
+    let ids = capture_all(
+        &project,
+        &[
+            started(1, "POST"),
+            response_head(1, 200),
+            finished(1, b"request", b"response"),
+            started(2, "GET"),
+            finished(2, b"", b"keep"),
+            ws_message(3, 2, b"ws"),
+        ],
+    );
+    wait(project.flush()).unwrap();
+    let before = persisted_meta(&project);
+    let id = ids[0];
+    wait(project.delete_http(id)).unwrap();
+    // Missing IDs are an idempotent success, not another counter decrement.
+    wait(project.delete_http(id)).unwrap();
+    assert!(project.get_http(id).unwrap().is_none());
+    assert!(project.get_http(ids[3]).unwrap().is_some());
+    assert!(project.get_ws(ids[5]).unwrap().is_some());
+    let after = persisted_meta(&project);
+    assert_eq!(after.http_count, 1);
+    assert_eq!(after.http_body_bytes, 4);
+    assert_eq!(after.next_http_id, before.next_http_id);
+    assert_eq!(after.next_http_number, before.next_http_number);
+    assert_eq!(after.retention_evictions, before.retention_evictions);
+    assert_eq!(after.event_loss_count, before.event_loss_count);
+    {
+        let db = project.database_snapshot().unwrap();
+        let tx = db.db.begin_read().unwrap();
+        assert!(
+            tx.open_table(schema::HTTP_BODIES)
+                .unwrap()
+                .get((id, 0))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            tx.open_table(schema::HTTP_BODIES)
+                .unwrap()
+                .get((id, 1))
+                .unwrap()
+                .is_none()
+        );
+        for entry in tx.open_table(schema::HTTP_BY_TIME).unwrap().iter().unwrap() {
+            assert_ne!(entry.unwrap().0.value().1, id);
+        }
+        for entry in tx.open_table(schema::HTTP_BY_HOST).unwrap().iter().unwrap() {
+            assert_ne!(entry.unwrap().0.value().1, id);
+        }
+        for entry in tx
+            .open_table(schema::HTTP_BY_STATUS)
+            .unwrap()
+            .iter()
+            .unwrap()
+        {
+            assert_ne!(entry.unwrap().0.value().1, id);
+        }
+    }
+    let file = TempProject::new("delete-one");
+    wait(project.save_as(file.path.clone(), false)).unwrap();
+    drop(project);
+    let reopened = ProjectHandle::temporary().unwrap();
+    let opened = wait(reopened.open(file.path.clone(), 100, 1024 * 1024)).unwrap();
+    assert_eq!(opened.http_total, 1);
+    assert_eq!(opened.http[0].id, ids[3]);
+    assert_eq!(opened.ws_total, 1);
+}
+
+#[test]
+fn deleting_in_flight_http_is_rejected_without_losing_the_capture() {
+    let project = ProjectHandle::temporary().unwrap();
+    let id = capture_all(&project, &[started(1, "GET")])[0];
+    wait(project.flush()).unwrap();
+    assert!(wait(project.delete_http(id)).is_err());
+    assert!(project.get_http(id).unwrap().unwrap().is_in_flight());
+    capture_all(&project, &[finished(1, b"", b"done")]);
+    wait(project.flush()).unwrap();
+    assert!(!project.get_http(id).unwrap().unwrap().is_in_flight());
+    wait(project.delete_http(id)).unwrap();
+    assert_eq!(project.status().http_count, 0);
+}
+
+#[test]
 fn cleared_ids_are_not_reused() {
     let project = ProjectHandle::temporary().expect("temporary project");
     let ids = capture_all(&project, &[started(41, "GET"), finished(41, b"", b"one")]);

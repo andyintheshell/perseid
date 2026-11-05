@@ -162,6 +162,11 @@ pub(super) fn run_writer(
                 let result = clear_http(&db, &mut meta);
                 finish(reply, result, &shared, &meta);
             }
+            Command::DeleteHttp(id, reply) => {
+                absorb_pending_loss(&shared, &mut meta);
+                let result = super::persistence::delete_http(&db, &mut meta, id);
+                finish(reply, result, &shared, &meta);
+            }
             Command::ClearWs(reply) => {
                 absorb_pending_loss(&shared, &mut meta);
                 let result = clear_ws(&db, &mut meta);

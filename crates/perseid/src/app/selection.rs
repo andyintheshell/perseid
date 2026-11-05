@@ -21,6 +21,33 @@ impl PerseidApp {
         self.project.clear_http_history();
     }
 
+    pub(super) fn delete_selected_http_item(&mut self) {
+        let Some(id) = self.selected else { return };
+        if self.history.get(id).is_none_or(|item| item.is_in_flight()) || self.project.is_busy() {
+            return;
+        }
+        if self.project.handle().is_some() {
+            self.project.delete_http_item(id);
+        } else {
+            self.remove_http_item(id);
+        }
+    }
+
+    /// Apply only after storage acknowledges deletion; failed writes retain the row.
+    pub(super) fn remove_http_item(&mut self, id: u64) {
+        self.history.remove_stored(&[id]);
+        self.site_map_ui.stored = Default::default();
+        self.project.history_browser = Default::default();
+        self.title_cache.borrow_mut().clear();
+        if self.selected == Some(id) {
+            self.selected = None;
+            self.detail = None;
+        }
+        self.inspector.remove_note(id);
+        self.search.remove_http_item(id);
+        self.invalidate_views();
+    }
+
     pub(super) fn clear_websocket_history(&mut self) {
         self.websocket_history.clear();
         self.websocket_live_ids.clear();

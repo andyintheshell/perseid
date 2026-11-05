@@ -160,6 +160,7 @@ enum Command {
     Capture(ProxyEvent),
     SetWorkspace(Box<WorkspaceState>),
     ClearHttp(Sender<Result<CommitReceipt>>),
+    DeleteHttp(u64, Sender<Result<CommitReceipt>>),
     ClearWs(Sender<Result<CommitReceipt>>),
     InterruptInFlight {
         reason: String,
@@ -584,6 +585,13 @@ impl ProjectHandle {
     pub fn clear_http(&self) -> Receiver<Result<CommitReceipt>> {
         let (tx, rx) = mpsc::channel();
         self.send_control(Command::ClearHttp(tx), &rx);
+        rx
+    }
+
+    /// Delete a finished exchange, including its bodies and lookup indexes.
+    pub fn delete_http(&self, id: u64) -> Receiver<Result<CommitReceipt>> {
+        let (tx, rx) = mpsc::channel();
+        self.send_control(Command::DeleteHttp(id, tx), &rx);
         rx
     }
 
