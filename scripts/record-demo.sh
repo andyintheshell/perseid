@@ -82,7 +82,7 @@ ffmpeg -hide_banner -loglevel error -y -f x11grab -framerate 1 \
 [[ -s "$out/x11-startup.png" ]] || { echo 'X11 startup capture is empty.' >&2; exit 1; }
 
 ffmpeg -hide_banner -loglevel error -y -f x11grab -framerate 30 -video_size 1600x1024 \
-    -draw_mouse 1 -i "${DISPLAY}+0,0" -c:v libx264 -preset ultrafast -crf 18 \
+    -draw_mouse 1 -i "${DISPLAY}+0,0" -c:v libx264rgb -preset ultrafast -crf 0 \
     "$out/demo-recording.mp4" >"$out/recording.log" 2>&1 &
 record_pid=$!
 sleep 2
@@ -291,17 +291,20 @@ kill -INT "$record_pid"
 wait "$record_pid" || true
 record_pid=''
 [[ -s "$out/demo-recording.mp4" ]] || { echo 'Recording is empty.' >&2; exit 1; }
-# Encode an animated WebP straight from the recording. GIF quantization was
-# the main source of size and dithering; WebP keeps text sharp at roughly half
-# the bytes. The intermediate JPEG frames are high quality and let img2webp
-# drop unchanged regions while preserving the pointer and UI text.
+# Keep the RGB capture, intermediate PNGs, and WebP encoding lossless. Lossy
+# JPEG/WebP encoding leaves block noise and stale delta-frame patches in light
+# editor backgrounds, especially after switching tools. Downscale only once.
 mkdir -p "$work/frames"
 ffmpeg -hide_banner -loglevel error -y -i "$out/demo-recording.mp4" \
-    -vf 'fps=12,scale=1280:820:flags=lanczos' -q:v 2 \
-    "$work/frames/frame-%05d.jpg"
-img2webp -loop 0 -mixed -d 83 -q 65 -m 6 -sharp_yuv \
-    -o "$out/perseid-demo.webp" "$work/frames"/frame-*.jpg
+    -vf 'fps=12,scale=1280:820:flags=lanczos' \
+    "$work/frames/frame-%05d.png"
+img2webp -loop 0 -lossless -d 83 -q 100 -m 6 \
+    -o "$out/perseid-demo.webp" "$work/frames"/frame-*.png
 [[ -s "$out/perseid-demo.webp" ]] || { echo 'WebP is empty.' >&2; exit 1; }
+if webpinfo -summary "$out/perseid-demo.webp" | grep 'Format: Lossy' >/dev/null; then
+    echo 'Demo WebP must use only lossless frames to avoid background artifacts.' >&2
+    exit 1
+fi
 dimensions="$(webpinfo -summary "$out/perseid-demo.webp" | awk '/Canvas size/ { print $3 "x" $5; exit }')"
 if [[ "$dimensions" != '1280x820' ]]; then
     echo "Demo WebP must be 1280x820 (got ${dimensions:-unknown})." >&2

@@ -38,7 +38,7 @@ jobs:
         run: |
           ffmpeg -version
           ffmpeg -hide_banner -devices 2>&1 | grep -F 'x11grab'
-          ffmpeg -hide_banner -encoders 2>&1 | grep -F 'libx264'
+          ffmpeg -hide_banner -encoders 2>&1 | grep -F 'libx264rgb'
           img2webp -version
           webpinfo -version
 
