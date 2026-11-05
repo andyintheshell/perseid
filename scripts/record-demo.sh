@@ -130,10 +130,10 @@ tab_y=63
 row_2=245
 row_3=272
 row_5=326
-menu_repeater=25
-menu_intruder=58
-menu_response_decoder=130
-menu_response_comparer=213
+menu_repeater=131
+menu_intruder=96
+menu_response_decoder=305
+menu_response_comparer=236
 # A submenu starts level with its parent menu item. Both use the same 24 px
 # button height and 4 px spacing, so the second item is 35 px below it.
 submenu_second_item=35
@@ -161,9 +161,9 @@ open_history_menu "$row_5"
 click_at 550 $((row_5 + menu_repeater)) 1
 sleep 1.3
 
-click_at 225 256 1
+click_at 225 340 1
 sleep 0.8
-xdotool key --clearmodifiers Home
+xdotool key --clearmodifiers ctrl+Home
 for _ in {1..21}; do
     xdotool key --clearmodifiers Right
     sleep 0.02
@@ -216,7 +216,7 @@ sleep 0.9
 open_history_menu "$row_2"
 click_at 550 $((row_2 + menu_response_decoder)) 1
 sleep 0.8
-click_at 780 $((row_2 + menu_response_decoder + submenu_second_item)) 1
+click_at 900 $((row_2 + menu_response_decoder + submenu_second_item)) 1
 sleep 1.5
 
 click_at 500 200 1
