@@ -19,6 +19,8 @@ use crate::site_map;
 
 #[derive(Clone, Copy)]
 enum HistoryRowAction {
+    AddToScope,
+    Notes,
     Repeater,
     Intruder,
     Sequencer,
@@ -704,7 +706,11 @@ impl PerseidApp {
                         });
                         row.col(|ui| {
                             let mime = site_map::mime_label(&mime_type(item));
-                            let mime = if mime.is_empty() { "-".to_string() } else { mime };
+                            let mime = if mime.is_empty() {
+                                "-".to_string()
+                            } else {
+                                mime
+                            };
                             let color = if item.is_tunnel() {
                                 theme::AMBER
                             } else {
@@ -717,11 +723,7 @@ impl PerseidApp {
                         });
                         row.col(|ui| {
                             let extension = request_extension(item);
-                            ui.label(
-                                RichText::new(extension)
-                                    .small()
-                                    .color(theme::TEXT_MUTED),
-                            );
+                            ui.label(RichText::new(extension).small().color(theme::TEXT_MUTED));
                         });
                         row.col(|ui| {
                             let title = history_title(&self.title_cache, item);
@@ -739,9 +741,7 @@ impl PerseidApp {
                             if request_uses_tls(item) {
                                 check_mark(ui, theme::GREEN).on_hover_text("TLS");
                             } else {
-                                ui.label(
-                                    RichText::new("-").small().color(theme::TEXT_MUTED),
-                                );
+                                ui.label(RichText::new("-").small().color(theme::TEXT_MUTED));
                             }
                         });
                         row.col(|ui| {
@@ -765,6 +765,35 @@ impl PerseidApp {
                             clicked = Some(id);
                         }
                         response.context_menu(|ui| {
+                            ui.add(
+                                Label::new(RichText::new(request_url(item)).strong()).truncate(),
+                            );
+                            if ui
+                                .add_enabled(
+                                    !item.request.host.is_empty()
+                                        && !self.scope.contains(&item.request.host),
+                                    egui::Button::new("Add to scope"),
+                                )
+                                .on_hover_text("Add this host to Target scope")
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::AddToScope);
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui
+                                .add_enabled(can_send, egui::Button::new("Send to Intruder"))
+                                .on_hover_text(
+                                    "Open the highlighted request in the Intruder workspace",
+                                )
+                                .on_disabled_hover_text(
+                                    "CONNECT tunnels do not contain an HTTP request",
+                                )
+                                .clicked()
+                            {
+                                action = Some(HistoryRowAction::Intruder);
+                                ui.close();
+                            }
                             if ui
                                 .add_enabled(can_send, egui::Button::new("Send to Repeater"))
                                 .on_hover_text(
@@ -779,37 +808,22 @@ impl PerseidApp {
                                 ui.close();
                             }
                             if ui
-                                .add_enabled(can_send, egui::Button::new("Send to Intruder"))
+                                .add_enabled(can_capture, egui::Button::new("Send to Sequencer"))
                                 .on_hover_text(
-                                    "Open the highlighted request in the Intruder workspace",
+                                    "Extract response tokens with the Sequencer capture regex",
                                 )
                                 .on_disabled_hover_text(
-                                    "CONNECT tunnels do not contain an HTTP request",
+                                    "Wait for a response before extracting tokens",
                                 )
                                 .clicked()
                             {
-                                action = Some(HistoryRowAction::Intruder);
+                                action = Some(HistoryRowAction::Sequencer);
                                 ui.close();
                             }
-                            if can_send {
-                                ui.menu_button("Send request to Decoder", |ui| {
-                                    if let Some(bytes) = view::captured_message_bytes(item, false) {
-                                        super::message_view::decoder_send_menu(ui, &bytes, "Captured request (reconstructed head)");
-                                    }
-                                });
-                            }
-                            if has_response {
-                                ui.menu_button("Send response to Decoder", |ui| {
-                                    if let Some(bytes) = view::captured_message_bytes(item, true) {
-                                        super::message_view::decoder_send_menu(ui, &bytes, "Captured response (reconstructed head)");
-                                    }
-                                });
-                            }
-                            ui.separator();
                             if ui
                                 .add_enabled(
                                     can_send,
-                                    egui::Button::new("Send request to Comparer"),
+                                    egui::Button::new("Send to Comparer (request)"),
                                 )
                                 .on_hover_text("Add the highlighted request to Comparer item 1")
                                 .on_disabled_hover_text(
@@ -823,7 +837,7 @@ impl PerseidApp {
                             if ui
                                 .add_enabled(
                                     has_response,
-                                    egui::Button::new("Send response to Comparer"),
+                                    egui::Button::new("Send to Comparer (response)"),
                                 )
                                 .on_hover_text("Add the highlighted response to Comparer item 2")
                                 .on_disabled_hover_text("The highlighted exchange has no response")
@@ -832,24 +846,33 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::ComparerResponse);
                                 ui.close();
                             }
+                            ui.add_enabled_ui(can_send, |ui| {
+                                ui.menu_button("Send to Decoder (request)", |ui| {
+                                    if let Some(bytes) = view::captured_message_bytes(item, false) {
+                                        super::message_view::decoder_send_menu(
+                                            ui,
+                                            &bytes,
+                                            "Captured request (reconstructed head)",
+                                        );
+                                    }
+                                });
+                            });
+                            ui.add_enabled_ui(has_response, |ui| {
+                                ui.menu_button("Send to Decoder (response)", |ui| {
+                                    if let Some(bytes) = view::captured_message_bytes(item, true) {
+                                        super::message_view::decoder_send_menu(
+                                            ui,
+                                            &bytes,
+                                            "Captured response (reconstructed head)",
+                                        );
+                                    }
+                                });
+                            });
                             ui.separator();
-                            if ui
-                                .add_enabled(
-                                    can_capture,
-                                    egui::Button::new("Send response to Sequencer"),
-                                )
-                                .on_hover_text(
-                                    "Extract tokens from the highlighted response with the Sequencer capture regex",
-                                )
-                                .on_disabled_hover_text(
-                                    "Wait for a response before extracting tokens",
-                                )
-                                .clicked()
-                            {
-                                action = Some(HistoryRowAction::Sequencer);
+                            if ui.button("Add notes").clicked() {
+                                action = Some(HistoryRowAction::Notes);
                                 ui.close();
                             }
-                            super::curl::context_menu(ui, item);
                             ui.separator();
                             if ui
                                 .button("Clear history")
@@ -859,6 +882,22 @@ impl PerseidApp {
                                 action = Some(HistoryRowAction::ClearHistory);
                                 ui.close();
                             }
+                            if ui
+                                .add_enabled(
+                                    self.project.handle().is_some(),
+                                    egui::Button::new("Browse stored history…"),
+                                )
+                                .clicked()
+                            {
+                                self.project.history_browser.open = true;
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("Copy URL").clicked() {
+                                ui.ctx().copy_text(request_url(item));
+                                ui.close();
+                            }
+                            super::curl::context_menu(ui, item);
                         });
                     });
                 });
@@ -868,6 +907,17 @@ impl PerseidApp {
             self.select_id(id);
         }
         match action {
+            Some(HistoryRowAction::AddToScope) => {
+                if let Some(item) = self.selected.and_then(|id| self.history.get(id)) {
+                    self.scope.insert(item.request.host.clone());
+                    self.invalidate_views();
+                    self.apply_proxy_settings();
+                }
+            }
+            Some(HistoryRowAction::Notes) => {
+                self.inspector.open = true;
+                self.inspector.tab = inspector::SideTab::Notes;
+            }
             Some(HistoryRowAction::Repeater) => self.send_selected_to_repeater(),
             Some(HistoryRowAction::Intruder) => self.send_selected_to_intruder(),
             Some(HistoryRowAction::Sequencer) => self.send_selected_to_sequencer(),
@@ -1091,8 +1141,8 @@ mod decoder_transfer_tests {
     #[test]
     fn history_menus_send_captured_request_and_response_to_decoder() {
         for (menu, expected) in [
-            ("Send request to Decoder", &[0, 255][..]),
-            ("Send response to Decoder", &[254, 0][..]),
+            ("Send to Decoder (request)", &[0, 255][..]),
+            ("Send to Decoder (response)", &[254, 0][..]),
         ] {
             let mut app = PerseidApp::test_app();
             app.main_tab = MainTab::Proxy;
@@ -1132,6 +1182,41 @@ mod decoder_transfer_tests {
             let ctx = egui::Context::default();
             ctx.all_styles_mut(|style| style.animation_time = 0.0);
             frame(&ctx, &mut app, vec![]).drop_without_applying_deltas();
+            click(&ctx, &mut app, "/path", egui::PointerButton::Secondary);
+            let output = frame(&ctx, &mut app, vec![]);
+            let labels = [
+                "Add to scope",
+                "Send to Intruder",
+                "Send to Repeater",
+                "Send to Sequencer",
+                "Send to Comparer (request)",
+                "Send to Comparer (response)",
+                "Send to Decoder (request)",
+                "Send to Decoder (response)",
+                "Add notes",
+                "Clear history",
+                "Browse stored history…",
+                "Copy URL",
+                "Copy as curl",
+            ];
+            let positions: Vec<_> = labels
+                .iter()
+                .map(|label| label_pos(&output, label))
+                .collect();
+            output.drop_without_applying_deltas();
+            assert!(positions.iter().all(Option::is_some));
+            assert!(
+                positions[..8]
+                    .windows(2)
+                    .all(|pair| pair[0].unwrap().y < pair[1].unwrap().y)
+            );
+            click(&ctx, &mut app, "Add to scope", egui::PointerButton::Primary);
+            assert!(app.scope.contains("example.test"));
+            click(&ctx, &mut app, "/path", egui::PointerButton::Secondary);
+            click(&ctx, &mut app, "Add notes", egui::PointerButton::Primary);
+            assert!(app.inspector.open);
+            assert_eq!(app.inspector.tab, inspector::SideTab::Notes);
+            assert_eq!(app.selected, Some(1));
             click(&ctx, &mut app, "/path", egui::PointerButton::Secondary);
             click(&ctx, &mut app, menu, egui::PointerButton::Primary);
             click(&ctx, &mut app, "Append panel", egui::PointerButton::Primary);
