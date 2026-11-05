@@ -47,9 +47,10 @@ const TIMEOUT: Duration = Duration::from_secs(150);
 /// Every UI tab captured for the documentation and pull-request preview.
 /// `perseid-main.png` is the Proxy > HTTP history scene used by the README.
 /// Keep this in sync with `scripts/check_screenshots.py` and
-/// `docs/screenshots.md`, and add a label in the Screenshots workflow.
+/// `docs/screenshots.md`, and add a label in `scripts/publish-screenshots.sh`.
 const SCENE_FILES: &[&str] = &[
     MAIN_FILE,
+    "perseid-http-history-context-menu.png",
     "perseid-project.png",
     "perseid-project-dialog.png",
     "perseid-target-site-map.png",
@@ -331,26 +332,32 @@ impl PerseidApp {
         self.search = SearchState::default();
         self.settings = Default::default();
         self.project.reset_for_screenshot();
+        self.http_context_menu_forced_open = false;
 
         match index {
             // Proxy > HTTP history (the README scene).
             0 => {}
+            // Proxy > HTTP history with the selected exchange's context menu.
+            1 => {
+                self.http_context_menu_forced_open = true;
+                self.scroll_to_selected = true;
+            }
             // Projects: the File menu open over the HTTP history, with the
             // temporary-project status visible in the status bar.
-            1 => {
+            2 => {
                 self.project.file_menu_forced_open = true;
             }
             // Projects: the Save As dialog with a demo destination path.
-            2 => {
+            3 => {
                 self.project.show_save_dialog_for_screenshot();
             }
             // Target > Site map.
-            3 => {
+            4 => {
                 self.main_tab = MainTab::Target;
                 self.target_section = TargetSection::SiteMap;
             }
             // Target > Scope.
-            4 => {
+            5 => {
                 self.main_tab = MainTab::Target;
                 self.target_section = TargetSection::Scope;
                 self.scope_enabled = true;
@@ -359,13 +366,13 @@ impl PerseidApp {
                 self.scope.insert("127.0.0.1:8090".to_string());
             }
             // Proxy > Intercept with a small queue of held messages.
-            5 => {
+            6 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::Intercept;
                 self.seed_screenshot_intercepts();
             }
             // Proxy > Match/replace.
-            6 => {
+            7 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::MatchReplace;
                 self.match_replace = vec![
@@ -396,19 +403,19 @@ impl PerseidApp {
                 ];
             }
             // Proxy > TLS.
-            7 => {
+            8 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::Tls;
                 self.tls_intercept = true;
                 self.tls_passthrough.push("banking.example.com".to_string());
             }
             // Intruder with a populated template, payload set, and results.
-            8 => {
+            9 => {
                 self.main_tab = MainTab::Intruder;
                 self.intruder.seed_screenshot();
             }
             // Repeater with two seeded history requests.
-            9 => {
+            10 => {
                 self.main_tab = MainTab::Repeater;
                 for (tab_id, history_id) in [(1, 2), (2, 5)] {
                     let item = self.history.get(history_id).ok_or_else(|| {
@@ -423,41 +430,41 @@ impl PerseidApp {
                 }
             }
             // Decoder with Base64 and SHA-256 layers.
-            10 => {
+            11 => {
                 self.main_tab = MainTab::Decoder;
                 self.decoder.seed_screenshot();
             }
             // Comparer with a request and response selected.
-            11 => {
+            12 => {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
             }
             // Comparer result window for the same pair.
-            12 => {
+            13 => {
                 self.main_tab = MainTab::Comparer;
                 self.comparer.seed_screenshot();
                 self.comparer.open_screenshot_result();
             }
             // Sequencer > Manual load with a seeded token sample.
-            13 => {
+            14 => {
                 self.main_tab = MainTab::Sequencer;
                 self.sequencer.seed_screenshot();
             }
             // Sequencer result window for the same sample.
-            14 => {
+            15 => {
                 self.main_tab = MainTab::Sequencer;
                 self.sequencer.seed_screenshot();
                 self.sequencer.open_screenshot_result();
             }
             // Proxy > WebSockets history with a JSON message selected.
-            15 => {
+            16 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::WebSocketsHistory;
                 self.websocket_selected = Some(23);
                 self.websocket_view = MessageView::Pretty;
             }
             // Search with a decoded response body selected.
-            16 => {
+            17 => {
                 self.main_tab = MainTab::Proxy;
                 self.proxy_section = ProxySection::HttpHistory;
                 self.selected = Some(2);
@@ -465,7 +472,7 @@ impl PerseidApp {
             }
             // Repeater seeded from synthetic WebSocket history. There is no
             // live connection in the offline screenshot environment.
-            17 => {
+            18 => {
                 let item = self
                     .websocket_history
                     .get(23)
@@ -473,9 +480,9 @@ impl PerseidApp {
                     .ok_or_else(|| "screenshot WebSocket message 23 is missing".to_string())?;
                 self.send_websocket_to_repeater(&item);
             }
-            18 | 19 => {
-                self.settings.open = index == 18;
-                self.settings.jar_open = index == 19;
+            19 | 20 => {
+                self.settings.open = index == 19;
+                self.settings.jar_open = index == 20;
                 let mut jar = self
                     .cookie_jar
                     .lock()
@@ -1095,7 +1102,7 @@ mod scene_tests {
     fn websocket_repeater_scene_uses_seeded_history() {
         let mut app = PerseidApp::test_app();
         app.prepare_screenshot_base().unwrap();
-        app.prepare_screenshot_scene(17).unwrap();
+        app.prepare_screenshot_scene(18).unwrap();
         assert_eq!(app.main_tab, MainTab::Repeater);
         assert!(!app.repeater_tabs.is_empty());
         assert!(app.repeater_workspace().is_empty());

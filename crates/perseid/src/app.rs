@@ -381,6 +381,8 @@ pub struct PerseidApp {
     #[cfg(feature = "screenshots")]
     reset_http_detail_size: bool,
     #[cfg(feature = "screenshots")]
+    http_context_menu_forced_open: bool,
+    #[cfg(feature = "screenshots")]
     screenshots: Option<screenshots::ScreenshotDriver>,
 }
 
@@ -565,6 +567,8 @@ impl PerseidApp {
             #[cfg(feature = "screenshots")]
             reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
+            http_context_menu_forced_open: false,
+            #[cfg(feature = "screenshots")]
             screenshots: None,
         };
         if !screenshot_mode && let Some(storage) = cc.storage {
@@ -716,6 +720,8 @@ impl PerseidApp {
             native_menu: None,
             #[cfg(feature = "screenshots")]
             reset_http_detail_size: false,
+            #[cfg(feature = "screenshots")]
+            http_context_menu_forced_open: false,
             #[cfg(feature = "screenshots")]
             screenshots: None,
         };

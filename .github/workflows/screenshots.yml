@@ -111,6 +111,9 @@ jobs:
       - name: Test screenshot verifier
         run: python3 -m unittest discover -s scripts -p 'test_*screenshots.py'
 
+      - name: Test screenshot scenes
+        run: cargo test -p perseid --lib --features screenshots screenshot --locked
+
       - name: Build with screenshot mode
         run: cargo build -p perseid --features screenshots --locked
 

@@ -543,6 +543,50 @@ fn read_workspace(db: &Database) -> Result<WorkspaceState> {
     Ok(workspace)
 }
 
+pub(super) fn delete_http(db: &Database, meta: &mut ProjectMeta, id: u64) -> Result<CommitReceipt> {
+    let mut next = meta.clone();
+    let tx = begin_write(db)?;
+    {
+        let mut http = tx.open_table(schema::HTTP_EXCHANGES)?;
+        let record = http
+            .get(id)?
+            .map(|value| codec::decode::<HttpExchangeRecord>(value.value()))
+            .transpose()?;
+        if let Some(record) = record {
+            if tx.open_table(schema::HTTP_IN_FLIGHT)?.get(id)?.is_some() {
+                return Err(ProjectError::OperationRejected(
+                    "Wait for the exchange to finish before deleting it".into(),
+                ));
+            }
+            http.remove(id)?;
+            let mut bodies = tx.open_table(schema::HTTP_BODIES)?;
+            bodies.remove((id, 0))?;
+            bodies.remove((id, 1))?;
+            tx.open_table(schema::HTTP_BY_TIME)?
+                .remove((record.started_at_ms, id))?;
+            let host = normalized_host(&record.request.host);
+            if !host.contains('\0') {
+                tx.open_table(schema::HTTP_BY_HOST)?.remove((host, id))?;
+            }
+            if let Some(response) = record.response {
+                tx.open_table(schema::HTTP_BY_STATUS)?
+                    .remove((response.status, id))?;
+            }
+            next.http_count = next.http_count.saturating_sub(1);
+            next.http_body_bytes = next.http_body_bytes.saturating_sub(
+                record
+                    .request_body
+                    .stored_len
+                    .saturating_add(record.response_body.stored_len),
+            );
+        }
+        schema::write_counters(&mut tx.open_table(schema::META)?, &next)?;
+    }
+    tx.commit()?;
+    *meta = next;
+    Ok(receipt(meta))
+}
+
 pub(super) fn clear_http(db: &Database, meta: &mut ProjectMeta) -> Result<CommitReceipt> {
     let mut next_meta = meta.clone();
     let tx = begin_write(db)?;

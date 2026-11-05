@@ -302,6 +302,20 @@ impl SearchState {
         self.clear_source(SearchSource::ProxyHttp);
     }
 
+    pub(super) fn remove_http_item(&mut self, id: u64) {
+        // The canceled snapshot scan may not have reached unrelated HTTP/WS
+        // records yet. Keep its partial results, but make the need to rerun visible.
+        self.dirty |= self.running;
+        self.cancel_job();
+        let matches = |key: SearchKey| key.source == SearchSource::ProxyHttp && key.id == id;
+        self.results.retain(|hit| !matches(hit.key));
+        self.keys.retain(|key| !matches(*key));
+        if self.selected.is_some_and(matches) {
+            self.selected = self.results.first().map(|hit| hit.key);
+            self.detail = None;
+        }
+    }
+
     pub(super) fn clear_websocket_source(&mut self) {
         self.clear_source(SearchSource::ProxyWebSocket);
     }
@@ -1221,6 +1235,42 @@ mod tests {
     }
 
     #[test]
+    fn deleting_one_http_hit_preserves_other_http_and_tool_results() {
+        let http = SearchKey {
+            source: SearchSource::ProxyHttp,
+            id: 1,
+        };
+        let other = SearchKey {
+            source: SearchSource::ProxyHttp,
+            id: 2,
+        };
+        let ws = SearchKey {
+            source: SearchSource::ProxyWebSocket,
+            id: 1,
+        };
+        let keys = [http, other, ws];
+        let mut state = SearchState {
+            results: keys
+                .iter()
+                .map(|key| SearchHit::text(*key, None, None, "h", "u", None, 0))
+                .collect(),
+            keys: keys.into_iter().collect(),
+            selected: Some(http),
+            ..Default::default()
+        };
+        state.remove_http_item(1);
+        assert!(
+            !state.dirty,
+            "a completed search stays complete after selective removal"
+        );
+        assert_eq!(state.selected, Some(other));
+        assert_eq!(state.results.len(), 2);
+        assert_eq!(state.keys, HashSet::from([other, ws]));
+        state.remove_http_item(99);
+        assert_eq!(state.results.len(), 2);
+    }
+
+    #[test]
     fn run_rejects_invalid_regex_and_empty_queries_without_results() {
         let history = empty_history();
         let websocket_history = WebSocketHistory::new(10, 1024);
@@ -1378,6 +1428,66 @@ mod tests {
         assert_eq!(state.results[0].key.id, 7);
         assert_eq!(state.results[0].key.source, SearchSource::ProxyHttp);
         assert_eq!(state.selected, Some(state.results[0].key));
+    }
+
+    #[test]
+    fn deleting_http_during_a_stored_scan_requires_a_rerun() {
+        let project = ProjectHandle::temporary().unwrap();
+        seed_project_exchange(&project, 1, "stored.example", b"needle");
+        seed_project_exchange(&project, 2, "stored.example", b"needle");
+        let ws_id = seed_project_ws(&project, "wss://socket.example/chat", b"needle");
+        let mut history = empty_history();
+        history.load(vec![project.get_http(1).unwrap().unwrap()]);
+        let websocket_history = WebSocketHistory::new(10, 1024);
+        let intruder = IntruderState::new();
+        let mut sources = sources(&history, &websocket_history, &[], &intruder);
+        sources.snapshot = project.database_snapshot();
+        let mut state = search_state("needle");
+        state.run(&sources, &BTreeSet::new());
+        assert!(state.running);
+        assert!(!state.options.dynamic_update);
+        assert_eq!(state.results.len(), 1);
+
+        project
+            .delete_http(1)
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        state.remove_http_item(1);
+        state.poll();
+        assert!(!state.running);
+        assert!(state.job.is_none());
+        assert!(state.progress.is_none());
+        assert!(state.dirty, "the canceled scan's results may be incomplete");
+        assert!(
+            state.results.is_empty(),
+            "the canceled scan cannot restore deleted hits"
+        );
+
+        // A manual rerun must find the unrelated HTTP and WebSocket matches.
+        let history = empty_history();
+        sources.history = &history;
+        state.run(&sources, &BTreeSet::new());
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while state.running && std::time::Instant::now() < deadline {
+            state.poll();
+            std::thread::yield_now();
+        }
+        assert!(!state.running);
+        assert!(!state.dirty);
+        assert_eq!(
+            state.keys,
+            HashSet::from([
+                SearchKey {
+                    source: SearchSource::ProxyHttp,
+                    id: 2
+                },
+                SearchKey {
+                    source: SearchSource::ProxyWebSocket,
+                    id: ws_id
+                },
+            ])
+        );
     }
 
     #[test]

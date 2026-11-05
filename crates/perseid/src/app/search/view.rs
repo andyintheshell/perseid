@@ -166,14 +166,19 @@ impl SearchState {
             } else if self.ran {
                 let count = self.results.len();
                 let noun = if count == 1 { "result" } else { "results" };
-                let mut text = format!("Search completed · {count} {noun}");
+                let status = if self.dirty {
+                    "Search needs rerun"
+                } else {
+                    "Search completed"
+                };
+                let mut text = format!("{status} · {count} {noun}");
                 if self.limit_reached {
                     text.push_str(&format!(" · capped at {SEARCH_RESULT_LIMIT} results"));
                 }
                 ui.label(RichText::new(text).small().color(theme::TEXT_MUTED));
                 if self.dirty && !self.options.dynamic_update {
                     ui.label(
-                        RichText::new("settings changed — press Go to rerun")
+                        RichText::new("results may be outdated — press Go to rerun")
                             .small()
                             .color(theme::AMBER),
                     );
@@ -633,4 +638,43 @@ fn tools_group(ui: &mut egui::Ui, options: &mut SearchOptions) -> bool {
 
 fn checkbox(ui: &mut egui::Ui, value: &mut bool, label: &str, tooltip: &str) -> bool {
     ui.checkbox(value, label).on_hover_text(tooltip).changed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupted_search_shows_a_rerun_hint_instead_of_completion() {
+        fn has_text(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text() == expected,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_text(shape, expected)),
+                _ => false,
+            }
+        }
+
+        let ctx = egui::Context::default();
+        for dirty in [false, true] {
+            let mut state = SearchState {
+                ran: true,
+                dirty,
+                ..Default::default()
+            };
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| state.status_line(ui));
+            let contains = |text| {
+                output
+                    .shapes
+                    .iter()
+                    .any(|shape| has_text(&shape.shape, text))
+            };
+            assert_eq!(contains("Search completed · 0 results"), !dirty);
+            assert_eq!(contains("Search needs rerun · 0 results"), dirty);
+            assert_eq!(
+                contains("results may be outdated — press Go to rerun"),
+                dirty
+            );
+            output.drop_without_applying_deltas();
+        }
+    }
 }
