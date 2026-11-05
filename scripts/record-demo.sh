@@ -162,7 +162,7 @@ click_at 550 $((row_5 + menu_repeater)) 1
 sleep 1.3
 
 # Focus the inline request editor (there is no separate preserved-body panel).
-click_at 225 256 1
+click_at 225 300 1
 sleep 0.8
 xdotool key --clearmodifiers ctrl+Home
 for _ in {1..21}; do
