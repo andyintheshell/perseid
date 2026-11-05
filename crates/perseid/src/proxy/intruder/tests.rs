@@ -12,6 +12,9 @@ fn preserved_bodies_are_not_templates_and_conflicting_text_is_rejected() {
     plan.preserved_body = Some(b"$$literal$$\0\xff".to_vec());
     assert!(plan.render_sequence(1).unwrap().raw.ends_with("\n\n"));
     plan.payload_sets = vec![vec!["x\n\nbody".into()]];
+    let error = plan.render_sequence(1).unwrap_err().to_string();
+    assert!(error.contains("generated request"));
+    assert!(error.contains("payloads"));
     assert!(matches!(
         plan.render_sequence(1),
         Err(IntruderError::PreservedBodyConflict)

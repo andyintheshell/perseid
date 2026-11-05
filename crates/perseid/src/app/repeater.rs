@@ -98,12 +98,10 @@ impl RepeaterTab {
         view::editor_views(head, body)
     }
 
-    pub(super) fn searchable_request(&self) -> std::borrow::Cow<'_, str> {
-        if self.preserved_body.is_some() {
-            self.request_views().raw.into()
-        } else {
-            self.request.as_str().into()
-        }
+    pub(super) fn preserved_body_bytes(&self) -> Option<&[u8]> {
+        self.preserved_body
+            .as_ref()
+            .map(|body| body.data.as_slice())
     }
 
     pub(super) fn response_raw(&self) -> Option<&str> {
@@ -820,6 +818,7 @@ impl PerseidApp {
         let body = match super::replay_body::bytes(&tab.preserved_body, &raw) {
             Ok(body) => body,
             Err(error) => {
+                self.repeater_tabs[index].response = None;
                 self.repeater_tabs[index].error = Some(error);
                 return;
             }
@@ -1401,7 +1400,7 @@ mod tests {
         let tab = RepeaterTab::from_history(1, &item);
         assert!(tab.request.ends_with("\n\n"));
         assert!(tab.request_views().hex.contains("ff"));
-        assert!(tab.searchable_request().contains("�·"));
+        assert_eq!(tab.preserved_body_bytes(), Some([0xff, 0x00].as_slice()));
         assert_eq!(tab.preserved_body.unwrap().data, vec![0xff, 0x00]);
     }
 

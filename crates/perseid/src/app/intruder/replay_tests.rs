@@ -188,7 +188,11 @@ fn incomplete_captures_block_both_send_paths_after_workspace_restore() {
             CapturedBody::from_stored_parts(b"prefix".to_vec(), 100, truncated, complete);
         let mut app = PerseidApp::test_app();
         app.send_history_to_repeater(&capture);
-        let saved = app.repeater_workspace();
+        let mut saved = app.repeater_workspace();
+        saved[0].response = Some(crate::project::RepeaterResponseWorkspace {
+            status: 200,
+            ..Default::default()
+        });
         app.apply_repeater_workspace(&saved, 0);
         app.send_active_repeater();
         assert!(
@@ -199,6 +203,7 @@ fn incomplete_captures_block_both_send_paths_after_workspace_restore() {
                 .contains("Acknowledge")
         );
         assert!(app.repeater.is_none());
+        assert!(app.repeater_workspace()[0].response.is_none());
         app.send_history_to_intruder(&capture);
         let saved = app.intruder_workspace();
         app.apply_intruder_workspace(&saved);

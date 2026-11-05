@@ -43,6 +43,7 @@ pub(super) fn controls(ui: &mut egui::Ui, body: &mut Option<BodyWorkspace>, raw:
     {
         // This is a replacement, not an implicit lossy/decompressed conversion.
         let (head, _) = split_raw_request(raw);
+        let newline = if head.contains("\r\n") { "\r\n" } else { "\n" };
         *raw = head
             .trim_end_matches(['\r', '\n'])
             .lines()
@@ -53,8 +54,9 @@ pub(super) fn controls(ui: &mut egui::Ui, body: &mut Option<BodyWorkspace>, raw:
                 })
             })
             .collect::<Vec<_>>()
-            .join("\n");
-        raw.push_str("\n\n");
+            .join(newline);
+        raw.push_str(newline);
+        raw.push_str(newline);
         *body = None;
     }
 }
@@ -134,6 +136,41 @@ mod tests {
         assert!(bytes(&body, &raw).unwrap().is_empty());
         raw.push_str("a=1\r\n");
         assert_eq!(bytes(&body, &raw).unwrap(), b"a=1\r\n");
+    }
+
+    #[test]
+    fn replacement_preserves_head_line_endings_and_entire_multipart_body() {
+        for newline in ["\r\n", "\n"] {
+            let mut body = Some(BodyWorkspace::from_body(&CapturedBody::from_bytes(vec![
+                255,
+            ])));
+            let mut raw = format!(
+                "POST / HTTP/1.1{newline}Content-Encoding: gzip{newline}Content-Length: 1{newline}Content-Type: multipart/form-data; boundary=test{newline}{newline}"
+            );
+            click(
+                &mut body,
+                &mut raw,
+                "Replace captured body with empty editable text",
+            );
+            assert_eq!(
+                raw,
+                format!(
+                    "POST / HTTP/1.1{newline}Content-Type: multipart/form-data; boundary=test{newline}{newline}"
+                )
+            );
+            let multipart = "--test\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--test--\r\n";
+            raw.push_str(multipart);
+            assert_eq!(bytes(&body, &raw).unwrap(), multipart.as_bytes());
+            let (head, _) = split_raw_request(&raw);
+            let request = crate::proxy::RepeaterRequest::parse(
+                head,
+                bytes(&body, &raw).unwrap().to_vec(),
+                "http",
+                "example.com",
+            )
+            .unwrap();
+            assert_eq!(request.body, multipart.as_bytes());
+        }
     }
 
     #[test]
