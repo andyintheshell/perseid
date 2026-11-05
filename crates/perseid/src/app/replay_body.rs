@@ -3,6 +3,27 @@
 use crate::project::BodyWorkspace;
 use crate::proxy::split_raw_request;
 
+/// Move losslessly editable captures into the raw editor, never a display preview.
+/// Intruder's marker syntax must not reinterpret literal captured dollar pairs.
+pub(super) fn inline_text(body: &mut Option<BodyWorkspace>, raw: &mut String, intruder: bool) {
+    let Some(captured) = body else { return };
+    if captured.truncated
+        || !captured.complete
+        || !split_raw_request(raw).1.is_empty()
+        || !(raw.ends_with("\r\n\r\n") || raw.ends_with("\n\n"))
+    {
+        return;
+    }
+    let Ok(text) = std::str::from_utf8(&captured.data) else {
+        return;
+    };
+    if intruder && text.contains("$$") {
+        return;
+    }
+    raw.push_str(text);
+    *body = None;
+}
+
 pub(super) fn bytes<'a>(body: &'a Option<BodyWorkspace>, raw: &'a str) -> Result<&'a [u8], String> {
     match body {
         Some(body) if body.truncated || !body.complete => {
@@ -65,6 +86,89 @@ pub(super) fn controls(ui: &mut egui::Ui, body: &mut Option<BodyWorkspace>, raw:
 mod tests {
     use super::*;
     use crate::proxy::CapturedBody;
+
+    #[test]
+    fn complete_text_is_editable_without_losing_bytes_or_headers() {
+        for text in [
+            "",
+            "a=1\r\n",
+            "中文\0",
+            "--part\r\n\r\nvalue\r\n--part--\r\n",
+        ] {
+            for intruder in [false, true] {
+                let mut body = Some(BodyWorkspace::from_body(&CapturedBody::from_bytes(
+                    text.as_bytes().to_vec(),
+                )));
+                let head = "POST / HTTP/1.1\r\nContent-Encoding: identity\r\n\r\n";
+                let mut raw = head.to_owned();
+                inline_text(&mut body, &mut raw, intruder);
+                assert!(body.is_none());
+                assert_eq!(raw, format!("{head}{text}"));
+                assert_eq!(bytes(&body, &raw).unwrap(), text.as_bytes());
+                raw.push_str("edited");
+                assert_eq!(
+                    bytes(&body, &raw).unwrap(),
+                    format!("{text}edited").as_bytes()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unsafe_captures_and_conflicting_edits_stay_preserved() {
+        for (data, truncated, complete, existing, intruder) in [
+            (vec![255], false, true, "", false),
+            (b"prefix".to_vec(), true, true, "", false),
+            (b"prefix".to_vec(), false, false, "", false),
+            (b"original".to_vec(), false, true, "edited", false),
+            (b"literal $$value$$".to_vec(), false, true, "", true),
+        ] {
+            let mut body = Some(BodyWorkspace {
+                data,
+                total_len: 100,
+                truncated,
+                complete,
+            });
+            let saved = body.clone();
+            let mut raw = format!("POST / HTTP/1.1\r\n\r\n{existing}");
+            let original = raw.clone();
+            inline_text(&mut body, &mut raw, intruder);
+            assert_eq!(
+                serde_json::to_value(&body).unwrap(),
+                serde_json::to_value(&saved).unwrap()
+            );
+            assert_eq!(raw, original);
+        }
+    }
+
+    #[test]
+    fn missing_header_separator_does_not_turn_body_into_a_header() {
+        let mut raw = "POST / HTTP/1.1\r\nHost: example.com".to_owned();
+        let mut body = Some(BodyWorkspace::from_body(&CapturedBody::from_bytes(
+            b"data".to_vec(),
+        )));
+        inline_text(&mut body, &mut raw, false);
+        assert!(body.is_some());
+        assert_eq!(raw, "POST / HTTP/1.1\r\nHost: example.com");
+    }
+
+    #[test]
+    fn inline_requests_have_no_preserved_body_controls() {
+        let ctx = egui::Context::default();
+        for text in ["", "a=1"] {
+            let mut raw = "POST / HTTP/1.1\r\n\r\n".to_owned();
+            let mut body = Some(BodyWorkspace::from_body(&CapturedBody::from_bytes(
+                text.as_bytes().to_vec(),
+            )));
+            inline_text(&mut body, &mut raw, false);
+            let output = ctx.run_ui(Default::default(), |ui| controls(ui, &mut body, &mut raw));
+            assert!(!output.shapes.iter().any(|shape| matches!(
+                &shape.shape,
+                egui::Shape::Text(text) if text.galley.job.text.contains("captured body")
+            )));
+            output.drop_without_applying_deltas();
+        }
+    }
 
     fn click(body: &mut Option<BodyWorkspace>, raw: &mut String, label: &str) {
         let ctx = egui::Context::default();

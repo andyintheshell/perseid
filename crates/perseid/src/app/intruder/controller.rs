@@ -53,6 +53,11 @@ impl PerseidApp {
             None,
         );
         self.intruder.preserved_body = Some(BodyWorkspace::from_body(&item.request_body));
+        super::super::replay_body::inline_text(
+            &mut self.intruder.preserved_body,
+            &mut self.intruder.request,
+            true,
+        );
         self.main_tab = MainTab::Intruder;
     }
 
@@ -404,6 +409,7 @@ impl PerseidApp {
         state.host = workspace.host.clone();
         state.request = workspace.request.clone();
         state.preserved_body = workspace.preserved_body.clone();
+        super::super::replay_body::inline_text(&mut state.preserved_body, &mut state.request, true);
         state.attack = attack_from_record(workspace.attack);
         state.payload_sets = if workspace.payload_sets.is_empty() {
             vec![PayloadSet::default()]

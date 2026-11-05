@@ -96,6 +96,7 @@ fn captured_bodies_round_trip_both_tools_and_workspace_json() {
     let cases = vec![
         (b"a=1".to_vec(), None, "application/x-www-form-urlencoded"),
         (b"a=1\r\n".to_vec(), None, "text/plain"),
+        (b"literal $$value$$".to_vec(), None, "text/plain"),
         (vec![0, 255, 128, 13, 10], None, "application/octet-stream"),
         (gzip.finish().unwrap(), Some("gzip"), "text/plain"),
         (b"--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\n\r\n\0\xff\r\n--boundary--\r\n".to_vec(), None, "multipart/form-data; boundary=boundary"),
@@ -164,7 +165,9 @@ fn captured_bodies_round_trip_both_tools_and_workspace_json() {
                         .unwrap()
                         .preserved_body
                         .as_deref(),
-                    Some(body.as_slice())
+                    (std::str::from_utf8(&body).is_err()
+                        || body.windows(2).any(|pair| pair == b"$$"))
+                    .then_some(body.as_slice())
                 );
             } else {
                 assert_eq!(
@@ -177,6 +180,73 @@ fn captured_bodies_round_trip_both_tools_and_workspace_json() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn legacy_preserved_text_workspaces_become_inline_without_changing_captures() {
+    let capture = item(
+        "example.com",
+        "a=中文\r\n".as_bytes().to_vec(),
+        None,
+        "text/plain",
+    );
+    let mut app = PerseidApp::test_app();
+    app.send_history_to_repeater(&capture);
+    let mut tabs = app.repeater_workspace();
+    tabs[0].request = crate::view::replay_request_head(&capture);
+    tabs[0].preserved_body = Some(crate::project::BodyWorkspace::from_body(
+        &capture.request_body,
+    ));
+    app.apply_repeater_workspace(&tabs, 0);
+    let restored = app.repeater_workspace();
+    assert!(restored[0].preserved_body.is_none());
+    assert_eq!(
+        crate::proxy::split_raw_request(&restored[0].request).1,
+        "a=中文\r\n"
+    );
+
+    app.send_history_to_intruder(&capture);
+    let mut saved = app.intruder_workspace();
+    saved.request = tabs[0].request.clone();
+    saved.preserved_body = tabs[0].preserved_body.clone();
+    app.apply_intruder_workspace(&saved);
+    assert!(app.intruder.preserved_body.is_none());
+    assert_eq!(
+        crate::proxy::split_raw_request(&app.intruder.request).1,
+        "a=中文\r\n"
+    );
+    assert_eq!(capture.request_body.data(), "a=中文\r\n".as_bytes());
+}
+
+#[test]
+fn captured_text_can_be_edited_and_sent_in_both_tools() {
+    for intruder in [false, true] {
+        let (host, received, task) = receiver();
+        let capture = item(&host, b"a=original\r\n".to_vec(), None, "text/plain");
+        let mut app = PerseidApp::test_app();
+        app.scope_enforce = false;
+        if intruder {
+            app.send_history_to_intruder(&capture);
+            assert!(app.intruder.preserved_body.is_none());
+            app.intruder.request = app.intruder.request.replace("a=original", "a=$$original$$");
+            app.intruder.payload_sets[0].text = "edited".into();
+            let saved = app.intruder_workspace();
+            app.apply_intruder_workspace(&saved);
+            app.start_intruder_attack();
+            assert!(app.intruder.error.is_none(), "{:?}", app.intruder.error);
+        } else {
+            app.send_history_to_repeater(&capture);
+            let mut saved = app.repeater_workspace();
+            assert!(saved[0].preserved_body.is_none());
+            saved[0].request = saved[0].request.replace("a=original", "a=edited");
+            app.apply_repeater_workspace(&saved, 0);
+            app.send_active_repeater();
+            assert!(app.repeater_workspace()[0].error.is_none());
+        }
+        let (_, actual) = received.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(actual, b"a=edited\r\n");
+        task.join().unwrap();
     }
 }
 

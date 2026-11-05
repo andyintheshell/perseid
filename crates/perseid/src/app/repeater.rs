@@ -29,7 +29,7 @@ pub(super) struct RepeaterTab {
     title: String,
     scheme: String,
     host: String,
-    /// Request line and headers, plus a UTF-8 body only outside preserved mode.
+    /// Full editable UTF-8 request; non-UTF-8/incomplete bodies stay separate.
     request: String,
     preserved_body: Option<crate::project::BodyWorkspace>,
     /// Seed warning, for example when the captured body was truncated.
@@ -159,7 +159,7 @@ impl RepeaterTab {
         } else {
             item.request.scheme.clone()
         };
-        Self {
+        let mut tab = Self {
             id,
             title,
             scheme,
@@ -173,7 +173,9 @@ impl RepeaterTab {
             error: None,
             response_view: MessageView::Pretty,
             websocket: None,
-        }
+        };
+        super::replay_body::inline_text(&mut tab.preserved_body, &mut tab.request, false);
+        tab
     }
 
     /// Seed a representative replay response for the documentation screenshot.
@@ -1072,6 +1074,7 @@ impl PerseidApp {
             tab.host = workspace.host.clone();
             tab.request = workspace.request.clone();
             tab.preserved_body = workspace.preserved_body.clone();
+            super::replay_body::inline_text(&mut tab.preserved_body, &mut tab.request, false);
             tab.note = workspace.note.clone();
             tab.response = workspace.response.as_ref().map(|response| RepeaterReply {
                 views: (&response.views).into(),

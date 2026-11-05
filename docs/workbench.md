@@ -578,14 +578,20 @@ them only in memory.
 ### Captured bodies and editable requests
 
 **Send to Repeater** and **Send to Intruder** retain the captured request body
-as bytes, independently of Pretty/Raw/Hex previews and their 256 KiB text limit.
-The request editor initially contains **headers only**; the preserved-body label
-shows the retained byte count. Unchanged complete bodies, including binary,
-multipart, trailing CRLF, and gzip, are sent without decoding or adding newlines.
-`Content-Encoding` is retained. Intruder positions in this mode affect only the
-request line and headers; body bytes (including literal `$$`) are not templates.
+without using Pretty/Raw/Hex previews or their 256 KiB text limit. Complete
+UTF-8 bodies appear directly below the headers and can be edited immediately,
+including after reopening an older saved project. Empty bodies need no extra
+controls. Intruder supports payload positions in these editable bodies.
 
-To edit a body, explicitly choose **Replace captured body with empty editable
+Non-UTF-8 and incomplete bodies remain preserved separately; only these requests
+show the preserved-body label and replacement controls. Intruder also preserves
+bodies containing literal `$$` separately so captured bytes are not accidentally
+interpreted as payload positions. Positions in preserved mode affect only the
+request line and headers. Unchanged bodies, including multipart, trailing CRLF,
+and gzip, are sent without decoding or adding newlines. `Content-Encoding` is
+retained; UTF-8 validity does not imply that an encoded body has been decoded.
+
+To replace a separately preserved body, choose **Replace captured body with empty editable
 text**, then enter the replacement after the header separator. This discards
 the captured bytes and removes `Content-Encoding` and `Content-Length`; it does
 not decode or transcode the original body. Replacement text is sent as UTF-8.
