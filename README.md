@@ -4,89 +4,73 @@
 
 # Perseid
 
-**An open-source, Rust-native alternative to Burp Suite Community Edition.**
+**An open-source web security workbench. Built in Rust. No Java required.**
 
-Intercept, inspect, modify, replay, and fuzz HTTP traffic in a lightweight desktop
-workbench. Built for security researchers, CTF players, and developers testing
-applications they own or are authorized to assess. **No Java runtime or bundled
-browser required.**
+Capture HTTP traffic, edit requests, replay them, and fuzz inputs in one desktop
+app. For security researchers, CTF players, and developers testing their own apps.
+
+Used Burp Suite Community Edition? You'll recognize the workflow. Perseid is an
+independently developed alternative, **not yet a drop-in replacement**.
 
 [![CI](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/andyintheshell/perseid/actions/workflows/ci.yml)
-[![Rust 1.95+](https://img.shields.io/badge/Rust-1.95%2B-orange?logo=rust)](rust-toolchain.toml)
 [![Public alpha](https://img.shields.io/badge/status-public%20alpha-FF9915)](docs/roadmap.md)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-112D68)](https://github.com/andyintheshell/perseid/blob/main/LICENSE-MIT)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-112D68)](LICENSE-MIT)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15832/badge)](https://www.bestpractices.dev/projects/15832)
 
-**[Get started](docs/getting-started.md)** · [Screenshots](docs/screenshots.md) ·
-[Feature comparison](docs/burp-parity.md) · [User guide](docs/workbench.md) ·
-[Contribute](CONTRIBUTING.md)
+**[Download](https://github.com/andyintheshell/perseid/releases/latest)** ·
+[Get started](docs/getting-started.md) · [Screenshots](docs/screenshots.md) ·
+[Documentation](docs/README.md) · [Contribute](CONTRIBUTING.md)
 
 [![Animated demo of Perseid capturing, replaying, fuzzing, decoding, and comparing HTTP traffic](docs/images/perseid-demo.webp)](docs/screenshots.md)
 
-> [!IMPORTANT]
-> **Public alpha: the core manual-testing workflows work today.** Perseid is
-> actively developed, not yet a feature-complete or drop-in Burp replacement.
-> The [scoped manual-workflow parity estimate](docs/burp-parity.md#parity-estimate-821)
-> is **82.1%** as of 2026-11-03; see its methodology and capability matrix for
-> limitations and remaining gaps.
+*A look around the workbench with synthetic traffic. [Browse the screenshots →](docs/screenshots.md)*
+
+> [!NOTE]
+> **Public alpha.** Core manual-testing workflows are available today; expect
+> rough edges and missing features. This README follows `main`, which may be
+> ahead of the latest release. See [current limitations](#current-limitations).
 
 ## Why Perseid?
 
-- **A familiar manual-testing workflow.** Go from a captured request to
-  interception, replay, payload fuzzing, decoding, and comparison in one app.
-- **Native and cross-platform.** Built in Rust with egui; CI tests Linux,
-  Apple Silicon macOS, and Windows. No JVM or embedded browser.
-- **Explicit resource controls.** Configurable per-message capture and
-  in-memory UI-cache limits, bounded Intruder concurrency, and a live
-  heap-memory indicator. Saved project history remains on disk until cleared.
-- **Open development.** Source available under MIT or Apache-2.0; feedback,
-  bug reports, and focused contributions are welcome.
+- **One connected workflow.** Capture → inspect → edit → replay, with fuzzing,
+  decoding, and comparison alongside it.
+- **A native desktop app.** Rust and egui on Linux, macOS, and Windows.
+  No JVM or embedded browser; use your own testing browser.
+- **Keep your work.** Save traffic and [supported workbench state](docs/workbench.md#projects-and-persistence)
+  in a single `.perseid` project file.
+- **Open to explore and improve.** MIT or Apache-2.0 licensed, with a public
+  [roadmap](docs/roadmap.md) and [capability matrix](docs/burp-parity.md).
 
-## What works today
+## Download and run
 
-| Tool | Available today |
-| --- | --- |
-| **Proxy & HTTP history** | HTTP/1.1 and HTTP/2 forwarding; filtered history; Burp-style target site map with a host/folder tree, display filters, and sortable Contents table; Pretty, Raw, and Hex message views; Copy as curl for complete captures; gzip, deflate, and Brotli decoding. |
-| **Projects** | Temporary projects by default; save/open/copy single-file `.perseid` projects with automatic persistence. Unified HTTP/WebSocket tables cover all retained traffic with lazy details. |
-| **Search** | Search every stored HTTP exchange and WebSocket message, plus current Repeater tabs and retained Intruder results, with case, regex, negative, in-scope, and dynamic-update options; background scans report progress and highlight Pretty/Raw/Hex matches. |
-| **HTTPS inspection** | Local CA generation, certificate download page, per-host TLS pass-through, and manual trust installation/removal. |
-| **Intercept** | Hold, edit, forward, or drop requests and optionally responses, including buffered text bodies. |
-| **WebSocket history** | Capture and inspect text and binary frames for `ws://` and decrypted `wss://` connections; no message editing or replay yet. |
-| **Repeater** | Editable HTTP/HTTPS requests, multiple tabs, history seeding, target and virtual-host control, and direct replay independent of the proxy. |
-| **Intruder** | `§` payload positions, editable payload sets, Sniper, Battering ram, Pitchfork, and Cluster bomb modes, bounded concurrency, and response inspection. |
-| **Decoder** | Stacked encoding/decoding panels, selection-aware transforms, Smart decode, and 31 common hashes. |
-| **Comparer** | Text and hex comparison, word- and byte-level diffs, synchronized scrolling, and inputs from history, files, or the clipboard. |
-| **Sequencer** | Manual and live token sampling with character- and bit-level randomness tests, effective-entropy estimates, and per-analysis settings. |
-| **Scope & rewriting** | Opt-in proxy scope enforcement, literal/regex match-and-replace rules, and capture/history limits. |
+**[Get the latest release →](https://github.com/andyintheshell/perseid/releases/latest)**
+Prebuilt downloads do not require Rust.
 
-The interface follows **Target → Proxy → Intruder → Repeater → Sequencer →
-Decoder → Comparer**. See the [workbench guide](docs/workbench.md) for behavior
-and limitations, or browse the [screenshot gallery](docs/screenshots.md).
+| Platform | Packages | Architecture |
+| --- | --- | --- |
+| **Windows** | MSI installer or no-install ZIP | x64 / ARM64 |
+| **macOS** | DMG | Universal: Intel + Apple Silicon |
+| **Linux** | AppImage, DEB, or RPM | x86-64 / ARM64 |
 
-## Quick start
+Windows packages are **unsigned**. The macOS app is ad-hoc signed but **not
+notarized**, so your OS may warn or block launch. Check the
+[platform requirements and installation guide](docs/getting-started.md#requirements)
+and the release's `SHA256SUMS.txt` before installing.
 
-Install the latest version published to crates.io with Cargo (it compiles from
-source), or choose a prebuilt binary from
-[GitHub Releases](https://github.com/andyintheshell/perseid/releases/latest).
-The release includes Windows x64/ARM64 MSI and no-install ZIPs, a universal
-macOS DMG, and Linux x86-64/ARM64 AppImage and DEB packages. Windows packages
-are unsigned; the macOS app is ad-hoc signed but not notarized. See the
-[platform requirements](docs/getting-started.md#requirements) before installing.
-Feature descriptions in this repository follow `main`, which can include changes
-not yet released. See the
-[roadmap](docs/roadmap.md) and [parity matrix](docs/burp-parity.md) for current gaps.
+<details>
+<summary>Prefer Cargo or building from source?</summary>
 
-### Install from crates.io
+Both options require **Rust 1.95+** and your platform's
+[native build dependencies](docs/getting-started.md#requirements).
+
+Install the latest published crate (compiles locally):
 
 ```sh
 cargo install perseid --locked
 perseid
 ```
 
-This builds the latest published crate on your machine and needs Rust 1.95+
-plus the platform's native build dependencies.
-
-### Build from a source checkout
+Or run the development version from `main`:
 
 ```sh
 git clone https://github.com/andyintheshell/perseid.git
@@ -94,121 +78,97 @@ cd perseid
 cargo run -p perseid --locked
 ```
 
-1. Perseid opens on **Proxy > HTTP history**, listening on `127.0.0.1:8080`
-   by default.
-2. Follow the [local HTTP walkthrough](docs/getting-started.md#try-it-with-a-local-target)
-   to capture your first request without installing a certificate.
-3. For HTTPS, open `http://127.0.0.1:8080/` directly and follow the
-   [TLS setup guide](docs/tls.md). Perseid creates a local CA on first launch,
-   but **never installs trust automatically**.
-4. Configure a dedicated testing browser to use `127.0.0.1:8080` for both
-   HTTP and HTTPS. Turn on **Proxy > Intercept** when you want to hold and edit
-   requests; it is off by default.
+</details>
+
+### Capture your first request
+
+1. **Launch Perseid.** The proxy starts at `127.0.0.1:8080`; the app opens on
+   **Proxy > HTTP history**. Request holding (**Intercept**) is off by default.
+2. **Try a local target.** Follow the
+   [HTTP walkthrough](docs/getting-started.md#try-it-with-a-local-target)
+   to capture a request without installing a certificate.
+3. **Replay it.** Right-click the captured request → **Send to Repeater**.
+   Edit the request and send it again.
+4. **Connect a testing browser.** Use a dedicated profile and set its HTTP and
+   HTTPS proxy to `127.0.0.1:8080`. For HTTPS, open `http://127.0.0.1:8080/`
+   directly and follow the [certificate setup guide](docs/tls.md).
+   Perseid **never installs certificate trust automatically**.
 
 > [!WARNING]
-> Test only systems you own or have explicit permission to assess. Use a
-> dedicated browser profile. Proxy scope rules **do not apply to direct
-> Repeater sends**. Intruder also sends directly, but checks each generated
-> request when scope enforcement is enabled. Read
-> [Safety and privacy](docs/safety.md) before capturing real traffic.
+> Test only systems you own or have explicit permission to assess.
+> Proxy scope rules **do not apply to direct Repeater sends**. Intruder sends
+> directly too, but checks each generated request when scope enforcement is on.
+> Read [Safety and privacy](docs/safety.md) before capturing real traffic.
 
-## Public alpha: current limitations
+## What's inside
 
-Perseid is already usable for hands-on HTTP security testing, but there are
-important boundaries:
+| Task | Tools and capabilities |
+| --- | --- |
+| **Explore traffic** | HTTP/1.1 and HTTP/2 proxy, filtered history, Target site map, Pretty/Raw/Hex views, and Copy as curl. |
+| **Intercept and edit** | HTTP requests and responses, HTTPS inspection with a local CA, and match/replace rules. |
+| **Replay and fuzz** | Multi-tab Repeater; Intruder with Sniper, Battering ram, Pitchfork, and Cluster bomb modes. |
+| **Work with WebSockets** | Capture text/binary frames; intercept, edit, and replay messages on live connections. |
+| **Search and save** | Cross-history search, regex filters, and persistent `.perseid` projects. |
+| **Transform and compare** | Decoder with layered transforms and hashes; Comparer with word- and byte-level diffs. |
+| **Examine tokens** | Sequencer with manual/live sampling and randomness analysis. |
 
-- **Project persistence is an initial slice.** `.perseid` files save captured
-  HTTP/WebSocket history and the full workbench state. Unified history tables
-  cover all retained captures using bounded metadata windows and lazy details.
-  Search scans stored bodies in the background. Files are not
-  encrypted, recent-projects are not implemented, and temporary contents are lost
-  on exit unless saved.
-  Temporary projects bound captured records and retained body bytes with the
-  opt-in `--temporary-retention-*` limits (defaulting to unlimited)
-  and evict the oldest records first. These are soft limits: each stream's
-  newest record is kept even when it alone exceeds the byte budget, in-flight
-  HTTP exchanges are kept until they complete, `0` disables a dimension, and
-  headers, indexes, and database overhead are outside the byte budget. Saved
-  projects default to unlimited retention; opt-in saved limits are available
-  under **Settings > Automatic deletion…**, but do not cap physical file size.
-  Temporary project RAM is unbounded by default; save to disk before exhausting it.
-  There is no automatic memory-pressure pause. Schema-v1
-  projects migrate atomically to v2 on open; back up before upgrading if needed
-  by older versions. Delete a whole saved project via the filesystem after
-  switching away or quitting; deletion is not secure erasure. New
-  Project and Open Project ask Save/Discard/Cancel before replacing a temporary
-   project with unsaved work. Window close and Quit use the same prompt for
-   temporary captures or meaningful workbench edits. Save waits for Save As and
-   final workspace persistence; cancelled dialogs or failed saves keep the
-   session open. Discard explicitly allows exit; Cancel preserves the session.
-   Quit is blocked during project operations. Forced termination cannot prompt
-   or recover unsaved in-memory contents.
-- **Transient activity is not persisted.** Running attacks and sends, held
-  interception decisions, pending network operations, and proxy lifecycle state
-  are not restored. The local TLS CA certificate and private key are stored
-  separately from project files.
-- **WebSocket replay requires a live connection.** Messages can be intercepted,
-  edited, and resent, but closed connections cannot be reopened from Repeater.
-- **Not an automated scanner.** There is no crawler, automated vulnerability
-  scanner, or bundled browser. Intruder sends requests using user-supplied
-  payloads; it does not discover vulnerabilities automatically.
-- **Sequencer results are indicative.** Token capture is expression-based and
-  the statistical tests are bounded approximations, not a proof that a token
-  is predictable or safe.
-- **Some message bodies cannot be edited.** Large, streaming, and binary
-  intercepted bodies are header-editable only. Previews and direct-send seeds
-  can be truncated or lossy.
-- **Performance varies by environment.** Resource limits are configurable,
-  but there are no universal memory or speed guarantees. See the
-  [measured baseline](docs/performance.md).
+See the [workbench guide](docs/workbench.md) for tool walkthroughs and the
+[feature comparison](docs/burp-parity.md) for implemented and planned capabilities.
 
-Burp Suite Community manual-toolkit parity is a
-[direction](docs/burp-parity.md), **not a claim of current feature parity**.
-Burp Suite and Burp Suite Community Edition are trademarks of PortSwigger Ltd.
-Perseid is independently developed, contains no PortSwigger software or logos,
-and is not affiliated with, sponsored by, or endorsed by PortSwigger Ltd.
-References to Burp are for comparison only.
+## Current limitations
 
-## Help build Perseid
+- **Manual testing, not automated scanning.** No crawler, vulnerability scanner,
+  or bundled browser. HTTP/3/QUIC is not supported.
+- **Save temporary projects.** They live in RAM and are lost on exit unless
+  saved. Retention is unlimited by default, with no automatic memory-pressure
+  pause. [Persistence and retention details →](docs/workbench.md#projects-and-persistence)
+- **Project files are not encrypted.** They may contain credentials and other
+  sensitive traffic. [Deletion is not secure erasure](docs/safety.md#data-handling).
+  Back up older projects before [schema upgrades](docs/workbench.md#migrations-and-deletion).
+- **Editing has limits.** Large, streaming, or binary HTTP bodies may be
+  header-editable only; previews can be truncated. WebSocket replay needs a
+  live connection. [Tool limits →](docs/workbench.md#limits-and-persistence)
+- **No blanket performance or security guarantees.** Sequencer results are
+  indicative, not proof of token safety. Resource controls are configurable;
+  see the [measured performance baseline](docs/performance.md).
 
-Want an open-source Burp-style workbench to improve? **Contributions are
-welcome**, whether you're interested in Rust networking, egui, usability,
-platform support, tests, or documentation.
+Found a missing workflow or a bug? [Open an issue](https://github.com/andyintheshell/perseid/issues)
+with your OS, reproduction steps, and what you expected.
 
-- **Try it and report issues:** [Open an issue](https://github.com/andyintheshell/perseid/issues)
-  with a minimal reproduction, your OS, and what you expected to happen.
-- **Contribute code or documentation:** Read [CONTRIBUTING.md](CONTRIBUTING.md)
-  and pick a focused change. HTTP correctness, accessibility, low-memory
-  behavior, and macOS/Windows testing are especially useful.
-- **Discuss future work:** Read the [roadmap](docs/roadmap.md) and
-  [capability matrix](docs/burp-parity.md) before proposing major features.
-- **Report vulnerabilities privately:** Follow [SECURITY.md](SECURITY.md).
-  Never post live credentials, private keys, or sensitive traffic in issues.
-
-## Documentation
+## Learn more
 
 | I want to… | Start here |
 | --- | --- |
-| Install, build, or configure Perseid | [Getting started](docs/getting-started.md) |
-| Learn Proxy, Intruder, Repeater, Sequencer, Decoder, and Comparer | [Workbench guide](docs/workbench.md) |
-| Set up HTTPS interception and certificate trust | [TLS guide](docs/tls.md) |
-| Troubleshoot setup, traffic, or proxy problems | [Troubleshooting](docs/troubleshooting.md) |
-| Compare implemented and planned capabilities | [Burp Community capability matrix](docs/burp-parity.md) |
-| Understand the architecture | [Design](docs/design.md) |
-| Find all guides and references | [Documentation index](docs/README.md) |
+| Install or capture my first request | [Getting started](docs/getting-started.md) |
+| Learn the tools | [Workbench guide](docs/workbench.md) |
+| Set up HTTPS inspection | [TLS guide](docs/tls.md) |
+| Fix a setup or traffic problem | [Troubleshooting](docs/troubleshooting.md) |
+| See what's next | [Roadmap](docs/roadmap.md) · [Capability matrix](docs/burp-parity.md) |
+| Explore the internals | [Design](docs/design.md) |
+| Browse every guide | [Documentation index](docs/README.md) |
 
-## License
+## Help shape Perseid
 
-The source code is dual-licensed under [MIT](LICENSE-MIT) **or**
-[Apache-2.0](LICENSE-APACHE), at your option. Third-party dependencies, fonts,
-and assets retain their own licenses; the Perseid Marks have separate terms
-below.
+Try it in a lab, tell us where the workflow gets awkward, or contribute a focused
+fix. Rust networking, egui, accessibility, tests, and platform testing are all
+welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Reporting a vulnerability?** Follow [SECURITY.md](SECURITY.md) for private
+reporting. Never post live credentials, private keys, or sensitive traffic in issues.
+
+## License and trademarks
+
+Source code is dual-licensed under [MIT](LICENSE-MIT) **or**
+[Apache-2.0](LICENSE-APACHE), at your option.
+Third-party dependencies, fonts, and assets retain their own licenses.
+
+The Perseid name, logos, and visual identity have
+[separate brand terms](branding/LICENSE-brand.txt). Forks and modified versions
+must replace them with their own branding.
+
+Burp Suite and Burp Suite Community Edition are trademarks of PortSwigger Ltd.
+Perseid is independently developed, contains no PortSwigger software or logos,
+and is not affiliated with, sponsored by, or endorsed by PortSwigger Ltd.
+References to Burp are for comparison only, not a claim of current feature parity.
 
 `SPDX-License-Identifier: MIT OR Apache-2.0`
-
-### Trademarks and Perseid branding
-
-The Perseid name, logos, and visual identity identify this project and are not
-covered by the source-code licenses. Forks and modified versions must remove or
-replace them and use their own branding. See the
-[Perseid brand terms](branding/LICENSE-brand.txt).

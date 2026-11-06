@@ -58,10 +58,11 @@ from the open project.
 
 Saved projects persist HTTP and WebSocket captures plus the workbench state:
 scope and match/replace rules, the selected tab/section, filters, message views,
-Inspector notes and expanded sections, Repeater tabs and their last responses,
+Inspector notes and expanded sections, HTTP Repeater tabs and their last responses,
 Intruder configuration and result rows, Decoder panels, Comparer items and
 result-window state, Search state and structured result rows, Sequencer
 samples/analysis/settings, and TLS interception and pass-through settings.
+WebSocket Repeater tabs are session-only and are not saved in project files.
 Active network work is not restored:
 running attacks or sends, held interception messages, pending operations, and
 proxy lifecycle state stay in the current session. The local TLS CA certificate
