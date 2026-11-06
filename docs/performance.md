@@ -4,7 +4,7 @@
 [Runtime limits](workbench.md#limits-and-persistence)
 
 Perseid aims to stay comfortable on modest hardware. This page records the
-Original proof-of-concept measurements: idle memory, a full 2,000-entry
+original proof-of-concept (M0) measurements: idle memory, a full 2,000-entry
 history, and viewing large responses.
 
 ![Perseid memory window showing current and peak memory with a rolling graph](images/perseid-memory.png)

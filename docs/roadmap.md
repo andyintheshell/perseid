@@ -30,7 +30,7 @@ not a priority. Pro-class OAST is deliberately P0 **before** Community parity.
 Critical defects can interrupt feature work. Safety, scope, privacy, and bounded
 resource handling are part of every feature, not a final hardening phase.
 
-## 1. P0 — Collaborator / OAST
+## P0 — Collaborator / OAST
 
 Deliver an integrated manual out-of-band testing workflow: generate payloads,
 use them in Repeater/Intruder, poll asynchronously, correlate callbacks to their
@@ -44,7 +44,7 @@ the older `interactsh-rs` is unmaintained. See the
 and [client assessment, adoption gates, and safety requirements](collaborator.md).
 No PortSwigger service/protocol compatibility is promised.
 
-## 2. Make the daily workbench dependable
+## Make the daily workbench dependable
 
 Do not defer usability until all features exist. Prioritize reproducible user
 friction, responsiveness, clear errors, predictable state, and safe project
@@ -65,7 +65,7 @@ writes; that is not crash recovery. Recent projects must not silently reopen
 files. See [exit guarantees](project-exit-guarantees.md) and
 [Safety and privacy](safety.md).
 
-## 3. Reach Community manual-workflow parity
+## Reach Community manual-workflow parity
 
 The near-term baseline is a complete, practical manual loop: Proxy, Target,
 HTTP/WebSocket history and interception, Repeater, Intruder, Decoder, Comparer,
@@ -78,7 +78,7 @@ Publish a repeatable, versioned [parity audit (#68)](https://github.com/andyinth
 with evidence and linked gaps. The historical 82.1% scoped estimate is not an
 overall product-completeness score or a reason to ignore usability bugs.
 
-## 4. Longer-term — Professional parity
+## Longer-term — Professional parity
 
 After a dependable Community baseline, expand toward Burp Professional's
 workflows: crawling/discovery, passive and active checks, findings/triage and
