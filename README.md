@@ -36,8 +36,8 @@ independently developed alternative, **not yet a drop-in replacement**.
   decoding, and comparison alongside it.
 - **A native desktop app.** Rust and egui on Linux, macOS, and Windows.
   No JVM or embedded browser; use your own testing browser.
-- **Keep your work.** Save traffic and workbench state in a single `.perseid`
-  project file, then pick up where you left off.
+- **Keep your work.** Save traffic and [supported workbench state](docs/workbench.md#projects-and-persistence)
+  in a single `.perseid` project file.
 - **Open to explore and improve.** MIT or Apache-2.0 licensed, with a public
   [roadmap](docs/roadmap.md) and [capability matrix](docs/burp-parity.md).
 
@@ -123,7 +123,7 @@ See the [workbench guide](docs/workbench.md) for tool walkthroughs and the
   saved. Retention is unlimited by default, with no automatic memory-pressure
   pause. [Persistence and retention details →](docs/workbench.md#projects-and-persistence)
 - **Project files are not encrypted.** They may contain credentials and other
-  sensitive traffic. Active sends, attacks, and held messages are not restored.
+  sensitive traffic. [Deletion is not secure erasure](docs/safety.md#data-handling).
   Back up older projects before [schema upgrades](docs/workbench.md#migrations-and-deletion).
 - **Editing has limits.** Large, streaming, or binary HTTP bodies may be
   header-editable only; previews can be truncated. WebSocket replay needs a
