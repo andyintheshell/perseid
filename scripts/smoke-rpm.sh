@@ -2,7 +2,7 @@
 # Run inside a native-architecture Fedora container; never convert the RPM.
 set -euo pipefail
 exec > >(tee smoke/installer.log) 2>&1
-dnf install -y python3 python3-pillow xorg-x11-server-Xvfb xorg-x11-xauth xdotool openbox desktop-file-utils
+dnf install -y python3 python3-pillow procps-ng xorg-x11-server-Xvfb xorg-x11-xauth xdotool openbox desktop-file-utils
 dnf install -y packages/*.rpm
 rpm -V perseid
 desktop-file-validate /usr/share/applications/perseid.desktop

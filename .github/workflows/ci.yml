@@ -97,9 +97,12 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s scripts -p test_release_packaging.py
 
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
       - name: Test installer smoke helpers
-        if: runner.os == 'Linux'
-        run: python3 -m unittest discover -s scripts -p test_installer_smoke.py
+        run: python -m unittest discover -s scripts -p test_installer_smoke.py
 
   # Keep the status-check name required by the repository ruleset. This gate
   # succeeds only after every parallel platform job has succeeded.

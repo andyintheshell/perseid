@@ -16,7 +16,15 @@ smoke = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smoke)
 
 
-class SmokeTests(unittest.TestCase):
+class PlatformMocks(unittest.TestCase):
+    def setUp(self):
+        # Replace module references: Windows has neither os.killpg nor SIGKILL.
+        # Do not require those native symbols just to test the Linux behavior.
+        self.enterContext(patch.object(smoke, "os", types.SimpleNamespace(killpg=MagicMock())))
+        self.enterContext(patch.object(smoke, "signal", types.SimpleNamespace(SIGTERM=15, SIGKILL=9)))
+
+
+class SmokeTests(PlatformMocks):
     def run_smoke(self, *, exited=False, blank=False, visible=True, platform="darwin"):
         process = MagicMock()
         process.poll.return_value = 1 if exited else None
@@ -56,6 +64,13 @@ class SmokeTests(unittest.TestCase):
         image.save.assert_called_once()
         process.wait.assert_any_call()
 
+    def test_windows_capture_does_not_use_process_groups(self):
+        process, grab, image = self.run_smoke(platform="win32")
+        grab.grab.assert_called_once_with(bbox=(0, 0, 800, 600))
+        image.save.assert_called_once()
+        process.terminate.assert_called_once()
+        smoke.os.killpg.assert_not_called()
+
     def test_rejects_startup_exit(self):
         with self.assertRaisesRegex(RuntimeError, "exited before capture"):
             self.run_smoke(exited=True)
@@ -69,7 +84,7 @@ class SmokeTests(unittest.TestCase):
             self.run_smoke(visible=False)
 
 
-class LinuxSmokeTests(unittest.TestCase):
+class LinuxSmokeTests(PlatformMocks):
     def test_finds_child_window_but_not_unrelated_process(self):
         with (
             patch.object(sys, "platform", "linux"),
