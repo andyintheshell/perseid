@@ -55,7 +55,7 @@
 //!   virtual `Host` header, and response bodies are bounded by
 //!   [`RepeaterConfig::capture_limit`]. WebSocket replay uses the live proxy connection.
 //! - Direct Intruder attacks using the same client. [`AttackType`] implements
-//!   Sniper, Battering ram, Pitchfork, and Cluster bomb with `$$` markers,
+//!   Sniper, Battering ram, Pitchfork, and Cluster bomb with `§` markers,
 //!   lazy request generation, and bounded result queues. The engine clamps
 //!   concurrency to [`MAX_INTRUDER_CONCURRENCY`].
 //!
@@ -70,6 +70,7 @@
 //! # Ok::<(), perseid::proxy::StartError>(())
 //! ```
 
+pub(crate) mod body_text;
 mod capture;
 mod config;
 pub mod cookies;

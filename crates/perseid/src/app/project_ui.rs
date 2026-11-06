@@ -127,16 +127,24 @@ enum PendingProject {
     ClearHttp {
         receiver: Receiver<std::result::Result<CommitReceipt, ProjectError>>,
     },
+    DeleteHttp {
+        id: u64,
+        receiver: Receiver<std::result::Result<CommitReceipt, ProjectError>>,
+    },
     ClearWs {
         receiver: Receiver<std::result::Result<CommitReceipt, ProjectError>>,
     },
 }
 
 impl PendingProject {
-    fn is_file_operation(&self) -> bool {
+    fn is_blocking_operation(&self) -> bool {
         matches!(
             self,
-            Self::Save { .. } | Self::PrepareOpen { .. } | Self::Open { .. } | Self::New { .. }
+            Self::Save { .. }
+                | Self::PrepareOpen { .. }
+                | Self::Open { .. }
+                | Self::New { .. }
+                | Self::DeleteHttp { .. }
         )
     }
 }
@@ -161,6 +169,7 @@ enum ProjectCompletion {
         restart_proxy: bool,
     },
     ClearedHttp(std::result::Result<CommitReceipt, ProjectError>),
+    DeletedHttp(u64, std::result::Result<CommitReceipt, ProjectError>),
     ClearedWs(std::result::Result<CommitReceipt, ProjectError>),
 }
 
@@ -179,7 +188,6 @@ use retention::RetentionSweep;
 pub(super) struct ProjectUi {
     retention_seen: (u64, u64),
     retention_sweep: Option<RetentionSweep>,
-    pub(super) history_browser: super::history_browser::HistoryBrowser,
     storage_limits: Option<RetentionLimits>,
     retention_pending: Option<Receiver<std::result::Result<CommitReceipt, ProjectError>>>,
     handle: Option<ProjectHandle>,
@@ -216,7 +224,6 @@ impl ProjectUi {
         let mut ui = Self {
             retention_seen: (0, 0),
             retention_sweep: None,
-            history_browser: Default::default(),
             storage_limits: None,
             retention_pending: None,
             handle,
@@ -253,6 +260,14 @@ impl ProjectUi {
         self.handle.as_ref().map(ProjectHandle::status)
     }
 
+    pub(super) fn history_clearing(&self, websocket: bool) -> bool {
+        self.pending.iter().any(|pending| match pending {
+            PendingProject::ClearHttp { .. } => !websocket,
+            PendingProject::ClearWs { .. } => websocket,
+            _ => false,
+        })
+    }
+
     fn dialog_icon(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         if self.dialog_icon.is_none() {
             self.dialog_icon = branding::mark_texture(ctx);
@@ -264,7 +279,10 @@ impl ProjectUi {
         self.quit_flush.is_some()
             || self.switch_flush.is_some()
             || self.retention_pending.is_some()
-            || self.pending.iter().any(PendingProject::is_file_operation)
+            || self
+                .pending
+                .iter()
+                .any(PendingProject::is_blocking_operation)
     }
 
     fn notify(&mut self, text: impl Into<String>) {
@@ -284,12 +302,24 @@ impl ProjectUi {
     }
 
     pub(super) fn clear_http_history(&mut self) {
-        self.history_browser = Default::default();
         let Some(handle) = self.handle() else {
             return;
         };
         let receiver = handle.clear_http();
         self.pending.push(PendingProject::ClearHttp { receiver });
+    }
+
+    pub(super) fn delete_http_item(&mut self, id: u64) {
+        let Some(handle) = self.handle() else {
+            self.notify_error(format!(
+                "Could not delete the exchange: {}",
+                ProjectError::ServiceUnavailable
+            ));
+            return;
+        };
+        let receiver = handle.delete_http(id);
+        self.pending
+            .push(PendingProject::DeleteHttp { id, receiver });
     }
 
     pub(super) fn clear_ws_history(&mut self) {
@@ -753,6 +783,15 @@ impl ProjectUi {
                         ProjectCompletion::ClearedHttp(Err(ProjectError::ServiceUnavailable)),
                     ),
                 },
+                PendingProject::DeleteHttp { id, receiver } => match receiver.try_recv() {
+                    Ok(result) => completed.push(ProjectCompletion::DeletedHttp(id, result)),
+                    Err(TryRecvError::Empty) => {
+                        keep.push(PendingProject::DeleteHttp { id, receiver })
+                    }
+                    Err(TryRecvError::Disconnected) => completed.push(
+                        ProjectCompletion::DeletedHttp(id, Err(ProjectError::ServiceUnavailable)),
+                    ),
+                },
                 PendingProject::ClearWs { receiver } => match receiver.try_recv() {
                     Ok(result) => completed.push(ProjectCompletion::ClearedWs(result)),
                     Err(TryRecvError::Empty) => keep.push(PendingProject::ClearWs { receiver }),
@@ -935,7 +974,7 @@ impl PerseidApp {
         let mut open = true;
         let mut apply = false;
         let saved = matches!(status.mode, ProjectMode::Persistent { .. });
-        egui::Window::new("Project storage")
+        egui::Window::new("Project automatic deletion")
             .open(&mut open).collapsible(false).resizable(false).default_width(480.0)
             .show(ctx, |ui| {
                 ui.label(format!("{} HTTP exchanges, {} WebSocket messages, {} retained body bytes", status.http_count, status.ws_count, status.retained_body_bytes));
@@ -1266,8 +1305,11 @@ impl PerseidApp {
             match receiver.try_recv() {
                 Ok(Ok(_)) => {
                     self.project.retention_pending = None;
-                    self.project.history_browser = Default::default();
-                    self.project.notify("Saved retention limits. Oldest eligible records were removed; use Browse stored history to see retained records.");
+                    self.http_table.invalidate();
+                    self.ws_table.invalidate();
+                    self.project.notify(
+                        "Saved automatic deletion policy. Oldest eligible records were removed.",
+                    );
                 }
                 Ok(Err(err)) => {
                     self.project.retention_pending = None;
@@ -1380,6 +1422,12 @@ impl PerseidApp {
                             .notify_error(format!("Could not clear the project history: {err}"));
                     }
                 }
+                ProjectCompletion::DeletedHttp(id, result) => match result {
+                    Ok(_) => self.remove_http_item(id),
+                    Err(err) => self
+                        .project
+                        .notify_error(format!("Could not delete the exchange: {err}")),
+                },
                 ProjectCompletion::ClearedWs(result) => {
                     if let Err(err) = result {
                         self.project.notify_error(format!(
@@ -1394,12 +1442,9 @@ impl PerseidApp {
     fn apply_opened_project(&mut self, opened: OpenedProject, path: Option<&Path>) {
         self.project.retention_sweep = None;
         self.project.retention_seen = (0, 0);
-        self.project.history_browser = Default::default();
+        self.http_table = Default::default();
+        self.ws_table = Default::default();
         self.project.storage_limits = None;
-        let http_total = opened.http_total;
-        let ws_total = opened.ws_total;
-        let http_loaded = opened.http.len() as u64;
-        let ws_loaded = opened.ws.len() as u64;
 
         self.history.load(opened.http);
         self.websocket_history.load(opened.ws);
@@ -1417,14 +1462,13 @@ impl PerseidApp {
         self.project_baseline_workspace = baseline;
         self.project.last_workspace_check = Instant::now();
 
-        let truncated = http_loaded < http_total || ws_loaded < ws_total;
-        if truncated {
+        if let Some(path) = path {
             self.project.notify(format!(
-                "Loaded the newest {} of {http_total} exchanges and {ws_loaded} of {ws_total} WebSocket messages; use Browse stored history or Search for older records.",
-                http_loaded
+                "Opened {} ({} exchanges, {} WebSocket messages)",
+                path.display(),
+                opened.http_total,
+                opened.ws_total
             ));
-        } else if let Some(path) = path {
-            self.project.notify(format!("Opened {}", path.display()));
         } else {
             self.project.notify("Started a new temporary project.");
         }
@@ -1459,12 +1503,8 @@ impl PerseidApp {
         self.history_filter_draft = None;
         self.title_cache.borrow_mut().clear();
         self.websocket_filter = workspace.websocket_filter.clone();
-        self.selected = workspace
-            .selected_http_id
-            .filter(|id| self.history.get(*id).is_some());
-        self.websocket_selected = workspace
-            .selected_websocket_id
-            .filter(|id| self.websocket_history.get(*id).is_some());
+        self.selected = workspace.selected_http_id;
+        self.websocket_selected = workspace.selected_websocket_id;
         self.detail = None;
         self.websocket_detail = None;
         self.scroll_to_selected = false;
@@ -1566,10 +1606,12 @@ impl PerseidApp {
     /// Poll project commands and draw their dialogs. Called once per frame.
     pub(super) fn project_windows(&mut self, ctx: &egui::Context) {
         self.quit_recovery_window(ctx);
-        if self.project.is_busy() || self.project.retention_sweep.is_some() {
+        if self.project.is_busy()
+            || self.project.retention_sweep.is_some()
+            || self.history_reads_pending()
+        {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
-        self.stored_history_window(ctx);
         self.project_storage_window(ctx);
         if let Some(action) = self.project.switch_prompt(ctx) {
             match action {
@@ -1751,6 +1793,9 @@ pub(super) mod tests {
                 }],
             },
             repeater: vec![RepeaterWorkspace {
+                body_escaped: false,
+                body_incomplete: false,
+                preserved_body: None,
                 id: 2,
                 title: "Login".to_string(),
                 scheme: "https".to_string(),
@@ -1771,6 +1816,9 @@ pub(super) mod tests {
                 response_view: MessageViewRecord::Raw,
             }],
             intruder: IntruderWorkspace {
+                body_escaped: false,
+                body_incomplete: false,
+                preserved_body: None,
                 scheme: "https".to_string(),
                 host: "example.test".to_string(),
                 request: "POST /login HTTP/1.1\r\nHost: example.test\r\n\r\nuser=§a§".to_string(),
@@ -1806,6 +1854,8 @@ pub(super) mod tests {
                 detail_view: MessageViewRecord::Raw,
                 attack_id: Some(9),
                 last_plan: Some(IntruderPlanWorkspace {
+                    body_escaped: false,
+                    preserved_body: None,
                     attack: IntruderAttackRecord::ClusterBomb,
                     scheme: "https".to_string(),
                     host: "example.test".to_string(),
@@ -2108,7 +2158,7 @@ pub(super) mod tests {
 
     /// Run the project poll loop until no command is pending. Commands finish
     /// on the writer thread, so a short bounded wait keeps the test honest.
-    fn poll_until_idle(app: &mut PerseidApp) {
+    pub(super) fn poll_until_idle(app: &mut PerseidApp) {
         let deadline = Instant::now() + Duration::from_secs(30);
         while !app.project.pending.is_empty() {
             app.poll_project();
@@ -2141,6 +2191,65 @@ pub(super) mod tests {
             response: None,
             phase: Phase::InFlight,
         }
+    }
+
+    #[test]
+    fn unavailable_persistence_keeps_the_row_and_detail_when_deleting() {
+        let mut app = PerseidApp::test_app();
+        let mut item = history_item();
+        item.phase = Phase::Finished {
+            duration: Duration::ZERO,
+            result: ExchangeResult::Response {
+                body: CapturedBody::default(),
+            },
+        };
+        app.history.load(vec![item]);
+        app.selected = Some(1);
+        app.ensure_detail(1);
+        app.inspector
+            .apply_workspace(&crate::project::InspectorWorkspace {
+                notes: vec![crate::project::InspectorNoteWorkspace {
+                    id: 1,
+                    text: "Keep this note".into(),
+                }],
+                ..Default::default()
+            });
+        app.project.handle = None;
+
+        app.delete_selected_http_item();
+
+        assert!(app.history.get(1).is_some());
+        assert_eq!(app.selected, Some(1));
+        assert_eq!(app.detail.as_ref().map(|detail| detail.id), Some(1));
+        assert_eq!(app.inspector.note(1), Some("Keep this note"));
+        assert!(app.project.pending.is_empty());
+        let (notice, error) = app.project.notice().unwrap();
+        assert!(error);
+        assert!(notice.contains("Could not delete the exchange"));
+        assert!(notice.contains("the project writer is not available"));
+    }
+
+    #[test]
+    fn failed_item_deletion_keeps_the_row_selection_and_reports_the_error() {
+        let mut app = PerseidApp::test_app();
+        app.history.load(vec![history_item()]);
+        app.selected = Some(1);
+        // In-flight exchanges cannot even queue a deletion from the UI.
+        app.delete_selected_http_item();
+        assert!(!app.project.is_busy());
+        let (tx, receiver) = std::sync::mpsc::channel();
+        app.project
+            .pending
+            .push(PendingProject::DeleteHttp { id: 1, receiver });
+        assert!(app.project.is_busy());
+        tx.send(Err(ProjectError::ServiceUnavailable)).unwrap();
+        app.poll_project();
+        assert!(app.history.get(1).is_some());
+        assert_eq!(app.selected, Some(1));
+        assert!(!app.project.is_busy());
+        let (notice, error) = app.project.notice().unwrap();
+        assert!(error);
+        assert!(notice.contains("Could not delete the exchange"));
     }
 
     fn websocket_item() -> WebSocketMessageItem {
@@ -2647,7 +2756,8 @@ pub(super) mod tests {
         assert!(app.websocket_selected.is_none());
         let (text, error) = app.project.notice().expect("notice");
         assert!(!error);
-        assert!(text.contains("Loaded the newest 0 of 5 exchanges"));
+        assert!(text.contains("5 exchanges, 0 WebSocket messages"));
+        assert!(!text.contains("Browse stored"));
 
         app.apply_opened_project(
             OpenedProject {
@@ -2734,6 +2844,7 @@ pub(super) mod tests {
         assert_eq!(app.current_project_path(), Some(path.clone()));
         assert!(app.scope.is_empty());
         assert_eq!(app.history.len(), 1);
+        assert!(!super::super::util::captured_hosts(&app.history).is_empty());
         assert!(app.proxy.as_ref().unwrap().is_running());
         app.shutdown_project();
         drop(app);
@@ -3127,14 +3238,28 @@ mod switch_tests {
         app.project.dialog = None;
         app.begin_save_project(path.clone(), false, false);
         app.scope_enabled = false;
+        // Saving creates and publishes a database on the writer thread. Use
+        // the same bounded wait as other file-backed project tests rather than
+        // charging that work against the final-flush deadline on slower CI.
+        super::tests::poll_until_idle(&mut app);
+        assert!(
+            app.project.quit_flush.is_some() || app.project.quit_ready,
+            "project save did not start the final workspace flush: {:?}",
+            app.project.notice()
+        );
         let ctx = egui::Context::default();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !app.project.quit_ready && Instant::now() < deadline {
             app.poll_project();
             app.handle_close_request(&ctx);
-            std::thread::yield_now();
+            assert!(
+                app.project.quit_error.is_none(),
+                "final workspace flush failed: {:?}",
+                app.project.quit_error
+            );
+            std::thread::sleep(Duration::from_millis(2));
         }
-        assert!(app.project.quit_ready);
+        assert!(app.project.quit_ready, "quit did not complete after saving");
         assert!(path.is_file());
         assert_eq!(
             app.project.last_workspace.as_ref().unwrap(),

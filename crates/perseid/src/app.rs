@@ -23,8 +23,8 @@ mod curl;
 mod decoder;
 mod events;
 mod file_dialog;
-mod history_browser;
 mod history_filter;
+mod history_view;
 mod input;
 mod inspector;
 mod intercept;
@@ -35,6 +35,7 @@ mod project_ui;
 mod proxy;
 mod proxy_control;
 mod repeater;
+mod replay_body;
 mod rules;
 mod scale;
 #[cfg(feature = "screenshots")]
@@ -46,6 +47,7 @@ mod settings;
 mod target;
 mod tls;
 mod util;
+mod utility_window;
 mod widgets;
 mod windows;
 
@@ -284,6 +286,12 @@ pub struct PerseidApp {
     capture_limit: usize,
     intercept_limit: usize,
     history: History,
+    http_table:
+        history_view::HistoryTable<crate::project::HttpHistoryRow, crate::history::HistoryItem>,
+    ws_table: history_view::HistoryTable<
+        crate::websocket_history::WebSocketMessageItem,
+        crate::websocket_history::WebSocketMessageItem,
+    >,
     dropped_seen: u64,
     paused: bool,
     intercept_enabled: bool,
@@ -380,6 +388,8 @@ pub struct PerseidApp {
     #[cfg(feature = "screenshots")]
     reset_http_detail_size: bool,
     #[cfg(feature = "screenshots")]
+    http_context_menu_forced_open: bool,
+    #[cfg(feature = "screenshots")]
     screenshots: Option<screenshots::ScreenshotDriver>,
 }
 
@@ -443,6 +453,9 @@ impl PerseidApp {
                 false
             }
         };
+        if screenshot_mode {
+            cc.egui_ctx.set_embed_viewports(true);
+        }
         let ca_dir = args.ca_dir.clone().unwrap_or_else(ca_store::default_dir);
         // Create the CA once, on first launch, and reuse it forever after. The
         // screenshot driver supplies its own in-memory CA so documentation
@@ -481,6 +494,8 @@ impl PerseidApp {
             capture_limit: args.capture_limit,
             intercept_limit: args.intercept_limit,
             history: History::new(args.history_limit, args.history_bytes),
+            http_table: Default::default(),
+            ws_table: Default::default(),
             dropped_seen: 0,
             paused: false,
             intercept_enabled: false,
@@ -561,8 +576,16 @@ impl PerseidApp {
             #[cfg(feature = "screenshots")]
             reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
+            http_context_menu_forced_open: false,
+            #[cfg(feature = "screenshots")]
             screenshots: None,
         };
+        if !screenshot_mode && let Some(storage) = cc.storage {
+            app.search.window.load(storage, "perseid.search.geometry");
+            app.comparer
+                .window
+                .load(storage, "perseid.comparer.geometry");
+        }
         app.project_baseline_workspace = app.workspace_snapshot();
         #[cfg(feature = "screenshots")]
         if let Some(dir) = args.screenshot_dir.clone() {
@@ -627,6 +650,8 @@ impl PerseidApp {
             capture_limit: crate::proxy::DEFAULT_CAPTURE_LIMIT,
             intercept_limit: crate::proxy::DEFAULT_INTERCEPT_LIMIT,
             history: History::new(10, 1024),
+            http_table: Default::default(),
+            ws_table: Default::default(),
             dropped_seen: 0,
             paused: false,
             intercept_enabled: false,
@@ -707,6 +732,8 @@ impl PerseidApp {
             #[cfg(feature = "screenshots")]
             reset_http_detail_size: false,
             #[cfg(feature = "screenshots")]
+            http_context_menu_forced_open: false,
+            #[cfg(feature = "screenshots")]
             screenshots: None,
         };
         app.project_baseline_workspace = app.workspace_snapshot();
@@ -715,6 +742,22 @@ impl PerseidApp {
 }
 
 impl eframe::App for PerseidApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        #[cfg(feature = "screenshots")]
+        if self.screenshots.is_some() {
+            return;
+        }
+        self.search.window.save(storage, "perseid.search.geometry");
+        self.comparer
+            .window
+            .save(storage, "perseid.comparer.geometry");
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        // Persist only geometry, never arbitrary UI memory or captured traffic.
+        false
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.memory.sample_if_due();
@@ -794,16 +837,11 @@ impl eframe::App for PerseidApp {
     }
 }
 
-/// Temporary retention defaults to the effective UI cache limits (clamped to
-/// at least one, as the caches are) but can be configured independently. An
-/// explicit `--temporary-retention-* 0` disables that dimension; saved projects
-/// never evict.
+/// Automatic deletion is independent of presentation caches and opt-in only.
 fn configured_retention(args: &Args) -> RetentionLimits {
     RetentionLimits::new(
-        args.temporary_retention_limit
-            .unwrap_or(args.history_limit.max(1) as u64),
-        args.temporary_retention_bytes
-            .unwrap_or(args.history_bytes.max(1) as u64),
+        args.temporary_retention_limit.unwrap_or(0),
+        args.temporary_retention_bytes.unwrap_or(0),
     )
 }
 
@@ -813,10 +851,10 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn temporary_retention_defaults_to_the_history_limits_and_honours_overrides() {
+    fn temporary_retention_is_unlimited_by_default_and_honours_overrides() {
         let mut args =
             Args::parse_from(["perseid", "--history-limit", "7", "--history-bytes", "99"]);
-        assert_eq!(configured_retention(&args), RetentionLimits::new(7, 99));
+        assert_eq!(configured_retention(&args), RetentionLimits::new(0, 0));
 
         args.temporary_retention_limit = Some(3);
         args.temporary_retention_bytes = Some(0);
@@ -824,11 +862,10 @@ mod tests {
     }
 
     #[test]
-    fn temporary_retention_follows_the_effective_cache_limits_when_unset() {
-        // The UI caches clamp zero to one, so the default retention limits do
-        // the same instead of silently disabling retention.
+    fn temporary_retention_is_independent_of_cache_limits() {
+        // Even minimal recent caches leave project retention unlimited.
         let args = Args::parse_from(["perseid", "--history-limit", "0", "--history-bytes", "0"]);
-        assert_eq!(configured_retention(&args), RetentionLimits::new(1, 1));
+        assert_eq!(configured_retention(&args), RetentionLimits::new(0, 0));
     }
 
     fn frame(mut run: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {

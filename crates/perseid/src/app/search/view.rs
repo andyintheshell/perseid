@@ -33,10 +33,7 @@ impl SearchState {
         inspector: &mut InspectorState,
     ) {
         if !self.open {
-            return;
-        }
-        if ctx.input(|input| input.key_pressed(Key::Escape)) {
-            self.open = false;
+            self.window.hide();
             return;
         }
 
@@ -46,21 +43,19 @@ impl SearchState {
         }
 
         let mut open = self.open;
-        let screen = ctx.content_rect();
-        let default_pos = egui::pos2(
-            (screen.center().x - 500.0).max(screen.left() + 16.0),
-            (screen.center().y - 330.0).max(screen.top() + 42.0),
-        );
-
-        egui::Window::new("Search")
-            .id(egui::Id::unique("perseid.search.window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(egui::vec2(1000.0, 660.0))
-            .min_size(egui::vec2(680.0, 430.0))
-            .default_pos(default_pos)
-            .show(ctx, |ui| {
+        let mut window = std::mem::take(&mut self.window);
+        window.show(
+            ctx,
+            "perseid.search.window",
+            "Search",
+            &mut open,
+            [egui::vec2(1000.0, 660.0), egui::vec2(680.0, 430.0)],
+            |ui| {
+                // Native viewports have their own input stream; the main
+                // window's shortcut handler cannot consume this one for us.
+                if ui.input_mut(|input| input.consume_shortcut(&crate::app::SEARCH_SHORTCUT)) {
+                    self.focus_query = true;
+                }
                 let history_changed = self.last_history_revision
                     != Some(sources.history.revision())
                     || self.last_websocket_revision != Some(sources.websocket_history.revision());
@@ -88,8 +83,10 @@ impl SearchState {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::SURFACE))
                     .show(ui, |ui| self.results_table(ui));
-            });
+            },
+        );
 
+        self.window = window;
         self.open = open;
     }
 
@@ -169,14 +166,19 @@ impl SearchState {
             } else if self.ran {
                 let count = self.results.len();
                 let noun = if count == 1 { "result" } else { "results" };
-                let mut text = format!("Search completed · {count} {noun}");
+                let status = if self.dirty {
+                    "Search needs rerun"
+                } else {
+                    "Search completed"
+                };
+                let mut text = format!("{status} · {count} {noun}");
                 if self.limit_reached {
                     text.push_str(&format!(" · capped at {SEARCH_RESULT_LIMIT} results"));
                 }
                 ui.label(RichText::new(text).small().color(theme::TEXT_MUTED));
                 if self.dirty && !self.options.dynamic_update {
                     ui.label(
-                        RichText::new("settings changed — press Go to rerun")
+                        RichText::new("results may be outdated — press Go to rerun")
                             .small()
                             .color(theme::AMBER),
                     );
@@ -636,4 +638,43 @@ fn tools_group(ui: &mut egui::Ui, options: &mut SearchOptions) -> bool {
 
 fn checkbox(ui: &mut egui::Ui, value: &mut bool, label: &str, tooltip: &str) -> bool {
     ui.checkbox(value, label).on_hover_text(tooltip).changed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupted_search_shows_a_rerun_hint_instead_of_completion() {
+        fn has_text(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text() == expected,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_text(shape, expected)),
+                _ => false,
+            }
+        }
+
+        let ctx = egui::Context::default();
+        for dirty in [false, true] {
+            let mut state = SearchState {
+                ran: true,
+                dirty,
+                ..Default::default()
+            };
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| state.status_line(ui));
+            let contains = |text| {
+                output
+                    .shapes
+                    .iter()
+                    .any(|shape| has_text(&shape.shape, text))
+            };
+            assert_eq!(contains("Search completed · 0 results"), !dirty);
+            assert_eq!(contains("Search needs rerun · 0 results"), dirty);
+            assert_eq!(
+                contains("results may be outdated — press Go to rerun"),
+                dirty
+            );
+            output.drop_without_applying_deltas();
+        }
+    }
 }

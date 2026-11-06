@@ -18,8 +18,9 @@ use egui::{
 /// too thin for 10-12 pt UI text on a light background. Licensed under the
 /// SIL OFL; see `assets/Selawik-OFL.txt`.
 const UI_FONT: &[u8] = include_bytes!("../assets/Selawik-Regular.ttf");
-/// CJK fallback for request/response text and UI labels (SIL OFL).
-const CJK_FONT: &[u8] = include_bytes!("../assets/NotoSansCJKsc-Regular.otf");
+/// CJK fallback for request/response text and UI labels (Apache-2.0).
+/// See `assets/DroidSansFallback-NOTICE.txt` and `assets/README.md`.
+const CJK_FONT: &[u8] = include_bytes!("../assets/DroidSansFallback.ttf");
 
 pub const CANVAS: Color32 = Color32::from_rgb(0xf8, 0xf6, 0xf2);
 pub const SURFACE: Color32 = Color32::from_rgb(0xff, 0xfe, 0xfc);
@@ -36,6 +37,7 @@ pub const SELECTED: Color32 = Color32::from_rgb(0xfb, 0xd9, 0xcd);
 /// Background for search matches in message text. Warm yellow keeps the
 /// syntax colors legible while matching Burp's highlight convention.
 pub const SEARCH_MATCH: Color32 = Color32::from_rgb(0xff, 0xe8, 0x94);
+pub const SEARCH_ACTIVE: Color32 = Color32::from_rgb(0xff, 0xbf, 0x5e);
 pub const GREEN: Color32 = Color32::from_rgb(0x1e, 0x6a, 0x3e);
 pub const BLUE: Color32 = Color32::from_rgb(0x1d, 0x5d, 0x90);
 pub const AMBER: Color32 = Color32::from_rgb(0x86, 0x50, 0x00);
@@ -183,9 +185,18 @@ mod font_tests {
         let mut output = ctx.run_pass(egui::RawInput::default(), |ctx| {
             ctx.fonts_mut(|fonts| {
                 for font in [FontId::monospace(12.0), FontId::proportional(12.0)] {
-                    assert!(fonts.has_glyphs(&font, "中文漢字日本語한국어"));
-                    let galley = fonts.layout_no_wrap("中文".to_owned(), font, Color32::BLACK);
-                    assert!(!galley.is_empty());
+                    for text in [
+                        "简体中文",
+                        "繁體漢字",
+                        "日本語ひらがなカタカナ",
+                        "한국어",
+                        "，。！？「」",
+                    ] {
+                        assert!(fonts.has_glyphs(&font, text), "missing glyphs for {text}");
+                        let galley =
+                            fonts.layout_no_wrap(text.to_owned(), font.clone(), Color32::BLACK);
+                        assert!(!galley.is_empty());
+                    }
                 }
             });
         });

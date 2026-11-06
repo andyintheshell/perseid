@@ -13,7 +13,7 @@ messages. Only test local labs or systems you are explicitly authorized to test.
 | --- | --- |
 | **Target** | A Burp-style site map derived from history, a shared scope list, and an explicit empty scanner-issues view. |
 | **Proxy** | HTTP history, WebSockets history, held interception messages, match/replace rules, and proxy/TLS settings. |
-| **Intruder** | Editable requests with `$$` payload positions, payload sets, and direct attacks. |
+| **Intruder** | Editable requests with `§` payload positions, payload sets, and direct attacks. |
 | **Repeater** | Editable HTTP/HTTPS requests and messages on live WebSocket connections. |
 | **Sequencer** | Token sampling and character- or bit-level randomness analysis. |
 | **Decoder** | Local encoding, decoding, hashing, and layered transformations. |
@@ -74,20 +74,18 @@ sharing one.
 
 ### Browse older history
 
-Opening a project loads a bounded newest-first live snapshot controlled by
-`--history-limit` and `--history-bytes`. In **Proxy > HTTP history**, choose
-**Browse stored history…** for all retained HTTP exchanges. **Older**, **Newer**,
-and **Newest** navigate metadata pages of up to 500 rows, newest first. Select
-a row to load request/response details, Pretty/Raw/Hex views, and Inspector
-notes on demand; send it directly to Repeater, Intruder, or Comparer. Pages
-stay in place during capture; **Newest** refreshes to include new arrivals.
-Live-table filters do not apply in this browser. **Search** filters all retained
-HTTP/WebSocket records, including decoded bodies. The site map also covers all
-retained HTTP history; only the live HTTP/WebSocket tables use the bounded snapshot.
+The HTTP and WebSocket history tables cover every retained capture in the
+current project, in capture-time order. Scroll or use Home/End and arrow keys
+to navigate; filters apply to the full history before windowing. Metadata loads
+in bounded background windows, and selecting a row loads its complete captured
+bytes and Inspector details on demand. Tool sends wait for full details rather
+than using metadata-only bodies. UI-cache eviction never deletes or hides a
+stored capture. **Search** also searches retained bodies; the site map covers
+all retained HTTP endpoints.
 
 ### Retention and file size
 
-**Project storage…** in the HTTP history toolbar configures a saved project's
+**Settings > Automatic deletion…** configures a saved project's
 combined HTTP/WebSocket record count and retained body/payload byte limits.
 Both default to **0 (unlimited)**. **Apply retention limits** immediately removes
 the oldest eligible records and applies the policy to future captures. Limits
@@ -96,7 +94,7 @@ copy first if you need the records. The status bar reports eviction counts, and
 the live caches refresh after committed evictions.
 
 Temporary projects use `--temporary-retention-limit` and
-`--temporary-retention-bytes`, defaulting to the history flags. For both modes,
+`--temporary-retention-bytes`, both defaulting to **0 (unlimited)**. For both modes,
 zero disables a dimension. Limits are soft: in-flight HTTP exchanges and each
 stream's newest record are kept, even if they exceed a limit. Byte accounting
 excludes headers, indexes, workbench snapshots, and database overhead.
@@ -202,8 +200,19 @@ is a quick way to verify the path without a browser or CA trust.
 
 - **HTTP history** has one row per HTTP exchange, including decrypted HTTPS.
   `CONNECT` transport tunnels do not get their own rows. Right-click a row to
-  send its request or response to Repeater, Intruder, or Comparer, send its
-  response to Sequencer, or **Clear history**.
+  open a Burp-style menu: add the host to scope; send the request to Intruder
+  or Repeater, response tokens to Sequencer, or either message to Comparer or
+  Decoder; open per-exchange Notes; delete the selected item; clear history; browse stored history; or
+  copy the URL or a curl command. Unavailable tool actions are disabled.
+  The site map already includes captured URLs automatically. Unsupported Burp
+  actions (including highlighting and browser integration)
+  are omitted.
+  **Delete item** permanently removes the finished exchange and its captured
+  bodies from the active project, including Notes and cached Search/site-map
+  views. It does not delete copies already sent to other tools. Deletion is
+  disabled while the exchange is in flight or a blocking project operation
+  (such as saving or switching projects) is pending; storage errors leave the
+  row intact and show an error notice.
 - The text filter matches method, host, path, URI, status, MIME type, and file
   extension—not response-body contents. The filter bar opens a Burp-style
   display-filter dialog with in-scope, missing-response, parameterized-request,
@@ -214,14 +223,12 @@ is a quick way to verify the path without a browser or CA trust.
   display filter. Filters only hide rows; captured exchanges stay in the
   project. Scope filtering can narrow the view further.
 - **Capture** pauses recording of new exchanges, not forwarding or interception.
-- The in-memory history view is bounded by exchange count and retained-body
-  bytes. These limits evict rows from the UI cache and do not prune saved-project
-  files. Temporary redb storage has separate aggregate count and body-byte
-  retention limits, which default to the history limits and can be configured
-  independently; older records are evicted when those limits are exceeded.
-  Older saved records remain on disk even when evicted from the UI cache.
+- Recent in-memory caches have independent count and body-byte limits. Eviction
+  never hides stored records from the virtual tables. Temporary redb retention
+  is unlimited by default; optional aggregate limits delete the oldest eligible
+  captures independently of those cache sizes.
 - The status bar shows in-flight requests, held messages, dropped capture events,
-  rejected connections, and UI-cache evictions. A dropped-event warning means
+  rejected connections, and storage-deletion counts. A dropped-event warning means
   the history may be incomplete even if the client received its response.
 
 ### Copy as curl
@@ -321,7 +328,21 @@ project. Clearing history also clears them.
 | **Raw** | Reconstructed message text with line numbers and syntax highlighting. Binary/control bytes may be displayed lossily. |
 | **Hex** | A bounded byte-offset dump. In history and Repeater, this uses the same decoded body representation as the text views. Drag across the hex or ASCII columns to select bytes; **Copy selection** copies them as space-separated hexadecimal. |
 
-History and Repeater views decode gzip, deflate, and Brotli bodies for
+Each message pane has a bottom **Search** field, previous/next arrows, and a
+highlight count. Search is literal and case-insensitive against the displayed
+view, including the displayed dump in Hex. `Enter` moves to the next highlight;
+`Shift`+`Enter` moves to the previous one. Navigation wraps at either end and
+scrolls the current highlight into view without changing the message. A query
+stays with its pane when selecting another message or switching views.
+
+The **Wrap lines** toggle (text lines with a bent arrow), immediately left of
+`\n`, is on by default.
+Turn it off to scroll long lines horizontally. Wrapping and whitespace settings
+are independent for each pane; Hex keeps its fixed columns and disables both
+toggles without discarding their text-view settings. The editable Repeater,
+Intercept, and Intruder message panes use the same search and wrapping controls.
+
+History and Repeater response views decode gzip, deflate, and Brotli bodies for
 inspection. Displayed `Content-Encoding` is removed after successful decoding;
 `Content-Length` is adjusted only when the complete decoded length is known.
 Unsupported or invalid encodings fall back to captured wire bytes. The proxy
@@ -342,7 +363,7 @@ limits and do not make the whole editor or process a fixed-size allocation.
 ## Search captured traffic
 
 Click the magnifying glass at the right side of the top toolbar, or press
-`Ctrl`/`Cmd`+`Shift`+`F`, to open the floating **Search** window. Type a term
+`Ctrl`/`Cmd`+`Shift`+`F`, to open the independent **Search** window. Type a term
 and press **Go** or `Enter`. Search covers every HTTP exchange and WebSocket
 message stored in the active project, including rows older than the loaded
 history snapshot, plus the Repeater tabs and retained Intruder results in the
@@ -401,9 +422,28 @@ those tools no longer hold the original message; selecting such a row shows
 that its request or response is no longer available. Workspaces saved by older
 versions contained only HTTP result IDs, so unknown IDs are dropped on open as
 before.
+
 Matching uses the decoded body representation; uncompressed retained bodies
 are searched in full, while decoded compressed previews are bounded by the
 same decoder limits as the message editor.
+
+### Independent utility windows
+
+Search and the Comparer result use native, decorated desktop windows. Drag
+their OS title bars to another monitor or resize them independently of the main
+Perseid window. Reopening Search with its keyboard shortcut focuses its query.
+Press `Esc` in a focused utility window, or use its native close button, to hide
+only that window and return focus to the main window. Closing does not clear
+the search or comparison; project saving still follows the normal workspace
+rules. Quitting the main window closes all child windows.
+
+Each window remembers its last normal size and position across close/reopen and
+app restarts, in per-user application settings rather than in a project file.
+On Wayland, compositors control placement and do not expose global positions;
+Perseid remembers sizes but cannot restore an exact monitor position. Window
+manager policies may also adjust requested geometry. Documentation screenshots
+and headless tests deliberately embed these windows inside the main viewport.
+See the [cross-platform manual checks](utility-window-checks.md).
 
 ## Intercept and edit
 
@@ -476,10 +516,10 @@ Proxy history.
 1. Right-click a history exchange and choose **Send to Intruder**, or open
    Intruder and paste or edit a raw request. Review the **Target** scheme and
    host.
-2. Wrap each value to fuzz in `$$`, for example
-   `GET /product?id=$$1$$ HTTP/1.1`. Select text and click **Add $$** to wrap it,
-   or place the cursor and use **Add $$** for an empty position (`$$$$`).
-   **Clear $$** removes every marker. **Auto $$** marks query values,
+2. Wrap each value to fuzz in `§`, for example
+   `GET /product?id=§1§ HTTP/1.1`. Select text and click **Add §** to wrap it,
+   or place the cursor and use **Add §** for an empty position (`§§`).
+   **Clear §** removes every marker. **Auto §** marks query values,
    `application/x-www-form-urlencoded` body values, and cookie values.
 3. Edit the payload list on the right, one value per line. **Load from file**
    appends a UTF-8 text file (up to 16 MiB) to the selected set. Blank lines are
@@ -499,11 +539,15 @@ Proxy history.
    a finished attack, elapsed time.
 
 Markers are literal delimiters, not part of the request: they are removed when
-the request is generated. An unclosed `$$` is an error. Sniper uses the text
+the request is generated. An unclosed `§` is an error. Sniper uses the text
 inside each marker as that position's base value. The other attack types replace
 every marked position.
 
-`$$` can appear anywhere in the request, including headers and bodies. Keep the
+Captured request lines or headers containing literal `§` are rejected on import
+into Intruder, leaving the current draft unchanged; use Repeater to replay them
+without interpreting those characters as positions.
+
+`§` can appear anywhere in the request, including headers and bodies. Keep the
 **Update Host header** option on when the target bar changes so the request stays
 consistent; turning it off allows virtual-host testing.
 
@@ -534,6 +578,45 @@ them only in memory.
    on macOS).
 4. Inspect the status, timing, size, and Pretty/Raw/Hex response. Keep separate
    tabs for variants you want to compare manually.
+
+### Captured bodies and editable requests
+
+**Send to Repeater** and **Send to Intruder** retain the captured request body
+without using Pretty/Raw/Hex previews or their 256 KiB text limit. Complete
+UTF-8 bodies appear directly below the headers and can be edited immediately,
+including after reopening an older saved project. Empty bodies need no extra
+controls. Intruder supports payload positions in these editable bodies.
+
+Binary and incomplete bodies also appear directly in the same request editor.
+There is no separate preserved-body section, replacement button, or prefix
+acknowledgement button. For bodies that are not valid UTF-8, the editor uses
+lossless byte escapes: `\xFF` represents byte FF and `\\` represents a literal
+backslash. The request subtitle identifies this notation. Valid UTF-8 characters
+remain readable. Intruder uses this notation for captured bodies containing
+literal `§` too, displaying section signs as `\xC2\xA7` so they cannot become
+payload positions accidentally. Dollar signs remain literal text. You can mark positions
+in binary bodies as well as text; select whole byte escapes. Payload values
+remain UTF-8 text, not byte-escape
+source. Invalid or unfinished escapes block sending rather than changing bytes.
+
+Unchanged bodies, including multipart, trailing CRLF, and gzip, are sent without
+decoding or adding newlines. `Content-Encoding` is retained. If replacing gzip
+bytes with plain text, remove or update that header yourself; there is no implicit
+decompression or transcoding. `Content-Length` is recalculated when sending.
+
+Incomplete or truncated captures are visible but block both Send and Start
+attack (including keyboard shortcuts) with an error until you edit or replace
+the body in the request editor. Header-only edits do not unblock them. Editing
+does not recover missing bytes or automatically repair partial gzip/multipart
+data. Draft bytes, byte-escape mode, and incomplete status survive save/reopen;
+older header-only workspaces are imported into the full-message editor.
+
+Replay is **not exact wire-header replay**: heads are reconstructed, transport
+negotiation can change the HTTP version, hop-by-hop headers are removed,
+`Content-Length` is recalculated, and supported `Accept-Encoding` values are
+normalized. Optional cookie-jar behavior still applies. The existing 8 MiB
+request and 64 KiB head limits remain in force; preview limits do not truncate
+replay bodies to fit those limits.
 
 For an origin-form line such as `GET /admin HTTP/1.1`, the target bar selects
 the connection destination. An absolute-form line such as
@@ -583,9 +666,9 @@ Parallel requests can race when a server rotates a cookie, so reduce concurrency
 or disable updates for such applications. The jar is not a login macro and will
 not re-authenticate an expired session.
 
-Captured history seeds use the decoded, bounded message representation, so
-compressed, binary, or large bodies can be lossy. Review seed warnings before
-sending. Responses retain up to `--capture-limit` body bytes and report
+Captured HTTP history seeds use the captured bytes, not decoded or bounded
+display previews; see [Captured bodies and editable requests](#captured-bodies-and-editable-requests).
+Responses retain up to `--capture-limit` body bytes and report
 truncation or incomplete transfers. Requests have a 60-second end-to-end timeout,
 with up to eight concurrent sends. Request tabs and their most recent responses
 are saved with a persistent project; pending sends are not.
@@ -623,7 +706,7 @@ to release admission for unread results. See
 
 Paste or type into the first panel, then choose **Decode as**, **Encode as**,
 **Hash**, or **Smart decode**. Every operation adds a panel; transforming an
-earlier panel replaces the chain below it. Select text to transform only that
+earlier panel replaces the chain below it. Select text or Hex bytes to transform only that
 part, preserving the surrounding prefix and suffix. With no selection, the
 whole panel is used.
 
@@ -668,18 +751,24 @@ cSHAKE; no older standalone TupleHash dependency is required.
 
 </details>
 
-Right-click a text selection in a message pane and choose **Send selection to
+Right-click a selection in a message pane and choose **Send selection to
 Decoder**, then append a panel or start a new chain. Pretty selections contain
 the displayed formatted or decoded text; Raw selections also reflect the text
-preview, which can normalize or replace binary bytes. Hex preview selections
-can be copied as hexadecimal; sending one to Decoder currently sends the
-space-separated hexadecimal text, not the selected byte values. From HTTP
+preview, which can normalize or replace binary bytes. For byte-exact transfers,
+use Hex: selections send the current view's selected bytes (including NUL and invalid
+UTF-8), while clipboard copies remain space-separated hexadecimal text. Hex
+shows the bytes represented by that view, which may already be content-decoded;
+it does not recover uncaptured or truncated data. From HTTP
 history, right-click an exchange to send the full captured request or response,
 including its original captured body bytes and a
 reconstructed HTTP head. Captures may themselves be truncated. Starting a new
 chain replaces the current panels; appending preserves them.
 
 Text panels are editable; Hex panels are read-only and preview at most 64 KiB.
+Drag in either the hexadecimal or ASCII column to select whole bytes across
+rows, in either direction. The selection survives context-menu and operation
+menu clicks. **Copy selection** (or the platform Copy shortcut) exports selected
+bytes as spaced hex; **Select all bytes** includes bytes beyond the preview.
 Binary results open in Hex. Switching to Text gives a lossy preview, and editing
 it replaces the bytes with UTF-8 text. **Copy** and **Copy output** export all
 retained data as text or hex, not just the visible hex preview.
@@ -706,7 +795,8 @@ select a different row in each table to choose the pair.
   on ASCII whitespace and highlights changed tokens. Byte mode compares raw
   bytes; it is useful when whitespace or encoding differences matter.
 
-The result window has a Text/Hex choice for each pane, Previous/Next difference
+The result opens in an [independent utility window](#independent-utility-windows)
+that can move to another monitor. It has a Text/Hex choice for each pane, Previous/Next difference
 buttons, length labels, and a color key for modified, deleted, and added data.
 Tick **Sync views** to mirror vertical scrolling and wheel input, or use the
 **Sync** button in either pane header. Text is a display-safe rendering of the
@@ -795,8 +885,8 @@ separate Space, matching the system green-button behavior.
 | --- | --- |
 | Captured bodies | 1 MiB retained per request/response by default; forwarding can stream larger bodies. |
 | Interception buffering | Known-size bodies up to 1 MiB by default; other bodies are header-only. |
-| History UI cache | 2,000 HTTP exchanges and 2,000 WebSocket messages; each cache uses the configured retained-body-byte budget (half of physical RAM by default, 256 MiB fallback, with a 64 MiB floor when RAM is reported). These are UI-cache limits; the temporary store has separate aggregate retention settings. |
-| Temporary retention | Combined HTTP + WebSocket records default to `--history-limit`; retained HTTP body + WebSocket payload bytes default to `--history-bytes`. Override with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest records are evicted first; each stream's newest record and any in-flight exchange are always kept, so the limits can be exceeded temporarily. |
+| History UI cache | 128 records and 64 MiB of bodies per recent cache by default, independent of project retention. Metadata windows hold at most 1,000 rows per table plus one selected full capture. |
+| Temporary retention | Unlimited by default. Opt into combined record/body limits with `--temporary-retention-limit`/`--temporary-retention-bytes`; `0` disables a dimension. The oldest eligible records are deleted first; each stream's newest record and in-flight HTTP are always kept. |
 | Inspection previews | Up to 256 KiB text/decoded body and 64 KiB Hex input; these are preview limits, not whole-process memory bounds. |
 | Pretty body formatting | Independent 256 KiB input/output and 128-level nesting budgets; falls back to bounded Raw text on excess. |
 | Repeater work | Eight active sends; at most 32 pending operations and 64 MiB of reservations across queued, active, and unread work. |
@@ -806,9 +896,9 @@ separate Space, matching the system green-button behavior.
 | Intruder results | At most 1,000 rows and 64 MiB retained in the UI; oldest rows are evicted. Generated requests are limited to 8 MiB with 64 KiB heads and a 60-second timeout. |
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
-| Temporary storage growth | Bounded by the aggregate temporary retention count and body-byte limits described above (soft limits: each stream's newest record and in-flight exchanges are kept); the status bar shows how many old records were evicted. Headers, indexes, and redb cache overhead are outside the byte limit. |
+| Temporary storage growth | Unbounded by default; save to disk before exhausting RAM. No automatic memory-pressure pause. Optional retention limits exclude headers, indexes, workbench data, and database overhead. |
 | Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Files are unencrypted; saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
-| Project history view | Opening loads a bounded newest snapshot. **Browse stored history…** pages all retained HTTP rows and loads details/notes on demand; Search scans all retained HTTP/WebSocket records. The site map pages all retained HTTP endpoints with lazy details; the live WebSocket table remains cache-based. |
+| Project history view | Both HTTP and WebSocket tables cover all retained records, filtering before loading bounded metadata windows. Selected bodies load lazily. Search covers stored bodies; the site map pages all retained HTTP endpoints. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |
 | Local CA | Persisted separately from projects; its certificate and private key are never included in a `.perseid` file. |

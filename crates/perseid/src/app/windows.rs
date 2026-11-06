@@ -47,6 +47,10 @@ impl PerseidApp {
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -44.0))
             .show(ctx, |ui| {
                 ui.set_min_width(440.0);
+                if let Some(total) = memory::physical_memory_bytes() {
+                    ui.small(format!("Physical RAM: {}", view::human_bytes(total)));
+                }
+                ui.small("Temporary projects keep captures in RAM. Save Project As moves storage to disk; cache limits do not limit project growth.");
                 ui.horizontal(|ui| {
                     memory_metric(ui, "Current", current, theme::ACCENT_DARK);
                     ui.add_space(24.0);

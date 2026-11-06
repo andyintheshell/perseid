@@ -29,23 +29,23 @@ impl PerseidApp {
                             .color(theme::TEXT_MUTED),
                     );
                     if ui
-                        .button("Add $$")
+                        .button("Add §")
                         .on_hover_text(
-                            "Wrap the selected text in $$ markers. With no selection, insert an empty position at the cursor. Selecting an existing position removes its markers.",
+                            "Wrap the selected text in § markers. With no selection, insert an empty position at the cursor. Selecting an existing position removes its markers.",
                         )
                         .clicked()
                     {
                         add_marker = true;
                     }
                     if ui
-                        .button("Clear $$")
+                        .button("Clear §")
                         .on_hover_text("Remove every position marker from the request")
                         .clicked()
                     {
                         clear_all = true;
                     }
                     if ui
-                        .button("Auto $$")
+                        .button("Auto §")
                         .on_hover_text(
                             "Add positions around query values, form values, and cookie values",
                         )
@@ -86,6 +86,10 @@ impl PerseidApp {
                 }
             });
 
+        let before = self
+            .intruder
+            .body_incomplete
+            .then(|| self.intruder.request.clone());
         if add_marker {
             let target = self.intruder.target_range();
             let (request, range) = toggle_marker(&self.intruder.request, target);
@@ -116,6 +120,16 @@ impl PerseidApp {
             self.intruder.selection = None;
             self.intruder.cursor = self.intruder.cursor.min(self.intruder.request.len());
         }
+        if let Some(before) = before {
+            crate::app::replay_body::edited(
+                &before,
+                &self.intruder.request,
+                &mut self.intruder.body_incomplete,
+            );
+            if !self.intruder.body_incomplete {
+                self.intruder.legacy_body = None;
+            }
+        }
     }
 }
 
@@ -141,7 +155,7 @@ impl PositionStatus {
             Self::None => "no payload positions".to_string(),
             Self::Count(1) => "1 payload position".to_string(),
             Self::Count(count) => format!("{count} payload positions"),
-            Self::Unclosed => "unclosed $$ marker".to_string(),
+            Self::Unclosed => "unclosed § marker".to_string(),
         }
     }
 
@@ -162,18 +176,18 @@ mod tests {
     fn position_status_reports_none_counts_and_unclosed_markers() {
         assert_eq!(position_status("GET / HTTP/1.1\n\n"), PositionStatus::None);
         assert_eq!(
-            position_status("GET /?a=$$1$$&b=$$2$$ HTTP/1.1\n\n"),
+            position_status("GET /?a=§1§&b=§2§ HTTP/1.1\n\n"),
             PositionStatus::Count(2)
         );
         assert_eq!(
-            position_status("GET /?a=$$oops HTTP/1.1\n\n"),
+            position_status("GET /?a=§oops HTTP/1.1\n\n"),
             PositionStatus::Unclosed
         );
 
         assert_eq!(PositionStatus::None.label(), "no payload positions");
         assert_eq!(PositionStatus::Count(1).label(), "1 payload position");
         assert_eq!(PositionStatus::Count(3).label(), "3 payload positions");
-        assert_eq!(PositionStatus::Unclosed.label(), "unclosed $$ marker");
+        assert_eq!(PositionStatus::Unclosed.label(), "unclosed § marker");
         assert_eq!(PositionStatus::None.color(), theme::TEXT_MUTED);
         assert_eq!(PositionStatus::Count(1).color(), theme::ACCENT_DARK);
         assert_eq!(PositionStatus::Unclosed.color(), theme::RED);

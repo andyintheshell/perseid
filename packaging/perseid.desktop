@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Perseid
+Comment=A native HTTP(S) security testing workbench
+Exec=perseid
+Icon=perseid
+Terminal=false
+Type=Application
+Categories=Development;Network;

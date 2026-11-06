@@ -340,12 +340,17 @@ impl PerseidApp {
     pub(super) fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!("{} exchanges", self.history.len()))
-                    .small()
-                    .color(theme::TEXT_MUTED),
+                RichText::new(format!(
+                    "{} exchanges",
+                    self.project
+                        .status()
+                        .map_or(self.history.len() as u64, |status| status.http_count)
+                ))
+                .small()
+                .color(theme::TEXT_MUTED),
             )
             .on_hover_text(format!(
-                "{} of {} captured body bytes retained",
+                "Recent HTTP cache: {} of {} body bytes. Cache limits never delete project captures.",
                 view::human_bytes(self.history.retained_bytes() as u64),
                 view::human_bytes(self.history.byte_limit() as u64)
             ));
@@ -413,15 +418,6 @@ impl PerseidApp {
                     ui.separator();
                     ui.colored_label(theme::AMBER, format!("{blocked} blocked by scope"));
                 }
-            }
-            let evicted = self.history.evicted();
-            if evicted > 0 {
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("{evicted} evicted by history limit"))
-                        .small()
-                        .color(theme::TEXT_MUTED),
-                );
             }
 
             if self.paused {

@@ -54,24 +54,27 @@ pub(crate) struct Args {
     #[arg(long, value_name = "BYTES", default_value_t = crate::proxy::DEFAULT_INTERCEPT_LIMIT)]
     pub intercept_limit: usize,
 
-    /// Maximum number of exchanges kept in the in-memory history.
-    #[arg(long, value_name = "N", default_value_t = 2000)]
+    /// Maximum exchanges kept in the recent UI cache (never deletes captures).
+    #[arg(long, value_name = "N", default_value_t = 128)]
     pub history_limit: usize,
 
-    /// Maximum total request/response body bytes retained by history
-    /// (default: half of physical memory).
+    /// Maximum body bytes in each recent UI cache (not a recording limit).
     #[arg(long, value_name = "BYTES", default_value_t = default_history_bytes())]
     pub history_bytes: usize,
 
     /// Maximum captured HTTP exchanges and WebSocket messages retained by a
-    /// temporary project (default: `--history-limit`). `0` disables the count
+    /// temporary project (default: unlimited). `0` disables the count
     /// limit. Saved projects have separate, opt-in retention settings.
+    /// This is a soft limit: each stream's newest record and in-flight HTTP
+    /// exchanges are always kept.
     #[arg(long, value_name = "N")]
     pub temporary_retention_limit: Option<u64>,
 
     /// Maximum request/response and WebSocket payload bytes retained by a
-    /// temporary project (default: `--history-bytes`). `0` disables the byte
+    /// temporary project (default: unlimited). `0` disables the byte
     /// limit. Saved projects have separate, opt-in retention settings.
+    /// This is a soft limit: each stream's newest record and in-flight HTTP
+    /// exchanges are always kept. Headers and indexes are excluded.
     #[arg(long, value_name = "BYTES")]
     pub temporary_retention_bytes: Option<u64>,
 
@@ -149,6 +152,9 @@ pub fn run() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport,
+        // Utility geometry is saved explicitly by the app. Keep the existing
+        // main-window startup sizing (including --ui-scale and screenshots).
+        persist_window: false,
         ..Default::default()
     };
 

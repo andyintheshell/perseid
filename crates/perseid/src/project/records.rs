@@ -71,6 +71,8 @@ pub struct HttpExchangeRecord {
     pub phase: HttpPhaseRecord,
     pub request_body: BodyCaptureRecord,
     pub response_body: BodyCaptureRecord,
+    #[serde(default)]
+    pub(crate) summary: Option<super::history::HttpSummary>,
 }
 
 impl HttpExchangeRecord {
@@ -91,6 +93,7 @@ impl HttpExchangeRecord {
             phase: HttpPhaseRecord::InFlight,
             request_body: BodyCaptureRecord::empty(),
             response_body: BodyCaptureRecord::empty(),
+            summary: None,
         }
     }
 
@@ -631,6 +634,12 @@ pub struct RepeaterResponseWorkspace {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RepeaterWorkspace {
     #[serde(default)]
+    pub body_escaped: bool,
+    #[serde(default)]
+    pub body_incomplete: bool,
+    #[serde(default)]
+    pub preserved_body: Option<BodyWorkspace>,
+    #[serde(default)]
     pub id: u64,
     #[serde(default)]
     pub title: String,
@@ -743,6 +752,10 @@ impl Default for IntruderResultOutcomeWorkspace {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntruderPlanWorkspace {
     #[serde(default)]
+    pub body_escaped: bool,
+    #[serde(default)]
+    pub preserved_body: Option<BodyWorkspace>,
+    #[serde(default)]
     pub attack: IntruderAttackRecord,
     #[serde(default)]
     pub scheme: String,
@@ -768,6 +781,12 @@ pub struct TextSelectionWorkspace {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IntruderWorkspace {
+    #[serde(default)]
+    pub body_escaped: bool,
+    #[serde(default)]
+    pub body_incomplete: bool,
+    #[serde(default)]
+    pub preserved_body: Option<BodyWorkspace>,
     #[serde(default)]
     pub scheme: String,
     #[serde(default)]
@@ -1408,6 +1427,9 @@ mod tests {
                 }],
             },
             repeater: vec![RepeaterWorkspace {
+                body_escaped: false,
+                body_incomplete: false,
+                preserved_body: Some(BodyWorkspace::from_body(&body)),
                 id: 3,
                 title: "Login".to_string(),
                 scheme: "https".to_string(),

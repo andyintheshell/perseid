@@ -29,8 +29,12 @@ pub(super) struct RepeaterTab {
     title: String,
     scheme: String,
     host: String,
-    /// The full raw request: request line, headers, blank line, body.
+    /// Full editable request; binary body bytes have reversible byte escapes.
     request: String,
+    body_escaped: bool,
+    body_incomplete: bool,
+    /// Retain conflicting old workspace bytes until the user edits the body.
+    legacy_body: Option<crate::project::BodyWorkspace>,
     /// Seed warning, for example when the captured body was truncated.
     note: Option<String>,
     response: Option<RepeaterReply>,
@@ -88,6 +92,15 @@ impl RepeaterTab {
         &self.request
     }
 
+    pub(super) fn request_views(&self) -> MessageViews {
+        let (head, _) = split_raw_request(&self.request);
+        view::editor_views(head, &self.request_body_bytes())
+    }
+
+    pub(super) fn request_body_bytes(&self) -> Vec<u8> {
+        super::replay_body::bytes(&self.request, self.body_escaped, false).unwrap_or_default()
+    }
+
     pub(super) fn response_raw(&self) -> Option<&str> {
         self.response.as_ref().map(|reply| reply.views.raw.as_str())
     }
@@ -115,6 +128,9 @@ impl RepeaterTab {
             scheme: "https".to_string(),
             host: String::new(),
             request: "GET / HTTP/1.1\nHost: \n\n".to_string(),
+            body_escaped: false,
+            body_incomplete: false,
+            legacy_body: None,
             note: None,
             response: None,
             pending: None,
@@ -142,26 +158,33 @@ impl RepeaterTab {
         } else {
             item.request.scheme.clone()
         };
-        let note = view::seeded_body_note(&item.request_body, "sending");
-
-        Self {
+        let mut tab = Self {
             id,
             title,
             scheme,
             host: item.request.host.clone(),
-            // `request_views` applies the same decoded, bounded representation
-            // as the Proxy detail pane. That keeps the seed readable for
-            // compressed text and avoids copying a huge captured body into the
-            // editor.
-            request: view::request_views(item).raw,
-            note,
+            request: view::replay_request_head(item),
+            body_escaped: false,
+            body_incomplete: false,
+            legacy_body: None,
+            note: None,
             response: None,
             pending: None,
             pending_since: None,
             error: None,
             response_view: MessageView::Pretty,
             websocket: None,
-        }
+        };
+        super::replay_body::inline(
+            Some(&crate::project::BodyWorkspace::from_body(
+                &item.request_body,
+            )),
+            &mut tab.request,
+            &mut tab.body_escaped,
+            &mut tab.body_incomplete,
+            false,
+        );
+        tab
     }
 
     /// Seed a representative replay response for the documentation screenshot.
@@ -631,30 +654,23 @@ impl PerseidApp {
             .default_size((ui.available_width() * 0.5).max(260.0))
             .min_size(180.0)
             .show(ui, |ui| {
-                let ws = self.repeater_tabs[index].websocket.as_mut().unwrap();
+                let tab = &mut self.repeater_tabs[index];
+                let ws = tab.websocket.as_mut().unwrap();
                 ui.label(match ws.opcode {
                     WebSocketOpcode::Text => "Text message",
                     WebSocketOpcode::Binary => "Binary message (hex bytes)",
                 });
-                let show_invisibles =
-                    super::message_view::invisible_toggle(ui, ws.opcode == WebSocketOpcode::Text);
-                let output = egui::TextEdit::multiline(&mut ws.draft)
-                    .char_limit(match ws.opcode {
+                super::message_view::invisible_toggle(ui, ws.opcode == WebSocketOpcode::Text);
+                super::message_view::message_editor_with_limit(
+                    ui,
+                    tab.id,
+                    &mut ws.draft,
+                    match ws.opcode {
                         WebSocketOpcode::Text => send_limit,
                         WebSocketOpcode::Binary => send_limit.saturating_mul(3),
-                    })
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(20)
-                    .show(ui);
-                if show_invisibles {
-                    super::message_view::paint_invisibles(
-                        ui,
-                        &output.galley,
-                        output.galley_pos,
-                        &egui::TextStyle::Monospace.resolve(ui.style()),
-                    );
-                }
+                    },
+                    ws.opcode == WebSocketOpcode::Text,
+                );
             });
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Connection history");
@@ -810,8 +826,16 @@ impl PerseidApp {
         let raw = tab.request.clone();
         let scheme = tab.scheme.clone();
         let host = tab.host.clone();
-        let (head, body) = split_raw_request(&raw);
-        let request = match RepeaterRequest::parse(head, body.as_bytes().to_vec(), &scheme, &host) {
+        let body = match super::replay_body::bytes(&raw, tab.body_escaped, tab.body_incomplete) {
+            Ok(body) => body,
+            Err(error) => {
+                self.repeater_tabs[index].response = None;
+                self.repeater_tabs[index].error = Some(error);
+                return;
+            }
+        };
+        let (head, _) = split_raw_request(&raw);
+        let request = match RepeaterRequest::parse(head, body, &scheme, &host) {
             Ok(request) => request,
             Err(err) => {
                 let tab = &mut self.repeater_tabs[index];
@@ -882,12 +906,17 @@ pub(super) fn parse_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
+    let before = tab.body_incomplete.then(|| tab.request.clone());
     ui.horizontal(|ui| {
         ui.label(RichText::new("Request").strong().color(theme::TEXT));
         ui.label(
-            RichText::new("editable raw message")
-                .small()
-                .color(theme::TEXT_MUTED),
+            RichText::new(if tab.body_escaped {
+                "editable raw message · body: \\xNN bytes, \\\\ backslash"
+            } else {
+                "editable raw message"
+            })
+            .small()
+            .color(theme::TEXT_MUTED),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
@@ -913,6 +942,12 @@ fn request_editor(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
         MessageView::Raw,
         &mut tab.request,
     );
+    if let Some(before) = before {
+        super::replay_body::edited(&before, &tab.request, &mut tab.body_incomplete);
+        if !tab.body_incomplete {
+            tab.legacy_body = None;
+        }
+    }
 }
 
 fn response_pane(ui: &mut egui::Ui, tab: &mut RepeaterTab) {
@@ -1024,6 +1059,9 @@ impl PerseidApp {
                 scheme: tab.scheme.clone(),
                 host: tab.host.clone(),
                 request: tab.request.clone(),
+                preserved_body: tab.legacy_body.clone(),
+                body_escaped: tab.body_escaped,
+                body_incomplete: tab.body_incomplete,
                 note: tab.note.clone(),
                 response: tab
                     .response
@@ -1056,6 +1094,18 @@ impl PerseidApp {
             tab.scheme = workspace.scheme.clone();
             tab.host = workspace.host.clone();
             tab.request = workspace.request.clone();
+            tab.body_escaped = workspace.body_escaped;
+            tab.body_incomplete = workspace.body_incomplete;
+            let imported = super::replay_body::inline(
+                workspace.preserved_body.as_ref(),
+                &mut tab.request,
+                &mut tab.body_escaped,
+                &mut tab.body_incomplete,
+                false,
+            );
+            tab.legacy_body = (!imported)
+                .then(|| workspace.preserved_body.clone())
+                .flatten();
             tab.note = workspace.note.clone();
             tab.response = workspace.response.as_ref().map(|response| RepeaterReply {
                 views: (&response.views).into(),
@@ -1106,6 +1156,89 @@ mod tests {
         assert!(parse_hex_bytes("0").is_err());
         assert!(parse_hex_bytes("gg").is_err());
         assert!(parse_hex_bytes("é").is_err());
+    }
+
+    #[test]
+    fn websocket_tabs_on_one_connection_keep_independent_editor_cursors() {
+        use egui::text::{CCursor, CCursorRange};
+        use egui::text_edit::TextEditState;
+
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        app.repeater_tabs = [11, 12]
+            .into_iter()
+            .map(|id| {
+                let mut tab = RepeaterTab::new(id);
+                tab.websocket = Some(WebSocketReplay {
+                    connection_id: 7,
+                    live_connection_id: None,
+                    url: "ws://example.com/".into(),
+                    direction: WebSocketDirection::ToServer,
+                    opcode: WebSocketOpcode::Text,
+                    draft: "abcdef".into(),
+                    selected_message: None,
+                    truncated: false,
+                });
+                tab
+            })
+            .collect();
+        let frame = |app: &mut PerseidApp, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 500.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.websocket_repeater_view(ui),
+            )
+        };
+        let mut editors = Vec::new();
+        for index in 0..2 {
+            app.repeater_active = index;
+            let output = frame(&mut app, vec![]);
+            let pos = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == "abcdef" => {
+                        Some(shape.pos + egui::vec2(2.0, 5.0))
+                    }
+                    _ => None,
+                })
+                .expect("draft must be visible");
+            output.drop_without_applying_deltas();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+                .drop_without_applying_deltas();
+            }
+            let id = ctx.memory(|memory| memory.focused()).unwrap();
+            let mut state = TextEditState::load(&ctx, id).unwrap();
+            let range = CCursorRange::one(CCursor::new(index + 1));
+            state.cursor.set_char_range(Some(range));
+            state.store(&ctx, id);
+            editors.push((id, range));
+        }
+        assert_ne!(editors[0].0, editors[1].0);
+        for (index, (id, range)) in editors.into_iter().enumerate() {
+            app.repeater_active = index;
+            frame(&mut app, vec![]).drop_without_applying_deltas();
+            let state = TextEditState::load(&ctx, id).unwrap();
+            assert_eq!(state.cursor.char_range(), Some(range));
+        }
     }
 
     #[test]
@@ -1275,7 +1408,7 @@ mod tests {
         assert_eq!(tab.title, "#7 GET /search");
         assert_eq!(tab.scheme, "https");
         assert_eq!(tab.host, "example.com");
-        assert_eq!(tab.request, view::request_views(&item).raw);
+        assert_eq!(tab.request, view::replay_request_head(&item));
         assert!(tab.note.is_none());
     }
 
@@ -1296,12 +1429,41 @@ mod tests {
     }
 
     #[test]
-    fn seeding_from_history_notes_binary_bodies_before_sending() {
+    fn seeding_from_history_keeps_binary_bodies_inside_the_editor() {
         let item = history_item(1, "POST", "/upload", "https", vec![0xff, 0x00]);
         let tab = RepeaterTab::from_history(1, &item);
-        let note = tab.note.expect("binary body needs a note");
-        assert!(note.contains("Seeded from history"));
-        assert!(note.ends_with("Review the body before sending."));
+        assert!(tab.request.ends_with("\\xFF\0"));
+        assert!(tab.request_views().hex.contains("ff"));
+        assert_eq!(tab.request_body_bytes(), vec![0xff, 0x00]);
+        assert!(tab.body_escaped);
+    }
+
+    #[test]
+    fn binary_and_incomplete_editor_has_no_body_replacement_controls() {
+        let ctx = egui::Context::default();
+        let item = history_item(1, "POST", "/upload", "https", vec![255]);
+        let mut tab = RepeaterTab::from_history(1, &item);
+        tab.body_incomplete = true;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| request_editor(ui, &mut tab),
+        );
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("Preserved captured body")
+                || text.galley.job.text.contains("Replace captured body")
+                || text.galley.job.text.contains("Use captured prefix")
+        )));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("\\xFF")
+        )));
+        assert!(tab.body_incomplete);
+        output.drop_without_applying_deltas();
     }
 
     #[test]

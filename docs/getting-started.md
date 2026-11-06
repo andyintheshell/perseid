@@ -21,7 +21,7 @@ needed for the first plain-HTTP walkthrough.
 
 | Platform | Validation status |
 | --- | --- |
-| Linux | CI-tested on Ubuntu 26.04; x86-64/ARM64 AppImage and DEB downloads are available. Packages are built on Ubuntu 22.04 and need compatible desktop/graphics libraries. The published memory baseline is from a Kali ARM64 VM. |
+| Linux | CI-tested on Ubuntu 26.04; x86-64/ARM64 AppImage, DEB, and RPM downloads are available. Packages are built on Ubuntu 22.04 and need compatible desktop/graphics libraries. RPM install tests use Fedora 44 containers. The published memory baseline is from a Kali ARM64 VM. |
 | macOS | CI-tested on the GitHub-hosted macOS 26 Apple Silicon runner. A universal Intel/Apple Silicon DMG is available; it is ad-hoc signed but not notarized. |
 | Windows | CI-tested on the GitHub-hosted Windows 2025 x64 runner. x64/ARM64 MSI and no-install ZIP downloads are available; Windows packages are unsigned. Graphics-driver and clean-install coverage is limited. |
 
@@ -50,11 +50,14 @@ Choose a platform package from
 | --- | --- |
 | Windows | x64 or ARM64 `.msi` installer, or `-portable.zip` |
 | macOS | Universal `.dmg` containing `Perseid.app` |
-| Linux | x86-64 or ARM64 `.AppImage` or `.deb` |
+| Linux | x86-64 or ARM64 `.AppImage`, `.deb`, or `.rpm` |
 
 `SHA256SUMS.txt` lists checksums. Windows packages are unsigned, and the macOS
 DMG is not notarized, so the operating system may warn or block launch. The
-AppImage and DEB still require compatible host desktop and graphics libraries.
+AppImage, DEB, and RPM still require compatible host desktop and graphics libraries.
+Install RPM downloads with `sudo dnf install ./perseid-*.rpm` on compatible
+Fedora-family systems. Release CI installs, launches, captures, and uninstalls
+each RPM in a native-architecture Fedora 44 container.
 
 ### Linux
 
@@ -107,8 +110,9 @@ desktop dependencies; the macOS job verifies that its hosted runner is arm64.
 Before caching, CI removes each image's unrelated floating `stable` Rust
 toolchain so image updates do not invalidate the cache for the pinned project
 toolchain. The test suite runs headlessly. Running the app still requires a
-working desktop and graphics stack. CI does not install-test release packages
-or promise support for every desktop and graphics configuration.
+working desktop and graphics stack. The separate release workflow install-tests
+the packages as described in [Installed release smoke tests](installer-smoke.md).
+These checks do not promise support for every desktop and graphics configuration.
 
 ## Build from the repository
 
@@ -203,10 +207,10 @@ cargo run -p perseid --locked -- --listen 127.0.0.1:8081 --ui-scale 1.5
 | `--listen <ADDR>` | `127.0.0.1:8080` | Proxy listen address; keep it on loopback. |
 | `--capture-limit <BYTES>` | `1048576` (1 MiB) | Body bytes retained per request/response. |
 | `--intercept-limit <BYTES>` | `1048576` (1 MiB) | Maximum body size eligible for buffering/editing or rewriting. |
-| `--history-limit <N>` | `2000` | Maximum number of HTTP exchanges or WebSocket messages held in each UI history cache / loaded project snapshot. Does not cap saved project files. Also the default for `--temporary-retention-limit`. |
-| `--history-bytes <BYTES>` | Half of physical RAM; 256 MiB fallback | Per-cache in-memory UI budget for HTTP and WebSocket history. In persistent projects this bounds the opened snapshot, not disk retention. Also the default for `--temporary-retention-bytes`. |
-| `--temporary-retention-limit <N>` | `--history-limit` | Maximum combined HTTP + WebSocket records retained by a temporary project. `0` disables the count limit. Oldest eligible records are evicted first; saved projects have separate opt-in settings. |
-| `--temporary-retention-bytes <BYTES>` | `--history-bytes` | Maximum retained HTTP request/response body bytes plus WebSocket payload bytes in a temporary project. `0` disables the byte limit. The newest record is always kept. |
+| `--history-limit <N>` | `128` | Maximum records in each recent UI cache; never deletes or hides stored captures. |
+| `--history-bytes <BYTES>` | 64 MiB | Body budget for each recent UI cache, independent of project retention. |
+| `--temporary-retention-limit <N>` | `0` (unlimited) | Opt-in combined HTTP/WebSocket record limit for temporary projects. Oldest eligible records are deleted first. |
+| `--temporary-retention-bytes <BYTES>` | `0` (unlimited) | Opt-in retained-body/payload limit for temporary projects. The newest record is always kept. |
 | `--no-proxy` | Off | Open the UI without starting the proxy. |
 | `--ca-dir <DIR>` | `PERSEID_CA_DIR`, then platform data directory | Where the local CA store lives; use the active certificate/key paths shown in the UI. |
 | `--no-tls-intercept` | Off | Keep HTTPS tunnels opaque; the CA is still prepared. |
@@ -232,18 +236,17 @@ separate from the capture/history flags above; see
 
 ## Current limitations
 
-Perseid `0.2.0` introduced saved projects. The live history tables open
-only a bounded newest-first snapshot of stored history; older records stay in the
-project file and can be found by Search. **Browse stored history…** in HTTP
-history pages through all retained HTTP exchanges and loads details/notes on demand.
+Perseid `0.2.0` introduced saved projects. HTTP and WebSocket history now use
+one virtual table per protocol for all retained captures, with background metadata
+windows and on-demand details, in both temporary and saved projects.
 Target's site map also covers all retained HTTP endpoints, with background
 indexing, paged tree/Contents navigation, and lazy exchange details.
-Temporary projects evict the
-oldest captured records and released body bytes when they exceed the configurable
-aggregate retention limits, which default to the history flags. New and Open ask
+Temporary projects retain captures in RAM without automatic deletion by default;
+save to disk before RAM is exhausted. There is no automatic memory-pressure pause.
+Optional aggregate retention limits delete the oldest eligible records. New and Open ask
 Save/Discard/Cancel before replacing a temporary project with unsaved work; a
 failed open keeps the current project and running proxy. Saved retention defaults
-to unlimited; **Project storage…** enables combined record/body limits. These
+to unlimited; **Settings > Automatic deletion…** enables combined record/body limits. These
 are logical limits, not a physical file-size cap or secure erasure. Projects
 are not encrypted. Schema-v1 projects migrate atomically to v2 on open; older
 applications cannot reopen upgraded files. To remove a saved project, switch

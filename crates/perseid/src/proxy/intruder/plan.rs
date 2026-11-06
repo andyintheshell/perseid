@@ -2,8 +2,8 @@
 
 use std::ops::Range;
 
-/// The pair of dollar signs around a payload position.
-pub const MARKER: &str = "$$";
+/// The section sign delimiting a payload position.
+pub const MARKER: &str = "§";
 
 /// Bound on simultaneous in-flight attack requests. The UI offers the same
 /// range, and the engine clamps values from library callers.
@@ -71,10 +71,14 @@ impl AttackType {
 /// editing the request cannot change a running attack underneath the engine.
 #[derive(Clone, Debug)]
 pub struct IntruderPlan {
+    /// Interpret reversible byte escapes in the rendered request body.
+    pub body_escaped: bool,
+    /// Captured bytes sent independently of the header-only template.
+    pub preserved_body: Option<Vec<u8>>,
     pub attack: AttackType,
     pub scheme: String,
     pub host: String,
-    /// Raw request with `$$` delimiters around each payload position.
+    /// Raw request with `§` delimiters around each payload position.
     pub template: String,
     /// Payload values. Sniper and Battering ram use only the first set.
     pub payload_sets: Vec<Vec<String>>,
@@ -102,8 +106,18 @@ pub struct RenderedRequest {
 }
 
 impl IntruderPlan {
+    pub(crate) fn body_bytes(&self, raw: &str) -> Result<Vec<u8>, String> {
+        match &self.preserved_body {
+            Some(body) => Ok(body.clone()),
+            None => super::super::body_text::decode(split_raw_request(raw).1, self.body_escaped)
+                .map(|bytes| bytes.into_owned()),
+        }
+    }
     /// Parse the template and validate payload sets and request count.
     pub fn prepare(&self) -> Result<PreparedIntruderPlan<'_>, IntruderError> {
+        if self.preserved_body.is_some() && !split_raw_request(&self.template).1.is_empty() {
+            return Err(IntruderError::PreservedBodyConflict);
+        }
         let positions = marker_ranges(&self.template)?;
         if positions.is_empty() {
             return Err(IntruderError::NoPositions);
@@ -237,20 +251,41 @@ impl PreparedIntruderPlan<'_> {
 
         let mut raw = String::with_capacity(plan.template.len());
         let mut cursor = 0;
+        let body_start = split_raw_request(&plan.template).0.len();
         for (index, range) in self.positions.iter().enumerate() {
             // `range` covers the content between the delimiters. Keep the text
-            // before the opening `$$`, then emit the payload (or the original
+            // before the opening `§`, then emit the payload (or the original
             // base value) and skip both delimiters.
             let open = range.start - MARKER.len();
             raw.push_str(&plan.template[cursor..open]);
             match values[index] {
-                Some(payload) => raw.push_str(payload),
+                Some(payload) => {
+                    if plan.body_escaped && range.start >= body_start {
+                        // Payloads are UTF-8 values, not escape-language source.
+                        raw.push_str(&super::super::body_text::encode(payload.as_bytes(), false));
+                    } else {
+                        raw.push_str(payload);
+                    }
+                }
                 None => raw.push_str(&plan.template[range.clone()]),
             }
             cursor = range.end + MARKER.len();
         }
         raw.push_str(&plan.template[cursor..]);
-        if raw.len() > MAX_REQUEST_BYTES {
+        if plan.preserved_body.is_some() && !split_raw_request(&raw).1.is_empty() {
+            return Err(IntruderError::PreservedBodyConflict);
+        }
+        let request_len = if plan.body_escaped {
+            split_raw_request(&raw).0.len().saturating_add(
+                plan.body_bytes(&raw)
+                    .map_err(IntruderError::BodyEscape)?
+                    .len(),
+            )
+        } else {
+            raw.len()
+                .saturating_add(plan.preserved_body.as_ref().map_or(0, Vec::len))
+        };
+        if request_len > MAX_REQUEST_BYTES {
             return Err(IntruderError::RequestTooLarge { sequence });
         }
 
@@ -258,10 +293,10 @@ impl PreparedIntruderPlan<'_> {
     }
 }
 
-/// Return the byte ranges between each pair of `$$` markers.
+/// Return the byte ranges between each pair of `§` markers.
 ///
 /// An odd number of markers is rejected rather than guessing where a position
-/// should end. Ranges are UTF-8 boundaries because the delimiters are ASCII.
+/// should end. Ranges are UTF-8 boundaries because matches cover whole markers.
 pub fn marker_ranges(template: &str) -> Result<Vec<Range<usize>>, IntruderError> {
     let mut ranges = Vec::new();
     let mut search = 0;
@@ -283,9 +318,9 @@ pub fn clear_markers(template: &str) -> String {
     template.replace(MARKER, "")
 }
 
-/// Wrap the selection in `$$`, or remove the enclosing markers.
+/// Wrap the selection in `§`, or remove the enclosing markers.
 ///
-/// An empty selection inserts `$$$$` and returns the empty range between the
+/// An empty selection inserts `§§` and returns the empty range between the
 /// two delimiters. The returned range is always the new payload-position
 /// content, so the caller can keep the editor selection on it.
 pub fn toggle_marker(template: &str, selection: Range<usize>) -> (String, Range<usize>) {
@@ -312,7 +347,7 @@ pub fn toggle_marker(template: &str, selection: Range<usize>) -> (String, Range<
     }
 
     // The selection itself may include the delimiters, as when the user
-    // selects `$$value$$` and clicks Add $$ to remove the position.
+    // selects `§value§` and clicks Add § to remove the position.
     if template[start..end].starts_with(MARKER)
         && template[start..end].ends_with(MARKER)
         && end - start >= MARKER.len() * 2
@@ -395,10 +430,12 @@ pub fn auto_mark(template: &str) -> (String, usize) {
 /// Split an edited raw request into its head (including the blank line) and
 /// body. Both CRLF and LF messages are accepted.
 pub fn split_raw_request(raw: &str) -> (&str, &str) {
-    if let Some(position) = raw.find("\r\n\r\n") {
-        (&raw[..position + 4], &raw[position + 4..])
-    } else if let Some(position) = raw.find("\n\n") {
-        (&raw[..position + 2], &raw[position + 2..])
+    if let Some((position, len)) = ["\r\n\r\n", "\n\n"]
+        .into_iter()
+        .filter_map(|delimiter| raw.find(delimiter).map(|pos| (pos, delimiter.len())))
+        .min_by_key(|(pos, _)| *pos)
+    {
+        (&raw[..position + len], &raw[position + len..])
     } else {
         (raw, "")
     }
@@ -514,9 +551,15 @@ pub fn update_host_header(raw: &str, host: &str) -> String {
 /// Why a plan or generated request is invalid.
 #[derive(Debug, thiserror::Error)]
 pub enum IntruderError {
-    #[error("the request has an unclosed $$ position marker at byte {offset}")]
+    #[error("{0}")]
+    BodyEscape(String),
+    #[error(
+        "the template or generated request contains body text that conflicts with the preserved body; remove body text or header/body boundaries introduced by payloads, or replace the preserved body"
+    )]
+    PreservedBodyConflict,
+    #[error("the request has an unclosed § position marker at byte {offset}")]
     UnbalancedMarker { offset: usize },
-    #[error("add at least one payload position by wrapping a value in $$")]
+    #[error("add at least one payload position by wrapping a value in §")]
     NoPositions,
     #[error("payload set {position} is empty")]
     EmptyPayloadSet { position: usize },

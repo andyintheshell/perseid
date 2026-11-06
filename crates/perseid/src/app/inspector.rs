@@ -83,6 +83,10 @@ impl InspectorState {
         self.notes.clear();
     }
 
+    pub(super) fn remove_note(&mut self, id: u64) {
+        self.notes.remove(&id);
+    }
+
     /// Note text for an exchange, used by the Target > Site map Notes column.
     pub(super) fn note(&self, id: u64) -> Option<&str> {
         self.notes

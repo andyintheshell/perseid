@@ -15,7 +15,7 @@ trap 'rm -rf "$preview"' EXIT
 cp "$SCREENSHOTS_DIR"/*.png "$preview/"
 
 names=(
-  perseid-main.png perseid-project.png perseid-project-dialog.png
+  perseid-main.png perseid-http-history-context-menu.png perseid-project.png perseid-project-dialog.png
   perseid-proxy-websockets.png perseid-target-site-map.png perseid-target-scope.png
   perseid-proxy-intercept.png perseid-proxy-match-replace.png perseid-proxy-tls.png
   perseid-intruder.png perseid-repeater.png perseid-repeater-websockets.png perseid-decoder.png
@@ -23,7 +23,7 @@ names=(
   perseid-sequencer-result.png perseid-search.png perseid-settings.png perseid-cookie-jar.png perseid-memory.png
 )
 labels=(
-  'Proxy - HTTP history' 'Projects - File menu' 'Projects - Save dialog'
+  'Proxy - HTTP history' 'Proxy - HTTP history context menu' 'Projects - File menu' 'Projects - Save dialog'
   'Proxy - WebSockets history' 'Target - Site map' 'Target - Scope'
   'Proxy - Intercept' 'Proxy - Match/replace' 'Proxy - Proxy settings'
   'Intruder' 'Repeater' 'Repeater - WebSockets' 'Decoder' 'Comparer' 'Comparer - Result'

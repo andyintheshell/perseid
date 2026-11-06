@@ -352,13 +352,11 @@ async fn run_attack(
             }
         };
         let payloads = rendered.payloads;
-        let (head, body) = split_raw_request(&rendered.raw);
-        let request = match RepeaterRequest::parse(
-            head,
-            body.as_bytes().to_vec(),
-            &plan.scheme,
-            &plan.host,
-        ) {
+        let (head, _) = split_raw_request(&rendered.raw);
+        let request = match plan.body_bytes(&rendered.raw).and_then(|body| {
+            RepeaterRequest::parse(head, body, &plan.scheme, &plan.host)
+                .map_err(|error| error.to_string())
+        }) {
             Ok(request) => request,
             Err(err) => {
                 let event = result_event(

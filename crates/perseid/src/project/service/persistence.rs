@@ -71,8 +71,11 @@ pub(super) fn apply_capture_batch(
                         let number = next_meta.next_http_number;
                         next_meta.next_http_number = next_meta.next_http_number.saturating_add(1);
                         next_meta.next_http_id = next_meta.next_http_id.max(id.saturating_add(1));
-                        let record =
+                        let mut record =
                             HttpExchangeRecord::started(*id, number, *timestamp, request.clone());
+                        record.summary = Some(super::super::history::HttpSummary::from_item(
+                            &record.to_history_item(Vec::new(), Vec::new()),
+                        ));
                         http.insert(*id, codec::encode(&record)?.as_slice())?;
                         by_time.insert((record.started_at_ms, *id), ())?;
                         let host = normalized_host(&record.request.host);
@@ -156,6 +159,16 @@ pub(super) fn apply_capture_batch(
                                 };
                             }
                         }
+                        let response = match &end.result {
+                            ExchangeResult::Response { body } => Some(body),
+                            _ => None,
+                        };
+                        record.summary = Some(super::super::history::HttpSummary::from_parts(
+                            &record.request,
+                            &end.request_body,
+                            record.response.as_ref(),
+                            response,
+                        ));
                         http.insert(*id, codec::encode(&record)?.as_slice())?;
                         in_flight.remove(*id)?;
                     }
@@ -543,6 +556,50 @@ fn read_workspace(db: &Database) -> Result<WorkspaceState> {
     Ok(workspace)
 }
 
+pub(super) fn delete_http(db: &Database, meta: &mut ProjectMeta, id: u64) -> Result<CommitReceipt> {
+    let mut next = meta.clone();
+    let tx = begin_write(db)?;
+    {
+        let mut http = tx.open_table(schema::HTTP_EXCHANGES)?;
+        let record = http
+            .get(id)?
+            .map(|value| codec::decode::<HttpExchangeRecord>(value.value()))
+            .transpose()?;
+        if let Some(record) = record {
+            if tx.open_table(schema::HTTP_IN_FLIGHT)?.get(id)?.is_some() {
+                return Err(ProjectError::OperationRejected(
+                    "Wait for the exchange to finish before deleting it".into(),
+                ));
+            }
+            http.remove(id)?;
+            let mut bodies = tx.open_table(schema::HTTP_BODIES)?;
+            bodies.remove((id, 0))?;
+            bodies.remove((id, 1))?;
+            tx.open_table(schema::HTTP_BY_TIME)?
+                .remove((record.started_at_ms, id))?;
+            let host = normalized_host(&record.request.host);
+            if !host.contains('\0') {
+                tx.open_table(schema::HTTP_BY_HOST)?.remove((host, id))?;
+            }
+            if let Some(response) = record.response {
+                tx.open_table(schema::HTTP_BY_STATUS)?
+                    .remove((response.status, id))?;
+            }
+            next.http_count = next.http_count.saturating_sub(1);
+            next.http_body_bytes = next.http_body_bytes.saturating_sub(
+                record
+                    .request_body
+                    .stored_len
+                    .saturating_add(record.response_body.stored_len),
+            );
+        }
+        schema::write_counters(&mut tx.open_table(schema::META)?, &next)?;
+    }
+    tx.commit()?;
+    *meta = next;
+    Ok(receipt(meta))
+}
+
 pub(super) fn clear_http(db: &Database, meta: &mut ProjectMeta) -> Result<CommitReceipt> {
     let mut next_meta = meta.clone();
     let tx = begin_write(db)?;
@@ -730,7 +787,9 @@ pub(super) fn build_snapshot(
     ui_limit: usize,
     ui_bytes: usize,
 ) -> Result<OpenedProject> {
-    let limit = ui_limit.max(1);
+    // Desktop views query metadata and hydrate selected captures lazily. Keep
+    // the bounded snapshot API for callers that explicitly request one.
+    let limit = ui_limit;
     let (http_budget, ws_budget) = snapshot_budgets(ui_bytes);
     let (http, http_total) =
         queries::load_http_snapshot(db, limit, http_budget.max(1)).map_err(|source| {

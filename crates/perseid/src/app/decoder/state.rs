@@ -249,10 +249,13 @@ pub(super) enum Action {
 }
 
 pub(super) fn selection_for(panel: &Panel) -> Option<Range<usize>> {
-    if panel.view != ViewMode::Text || !panel.text_valid {
+    if panel.view == ViewMode::Text && !panel.text_valid {
         return None;
     }
-    panel.selection.clone()
+    panel
+        .selection
+        .clone()
+        .filter(|range| range.start < range.end && range.end <= panel.data.len())
 }
 
 /// Convert a byte range in `text` to the character range used by egui.
@@ -418,18 +421,34 @@ mod tests {
     }
 
     #[test]
-    fn saved_selection_is_used_only_for_text_panels() {
+    fn saved_selection_is_used_for_text_and_binary_hex_panels() {
         let mut state = DecoderState::new();
         set_root(&mut state, b"hello world");
         state.panels[0].selection = Some(6..11);
         assert_eq!(selection_for(&state.panels[0]), Some(6..11));
 
         state.panels[0].view = ViewMode::Hex;
-        assert_eq!(selection_for(&state.panels[0]), None);
+        assert_eq!(selection_for(&state.panels[0]), Some(6..11));
+        state.panels[0].text_valid = false;
+        assert_eq!(selection_for(&state.panels[0]), Some(6..11));
 
         state.panels[0].view = ViewMode::Text;
         state.panels[0].text_valid = false;
         assert_eq!(selection_for(&state.panels[0]), None);
+    }
+
+    #[test]
+    fn hex_binary_selection_transforms_only_selected_bytes() {
+        let mut state = DecoderState::new();
+        state.receive(vec![128, 0, 255, 129], "binary".into(), false);
+        state.panels[0].selection = Some(1..3);
+        let selection = selection_for(&state.panels[0]);
+        state.apply(
+            0,
+            engine::Transform::Encode(engine::Codec::AsciiHex),
+            selection,
+        );
+        assert_eq!(state.panels[1].data, [128, b'0', b'0', b'f', b'f', 129]);
     }
 
     #[test]

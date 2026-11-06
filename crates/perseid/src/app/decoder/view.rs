@@ -78,7 +78,7 @@ impl DecoderState {
                     ui.separator();
                     ui.label(
                         RichText::new(
-                            "Select text to transform only that part; every operation adds a panel.",
+                            "Select text or hex bytes to transform only that part; every operation adds a panel.",
                         )
                         .small()
                         .color(theme::TEXT_MUTED),
@@ -268,8 +268,28 @@ fn draw_editor(ui: &mut egui::Ui, panel: &mut Panel) -> bool {
         })
     } else {
         frame.response.container_context_menu(|ui| {
+            if ui
+                .add_enabled(
+                    panel.selection.is_some(),
+                    egui::Button::new("Copy selection"),
+                )
+                .clicked()
+            {
+                if let Some(bytes) = panel
+                    .selection
+                    .clone()
+                    .and_then(|range| panel.data.get(range))
+                {
+                    ui.ctx().copy_text(super::state::hex_copy(bytes));
+                }
+                ui.close();
+            }
             if ui.button("Copy hex").clicked() {
                 ui.ctx().copy_text(panel.copy_value());
+                ui.close();
+            }
+            if ui.button("Select all bytes").clicked() {
+                panel.selection = (!panel.data.is_empty()).then_some(0..panel.data.len());
                 ui.close();
             }
         })
@@ -558,7 +578,7 @@ fn append_text_run(job: &mut LayoutJob, text: &str, tag: Option<engine::ColorTag
     );
 }
 
-fn hex_view(ui: &mut egui::Ui, panel: &Panel) {
+fn hex_view(ui: &mut egui::Ui, panel: &mut Panel) {
     if panel.data.is_empty() {
         ui.label(RichText::new("No data").italics().color(theme::TEXT_MUTED));
         return;
@@ -567,6 +587,28 @@ fn hex_view(ui: &mut egui::Ui, panel: &Panel) {
     let shown = panel.data.len().min(HEX_PREVIEW_LIMIT);
     let rows = shown.div_ceil(HEX_BYTES_PER_ROW);
     let row_height = ui.text_style_height(&TextStyle::Monospace) + 2.0;
+    let drag_id = ui.make_persistent_id(("perseid.decoder.hex.drag", panel.id));
+    ui.interact(
+        egui::Rect::NOTHING,
+        drag_id,
+        egui::Sense::focusable_noninteractive(),
+    );
+    let mut anchor = ui.data(|data| data.get_temp::<usize>(drag_id));
+    let (pressed, down, released, pointer) = ui.input(|input| {
+        (
+            input.pointer.primary_pressed(),
+            input.pointer.primary_down(),
+            input.pointer.primary_released(),
+            input.pointer.interact_pos(),
+        )
+    });
+    let font = monospace_font(ui);
+    let char_width = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap("0".into(), font.clone(), theme::TEXT)
+            .size()
+            .x
+    });
     egui::ScrollArea::both()
         .id_salt(("perseid.decoder.hex", panel.id))
         .max_height(EDITOR_HEIGHT)
@@ -574,9 +616,99 @@ fn hex_view(ui: &mut egui::Ui, panel: &Panel) {
         .show_rows(ui, row_height, rows, |ui, row_range| {
             for row in row_range {
                 let job = hex_row_job(ui, panel, row, shown);
-                ui.add(Label::new(job).extend().selectable(true));
+                let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+                let (_, rect) = ui.allocate_space(egui::vec2(galley.size().x, row_height));
+                ui.interact(
+                    rect,
+                    drag_id.with(row),
+                    egui::Sense::click_and_drag() - egui::Sense::FOCUSABLE,
+                );
+                let hit = pointer.map(|pos| {
+                    if anchor.is_some() && (down || released) && ui.clip_rect().height() > 1.0 {
+                        egui::pos2(
+                            pos.x,
+                            pos.y
+                                .clamp(ui.clip_rect().top() + 0.5, ui.clip_rect().bottom() - 0.5),
+                        )
+                    } else {
+                        pos
+                    }
+                });
+                if let Some(pos) =
+                    hit.filter(|pos| rect.contains(*pos) && ui.clip_rect().contains(*pos))
+                {
+                    let column = ((pos.x - rect.left()) / char_width).floor().max(0.0) as usize;
+                    if let Some(offset) = hex_byte_at(row, column, shown) {
+                        if pressed {
+                            anchor = Some(offset);
+                            ui.memory_mut(|memory| memory.request_focus(drag_id));
+                        }
+                        if (down || released)
+                            && let Some(start) = anchor
+                        {
+                            panel.selection = Some(start.min(offset)..start.max(offset) + 1);
+                        }
+                    } else if pressed {
+                        panel.selection = None;
+                        anchor = None;
+                    }
+                }
+                if let Some(range) = &panel.selection {
+                    for offset in
+                        row * HEX_BYTES_PER_ROW..((row + 1) * HEX_BYTES_PER_ROW).min(shown)
+                    {
+                        if range.contains(&offset) {
+                            let byte = offset % HEX_BYTES_PER_ROW;
+                            for (column, width) in [(10 + byte * 3, 2), (36 + byte, 1)] {
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(
+                                        rect.min + egui::vec2(column as f32 * char_width, 0.0),
+                                        egui::vec2(width as f32 * char_width, row_height),
+                                    ),
+                                    0.0,
+                                    ui.visuals().selection.bg_fill,
+                                );
+                            }
+                        }
+                    }
+                }
+                ui.painter().galley(rect.min, galley, theme::TEXT);
+            }
+            if anchor.is_some()
+                && down
+                && let Some(pos) = pointer
+            {
+                let clip = ui.clip_rect();
+                if pos.y < clip.top() || pos.y > clip.bottom() {
+                    ui.scroll_with_delta_animation(
+                        egui::vec2(0.0, if pos.y < clip.top() { 18.0 } else { -18.0 }),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                    ui.ctx().request_repaint();
+                }
             }
         });
+    ui.data_mut(|data| {
+        data.remove::<usize>(drag_id);
+        if down && let Some(anchor) = anchor {
+            data.insert_temp(drag_id, anchor);
+        }
+    });
+    if ui.memory(|memory| memory.has_focus(drag_id))
+        && ui.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Copy))
+                || (input.key_pressed(egui::Key::C) && input.modifiers.command)
+        })
+        && let Some(bytes) = panel
+            .selection
+            .clone()
+            .and_then(|range| panel.data.get(range))
+    {
+        ui.ctx().copy_text(super::state::hex_copy(bytes));
+    }
     if panel.data.len() > shown {
         ui.label(
             RichText::new(format!(
@@ -588,6 +720,18 @@ fn hex_view(ui: &mut egui::Ui, panel: &Panel) {
             .color(theme::TEXT_MUTED),
         );
     }
+}
+
+fn hex_byte_at(row: usize, column: usize, shown: usize) -> Option<usize> {
+    let byte = (0..HEX_BYTES_PER_ROW)
+        .find(|byte| (10 + byte * 3..12 + byte * 3).contains(&column))
+        .or_else(|| {
+            (36..36 + HEX_BYTES_PER_ROW)
+                .contains(&column)
+                .then(|| column - 36)
+        })?;
+    let offset = row * HEX_BYTES_PER_ROW + byte;
+    (offset < shown).then_some(offset)
 }
 
 fn hex_row_job(ui: &egui::Ui, panel: &Panel, row: usize, shown: usize) -> LayoutJob {
@@ -655,4 +799,142 @@ fn monospace_font(ui: &egui::Ui) -> FontId {
         .get(&TextStyle::Monospace)
         .cloned()
         .unwrap_or_else(|| FontId::monospace(13.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_hit_testing_excludes_offsets_spaces_and_padding() {
+        assert_eq!(hex_byte_at(0, 10, 10), Some(0));
+        assert_eq!(hex_byte_at(0, 11, 10), Some(0));
+        assert_eq!(hex_byte_at(0, 12, 10), None);
+        assert_eq!(hex_byte_at(0, 9, 10), None);
+        assert_eq!(hex_byte_at(1, 37, 10), Some(9));
+        assert_eq!(hex_byte_at(1, 38, 10), None);
+    }
+
+    #[test]
+    fn hex_panel_finalizes_batched_release_and_same_frame_click() {
+        for same_frame_click in [false, true] {
+            let ctx = egui::Context::default();
+            let mut panel = Panel::new(1, (0..16).collect(), vec![], None);
+            let mut run = |events| {
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(600.0, 250.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| hex_view(ui, &mut panel),
+                )
+            };
+            run(vec![]).drop_without_applying_deltas();
+            let (width, height) = ctx.fonts_mut(|fonts| {
+                let font = FontId::monospace(13.0);
+                (
+                    fonts
+                        .layout_no_wrap("0".into(), font.clone(), theme::TEXT)
+                        .size()
+                        .x,
+                    fonts.row_height(&font) + 2.0,
+                )
+            });
+            let start = egui::pos2(37.5 * width, height * 1.5);
+            let end = egui::pos2(28.5 * width, height * 0.5);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            run(vec![egui::Event::PointerMoved(start)]).drop_without_applying_deltas();
+            if same_frame_click {
+                run(vec![button(start, true), button(start, false)]).drop_without_applying_deltas();
+            } else {
+                run(vec![button(start, true)]).drop_without_applying_deltas();
+                // No intermediate frame sees the final endpoint while down.
+                run(vec![egui::Event::PointerMoved(end), button(end, false)])
+                    .drop_without_applying_deltas();
+            }
+            // An unrelated release must not extend the completed selection.
+            run(vec![
+                egui::Event::PointerMoved(egui::pos2(10.5 * width, height * 0.5)),
+                button(egui::pos2(10.5 * width, height * 0.5), false),
+            ])
+            .drop_without_applying_deltas();
+            assert_eq!(
+                panel.selection,
+                Some(if same_frame_click { 9..10 } else { 6..10 })
+            );
+        }
+    }
+
+    #[test]
+    fn hex_panel_reverse_drag_crosses_rows_and_preserves_selection_on_right_click() {
+        let ctx = egui::Context::default();
+        let mut panel = Panel::new(1, (0..16).collect(), vec![], None);
+        let mut run = |events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(600.0, 250.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    hex_view(ui, &mut panel);
+                },
+            )
+        };
+        run(vec![]).drop_without_applying_deltas();
+        let (width, height) = ctx.fonts_mut(|fonts| {
+            let font = FontId::monospace(13.0);
+            (
+                fonts
+                    .layout_no_wrap("0".into(), font.clone(), theme::TEXT)
+                    .size()
+                    .x,
+                fonts.row_height(&font) + 2.0,
+            )
+        });
+        let start = egui::pos2(37.5 * width, height * 1.5);
+        let end = egui::pos2(28.5 * width, height * 0.5);
+        let button = |pos, button, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(start)],
+            vec![button(start, egui::PointerButton::Primary, true)],
+            vec![egui::Event::PointerMoved(end)],
+            vec![button(end, egui::PointerButton::Primary, false)],
+        ] {
+            run(events).drop_without_applying_deltas();
+        }
+        let output = run(vec![egui::Event::Copy]);
+        assert!(
+            output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(
+                    command, egui::OutputCommand::CopyText(value) if value == "06 07 08 09"
+                ))
+        );
+        output.drop_without_applying_deltas();
+        for pressed in [true, false] {
+            run(vec![button(end, egui::PointerButton::Secondary, pressed)])
+                .drop_without_applying_deltas();
+        }
+        assert_eq!(panel.selection, Some(6..10));
+    }
 }

@@ -72,7 +72,7 @@ async fn cookie_jar_adds_missing_cookies_without_overwriting_payloads() {
     intruder
         .start_attack(plan(
             addr,
-            "GET / HTTP/1.1\r\nCookie: sid=$$old$$\r\n\r\n",
+            "GET / HTTP/1.1\r\nCookie: sid=§old§\r\n\r\n",
             &["payload"],
         ))
         .unwrap();
@@ -97,6 +97,8 @@ async fn cookie_jar_adds_missing_cookies_without_overwriting_payloads() {
 
 fn plan(addr: std::net::SocketAddr, template: &str, payloads: &[&str]) -> IntruderPlan {
     IntruderPlan {
+        body_escaped: false,
+        preserved_body: None,
         attack: AttackType::Sniper,
         scheme: "http".to_string(),
         host: addr.to_string(),
@@ -179,7 +181,7 @@ async fn sniper_attack_sends_every_payload_and_reports_results() {
     .unwrap();
     let attack_plan = plan(
         addr,
-        "GET /item?id=$$1$$ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "GET /item?id=§1§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         &["alpha", "beta", "gamma"],
     );
     let attack_id = intruder.start_attack(attack_plan).unwrap();
@@ -223,7 +225,7 @@ async fn sniper_attack_sends_every_payload_and_reports_results() {
     // A finished attack releases the engine for the next one.
     let next_plan = plan(
         addr,
-        "GET /next?id=$$1$$ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "GET /next?id=§1§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         &["one"],
     );
     let next_id = intruder.start_attack(next_plan).unwrap();
@@ -248,7 +250,7 @@ async fn payloads_cannot_redirect_an_attack_outside_scope() {
     let payloads = [in_scope.as_str(), out_of_scope.as_str()];
     let mut attack_plan = plan(
         addr,
-        "GET http://$$host$$/blocked HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "GET http://§host§/blocked HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         &payloads,
     );
     attack_plan.scope = vec!["127.0.0.1".to_string()];
@@ -283,6 +285,8 @@ fn invalid_plans_are_rejected_before_an_attack_starts() {
     })
     .unwrap();
     let base = IntruderPlan {
+        body_escaped: false,
+        preserved_body: None,
         attack: AttackType::Sniper,
         scheme: "http".to_string(),
         host: "127.0.0.1:1".to_string(),
@@ -297,7 +301,7 @@ fn invalid_plans_are_rejected_before_an_attack_starts() {
     ));
 
     let empty = IntruderPlan {
-        template: "GET /?q=$$1$$ HTTP/1.1\n\n".to_string(),
+        template: "GET /?q=§1§ HTTP/1.1\n\n".to_string(),
         payload_sets: vec![Vec::new()],
         ..base
     };

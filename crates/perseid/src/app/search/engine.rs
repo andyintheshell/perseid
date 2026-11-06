@@ -16,7 +16,7 @@ use crate::history::{History, HistoryItem};
 use crate::project::ProjectSnapshot;
 use crate::proxy::RepeaterResult;
 use crate::site_map;
-use crate::view::{self, MessageViews};
+use crate::view;
 use crate::websocket_history::{WebSocketHistory, WebSocketMessageItem};
 
 /// Upper bound on highlight ranges produced for one message. A one-character
@@ -288,15 +288,17 @@ fn ws_connection_text(item: &WebSocketMessageItem) -> String {
 
 /// Match a raw request and optional raw response from Repeater or Intruder.
 ///
-/// The raw strings use the same representation as the message editor, so a
-/// decoded response body is searched just like a captured HTTP response.
+/// Preserved request bytes bypass display previews. Other raw strings use the
+/// editor representation, including decoded response bodies.
 pub(super) fn matches_document(
     matcher: &SearchMatcher,
     options: SearchOptions,
     request: &str,
+    preserved_body: Option<&[u8]>,
     response: Option<&str>,
 ) -> bool {
     let (request_head, request_body) = split_message(request);
+    let request_body = preserved_body.unwrap_or(request_body);
     let mut matched = false;
     if options.request_headers && matcher.is_match(request_head.as_bytes()) {
         matched = true;
@@ -324,16 +326,19 @@ pub(super) fn matches_document(
 
 /// Split an editor-style raw message into its head and body.
 pub(super) fn split_message(raw: &str) -> (&str, &[u8]) {
-    for delimiter in ["\r\n\r\n", "\n\n"] {
-        if let Some(index) = raw.find(delimiter) {
-            return (&raw[..index], &raw.as_bytes()[index + delimiter.len()..]);
-        }
+    if let Some((index, len)) = ["\r\n\r\n", "\n\n"]
+        .into_iter()
+        .filter_map(|delimiter| raw.find(delimiter).map(|pos| (pos, delimiter.len())))
+        .min_by_key(|(pos, _)| *pos)
+    {
+        return (&raw[..index], &raw.as_bytes()[index + len..]);
     }
     (raw, &[])
 }
 
 /// Build editor views for a raw request held by Repeater or Intruder.
-pub(super) fn request_views_from_raw(raw: &str) -> MessageViews {
+#[cfg(test)]
+pub(super) fn request_views_from_raw(raw: &str) -> view::MessageViews {
     let (head, body) = split_message(raw);
     view::editor_views(head, body)
 }
@@ -1072,6 +1077,27 @@ mod tests {
     }
 
     #[test]
+    fn document_search_uses_first_boundary_with_mixed_line_endings() {
+        let request = "POST / HTTP/1.1\n\n--part\r\nX-Part: first\r\n\r\nvalue";
+        let (head, body) = split_message(request);
+        assert_eq!(head, "POST / HTTP/1.1");
+        assert_eq!(body, b"--part\r\nX-Part: first\r\n\r\nvalue");
+        let options = SearchOptions {
+            request_headers: false,
+            response_headers: false,
+            response_body: false,
+            ..Default::default()
+        };
+        assert!(matches_document(
+            &matcher("X-Part"),
+            options,
+            request,
+            None,
+            None
+        ));
+    }
+
+    #[test]
     fn document_search_splits_heads_and_bodies_and_handles_failures() {
         let request = "POST /login HTTP/1.1\nHost: example.com\n\nuser=admin";
         let response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nwelcome admin";
@@ -1080,12 +1106,14 @@ mod tests {
             &matcher("example.com"),
             SearchOptions::default(),
             request,
+            None,
             Some(response)
         ));
         assert!(matches_document(
             &matcher("welcome"),
             SearchOptions::default(),
             request,
+            None,
             Some(response)
         ));
         let body_only = SearchOptions {
@@ -1097,12 +1125,14 @@ mod tests {
             &matcher("user=admin"),
             body_only,
             request,
+            None,
             Some(response)
         ));
         assert!(!matches_document(
             &matcher("example.com"),
             body_only,
             request,
+            None,
             Some(response)
         ));
 
@@ -1115,6 +1145,7 @@ mod tests {
             &negative,
             options,
             "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+            None,
             None
         ));
     }

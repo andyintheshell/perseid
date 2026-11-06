@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import io
 import os
 import struct
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +16,29 @@ import check_screenshots
 
 
 class ScreenshotPathTests(unittest.TestCase):
+    def test_verifier_requires_the_http_history_context_menu(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            directory = Path(temporary).resolve()
+            for name, (width, height, _) in check_screenshots.EXPECTED.items():
+                header = (
+                    b"\x89PNG\r\n\x1a\n"
+                    + struct.pack(">I", 13)
+                    + b"IHDR"
+                    + struct.pack(">II", width, height)
+                )
+                (directory / name).write_bytes(header + b"\x00" * check_screenshots.MIN_BYTES)
+            menu = directory / "perseid-http-history-context-menu.png"
+            self.assertTrue(menu.is_file())
+            with (
+                patch("sys.argv", ["check_screenshots.py", str(directory)]),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(check_screenshots.main(), 0)
+                menu.unlink()
+                self.assertEqual(check_screenshots.main(), 1)
+                self.assertIn(f"missing {menu}", errors.getvalue())
+
     def test_directory_must_resolve_inside_the_working_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "workspace"

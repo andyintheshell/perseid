@@ -93,6 +93,10 @@ jobs:
       - name: Check packaging
         run: cargo package --workspace --allow-dirty --locked
 
+      - name: Test release packaging helpers
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p test_release_packaging.py
+
   # Keep the status-check name required by the repository ruleset. This gate
   # succeeds only after every parallel platform job has succeeded.
   required-check:

@@ -75,6 +75,9 @@ pub(in crate::app) struct IntruderState {
     pub(super) scheme: String,
     pub(super) host: String,
     pub(super) request: String,
+    pub(super) body_escaped: bool,
+    pub(super) body_incomplete: bool,
+    pub(super) legacy_body: Option<crate::project::BodyWorkspace>,
     pub(super) attack: AttackType,
     pub(super) payload_sets: Vec<PayloadSet>,
     pub(super) payload_file_dialog: Option<PayloadFileDialog>,
@@ -86,7 +89,7 @@ pub(in crate::app) struct IntruderState {
     pub(super) note: Option<String>,
     pub(super) error: Option<String>,
     pub(super) notice: Option<String>,
-    /// The last non-empty request-editor selection, used by Add/Clear $$.
+    /// The last non-empty request-editor selection, used by Add/Clear §.
     pub(super) selection: Option<Range<usize>>,
     pub(super) cursor: usize,
     pub(super) results: Vec<IntruderResult>,
@@ -111,6 +114,9 @@ impl IntruderState {
             scheme: "https".to_string(),
             host: String::new(),
             request: "GET / HTTP/1.1\nHost: \n\n".to_string(),
+            body_escaped: false,
+            body_incomplete: false,
+            legacy_body: None,
             attack: AttackType::Sniper,
             payload_sets: vec![PayloadSet::default()],
             payload_file_dialog: None,
@@ -165,6 +171,9 @@ impl IntruderState {
         self.scheme = scheme;
         self.host = host;
         self.request = request;
+        self.body_escaped = false;
+        self.body_incomplete = false;
+        self.legacy_body = None;
         self.payload_file_dialog = None;
         self.payload_sets.clear();
         self.payload_sets.push(PayloadSet::default());
@@ -264,6 +273,8 @@ impl IntruderState {
             scheme: self.scheme.clone(),
             host: self.host.trim().to_string(),
             template: self.request.clone(),
+            preserved_body: None,
+            body_escaped: self.body_escaped,
             payload_sets,
             concurrency: self.concurrency,
             scope: Vec::new(),
@@ -459,8 +470,11 @@ impl IntruderState {
             .find(|result| result.sequence == sequence)?;
         let request = self.last_plan.as_ref().and_then(|plan| {
             let rendered = plan.render_sequence(sequence).ok()?;
-            let (head, body) = split_raw_request(&rendered.raw);
-            Some(view::editor_views(head, body.as_bytes()))
+            let (head, _) = split_raw_request(&rendered.raw);
+            Some(view::editor_views(
+                head,
+                &plan.body_bytes(&rendered.raw).ok()?,
+            ))
         });
         let (response, status, length) = match &result.result {
             RepeaterResult::Response {
@@ -513,7 +527,7 @@ impl IntruderState {
     pub(in crate::app) fn seed_screenshot(&mut self) {
         self.scheme = "https".to_string();
         self.host = "shop.example.com".to_string();
-        self.request = "GET /product?id=$$1$$ HTTP/1.1\r\n\
+        self.request = "GET /product?id=§1§ HTTP/1.1\r\n\
 Host: shop.example.com\r\n\
 User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:153.0) Firefox/153.0\r\n\
 Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n\
@@ -705,7 +719,7 @@ mod tests {
         std::fs::write(&path, b"\xef\xbb\xbfalpha\r\n\r\n spaced \r\nomega").unwrap();
         let mut state = IntruderState::new();
         state.attack = AttackType::ClusterBomb;
-        state.request = "GET /$$a$$/$$b$$ HTTP/1.1\n\n".into();
+        state.request = "GET /§a§/§b§ HTTP/1.1\n\n".into();
         state.sync_payload_sets(2);
         state.payload_sets[0].text = "untouched".into();
         state.payload_sets[1].text = "existing".into();
@@ -787,7 +801,7 @@ mod tests {
     #[test]
     fn result_count_matches_the_engine_for_each_attack() {
         let mut state = IntruderState::new();
-        state.request = "GET /?a=$$1$$&b=$$2$$ HTTP/1.1\n\n".to_string();
+        state.request = "GET /?a=§1§&b=§2§ HTTP/1.1\n\n".to_string();
         state.payload_sets = vec![
             PayloadSet {
                 text: "a\nb".to_string(),
@@ -869,7 +883,7 @@ mod tests {
         let mut state = IntruderState::new();
         state.scheme = "http".to_string();
         state.host = "  example.test:8080  ".to_string();
-        state.request = "GET /?a=$$1$$&b=$$2$$ HTTP/1.1\n\n".to_string();
+        state.request = "GET /?a=§1§&b=§2§ HTTP/1.1\n\n".to_string();
         state.payload_sets = vec![
             PayloadSet {
                 text: "a\n\nb".to_string(),
@@ -914,7 +928,7 @@ mod tests {
         let mut state = IntruderState::new();
         state.scheme = "https".to_string();
         state.host = "example.test".to_string();
-        state.request = "GET /?q=$$1$$ HTTP/1.1\nHost: example.test\n\n".to_string();
+        state.request = "GET /?q=§1§ HTTP/1.1\nHost: example.test\n\n".to_string();
         state.payload_sets[0].text = "needle".to_string();
         let plan = state.build_plan();
         state.begin_attack(3, 1, plan);
