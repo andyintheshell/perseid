@@ -3,15 +3,19 @@
 [Project home](../README.md) · [Get started](getting-started.md) ·
 [Workbench](workbench.md) · [Troubleshooting](troubleshooting.md)
 
-Perseid is an **early prototype** for manual, authorized web security testing.
+Perseid is a **public alpha** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
 The latest published release, Perseid `0.3.0`, includes the local
-project-persistence support introduced in `0.2.0`,
-with M3 complete and remaining issues moved to M4; install
+project-persistence support introduced in `0.2.0`; install
 the published crate or a prebuilt release, or build from source for current
 development.
+
+**Current direction:** [Collaborator/OAST (P0)](collaborator.md), usability and
+reliability fixes, then Community manual-workflow parity. Professional parity is
+the longer-term goal. The [priority roadmap](roadmap.md) replaces the old numbered
+milestones; planned capabilities are not claims of current support.
 
 ## New to Perseid?
 
@@ -42,11 +46,12 @@ use a local lab or another target you are explicitly authorized to test.
 
 | Reference | What it covers |
 | --- | --- |
-| [Roadmap](roadmap.md) | Completed milestones, current work, and planned capabilities—not delivery dates. |
-| [Burp Community parity](burp-parity.md) | Capability status, deliberate differences, and the definition of parity. |
+| [Roadmap](roadmap.md) | Priority-based direction: Collaborator, usability, Community parity, and longer-term Pro parity—not delivery dates. |
+| [Collaborator / OAST](collaborator.md) | Interactsh research, Rust client suitability, adoption gates, and planned safety behavior. Not a usage guide yet. |
+| [Burp parity](burp-parity.md) | Current Community capability status, longer-term Pro scope, deliberate differences, and the definition of parity. |
 | [Design](design.md) | Architecture, module boundaries, technology choices, and design goals. |
 | [Project storage design](storage-design.md) | Original storage proposal, implementation status, deviations, and remaining work. |
-| [Performance and memory](performance.md) | Historical M0 measurements, their environment, and a reproduction method. |
+| [Performance and memory](performance.md) | Historical baseline measurements, their environment, and a reproduction method. |
 | [Contributing](../CONTRIBUTING.md) | Toolchains, checks, headless development, screenshots, and documentation changes. |
 | [Proxy library](../crates/perseid/README.md) | The `perseid::proxy` API, its defaults, and the headless example. |
 | [Security policy](../SECURITY.md) | Private vulnerability reporting, supported versions, and safe-harbor terms. |

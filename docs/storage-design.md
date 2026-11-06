@@ -40,7 +40,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 | Proxy-drop and storage-drop counters kept separately (§8.3) | The proxy's own `dropped_events` interrupts affected in-flight records; project queue overflow increments `capture_loss_count`, which the status widget reports | The two signals exist; only the storage-side count is durable in project metadata today. |
 | §7.2 separately versioned workspace component keys | One `workspace/v1` JSON document holds all project-scoped workbench state, stored inline up to 32 MiB or split into 8 MiB chunks in the same `workspace` table with a manifest. Reads are capped at 512 MiB. | A single atomic snapshot keeps cross-tool state consistent; chunking handles result bodies without a schema change. |
 | §7.2 persist logical inputs and regenerate derived results | Intruder results store response heads/bodies and rebuild their detail views; Comparer diffs and Sequencer analysis are recomputed on open. Repeater's last response is stored as its Pretty/Raw/Hex views because the tab does not retain the raw body. | Intruder and Repeater responses are already bounded by the UI; storing views preserves the visible result without adding a second body store. |
-| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | **New Project**, **Open Project**, and ordinary quit ask Save/Discard/Cancel for unsaved temporary work. Saved-project quit waits asynchronously for acknowledged workspace commit and flush, with recovery choices on failure/timeout. | Recent projects remain M4 work; see [exit guarantees](project-exit-guarantees.md) for limits. |
+| Recent Projects and Save/Discard/Cancel prompts (§4.1, Phase C) | **New Project**, **Open Project**, and ordinary quit ask Save/Discard/Cancel for unsaved temporary work. Saved-project quit waits asynchronously for acknowledged workspace commit and flush, with recovery choices on failure/timeout. | Recent projects remain usability work in [#152](https://github.com/andyintheshell/perseid/issues/152); see [exit guarantees](project-exit-guarantees.md) for limits. |
 | Migrations (§11.2) | v1→v2 is a single durable transaction; errors abort it. No resumable multi-batch migration protocol is needed for this upgrade. | Version metadata is updated in the same commit as the new counters/settings; there is no exposed half-upgraded state. |
 
 ### 0.3 Test and follow-up notes
@@ -716,7 +716,7 @@ Implement in narrowly scoped PRs; make the smallest vertical slice functional be
 ### Phase C — Two-mode UI and project transitions
 
 - [x] Add Untitled Temporary status, New, Open, Save As, Save Copy, and Save/Discard/Cancel prompts for New/Open.
-- [ ] Add a recent-project list (M4). The quit prompt and acknowledged saved-workspace exit are implemented.
+- [ ] Add a recent-project list ([#152](https://github.com/andyintheshell/perseid/issues/152)). The quit prompt and acknowledged saved-workspace exit are implemented.
 - [ ] Add project generation IDs, flush receipts, visible write-error and capture-loss indicators.
 - [ ] Implement snapshot transfer first in a controlled, explicitly quiesced path, then the ordered delta handover for seamless Save As.
 - [ ] Test project switching while the proxy and held interception are active; do not auto-forward held requests.

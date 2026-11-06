@@ -2,16 +2,17 @@
 
 [Documentation](README.md) · [Roadmap](roadmap.md) · [Capability matrix](burp-parity.md) · [Workbench guide](workbench.md)
 
-> **Reading this page:** the implementation snapshot and roadmap implications
-> were last updated **29 October 2026** for the `0.3.0` release. The Burp and ZAP research is
+> **Reading this page:** planning guidance was updated **6 November 2026** to
+> prioritize Collaborator, usability, Community parity, and later Pro parity.
+> The Burp and ZAP research is
 > qualitative, not a representative usage survey; vendor sources were checked **20 October
 > 2026**. For current status, use the [capability matrix](burp-parity.md) and
 > [roadmap](roadmap.md).
 
-**Decoder follow-up:** the historical snapshot below predates binary-preserving
-Hex transfers and selection-aware Decoder Hex panels. Those are now implemented;
-see the [current guide](workbench.md#decoder) and
-[promotion check](burp-parity.md#decoder-promotion-check).
+**Planning source of truth:** use the [priority roadmap](roadmap.md) and
+[live backlog](https://github.com/andyintheshell/perseid/issues/73), not the
+research rankings as a fixed implementation order. Collaborator/OAST is P0;
+the [Interactsh assessment](collaborator.md) records client suitability and risks.
 
 **On this page:** [Manual workflow](#the-manual-workflow) ·
 [Implementation snapshot](#perseid-implementation-snapshot) ·
@@ -48,11 +49,12 @@ and captured body bytes differ.
 
 | Area | Snapshot | Next step |
 | --- | --- | --- |
-| **Core HTTP loop** | Capture, interception, replay, payload testing, comparison, local transforms, and search across stored history are available. | Maintain the loop; finish full-history paging. |
+| **Core HTTP loop** | Capture, interception, replay, payload testing, comparison, local transforms, and search across stored history are available. | Fix daily usability and reliability gaps; full-store history navigation is implemented. |
 | **Projects and evidence** | Captures and workspace state persist; normal quit protects unsaved work and acknowledges saved writes. HTTP history supports Copy as curl. | Add recent projects and useful export formats. |
 | **Sessions** | A browser keeps its own cookies; an optional in-memory cookie jar supports Proxy, Repeater, and Intruder. | Login macros and automatic re-authentication remain gaps. |
 | **WebSockets** | Message capture, interception, editing, and live-connection replay work. | Consider new-connection replay and fuzzing. |
-| **Automation** | No scanner, crawler, or automation API. | Scanner and crawler are non-goals; extensions and automation are post-parity. |
+| **Collaborator / OAST** | No integrated payload or callback workflow. | **P0:** Interactsh-backed manual OAST, subject to Rust-client adoption gates. |
+| **Automation** | No scanner, crawler, or automation API. | Deferred toward longer-term Pro parity, not permanent scanner/crawler non-goals. |
 
 ## Perseid implementation snapshot
 
@@ -68,9 +70,9 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 | Proxy capture and HTTP history | **Working**: one virtual HTTP table covers all retained rows in RAM or disk, with bounded metadata windows and lazy details/notes. Search scans all stored HTTP and WebSocket records. Temporary and opt-in saved retention evict oldest eligible captures. | Maintain |
 | Intercept and edit | **Working** for HTTP/1.1 and HTTP/2, including decrypted HTTPS: a Burp-style message table with multi-selection, head and buffered UTF-8 body editing, forward/drop for selected or all messages, optional response interception, and match/replace afterward. WebSocket messages can be held and edited as text or hex. Large, streaming, and binary HTTP bodies are limited. | Maintain |
 | Target scope and site map | **Partial**: scope filtering/blocking and saved scope work; the site map indexes all retained HTTP endpoints with bounded host/folder navigation, Contents pages, display filters, and lazy details/tool sends. No crawl, unrequested-URL inference, or parameter discovery. | Maintain; improve discovery separately |
-| Repeater / manual request editor | **Working** for HTTP/HTTPS and live WebSocket connections: editable tabs seeded from history, replay, and Pretty/Raw/Hex inspection. Persistent projects save HTTP tabs and their last responses; WebSocket tabs are session-only. Direct HTTP sends bypass proxy scope and rewriting. | Maintain |
+| Repeater / manual request editor | **Partial**: HTTP/HTTPS and live WebSocket replay, editable tabs, and Pretty/Raw/Hex inspection. Projects save HTTP tabs and their last responses; WebSocket tabs are session-only. Direct HTTP sends bypass proxy scope and rewriting. | **P1:** sent-request visibility, protocol selection, send history, and scope guardrails. |
 | Intruder / fuzzer | **Working** for HTTP/HTTPS: editable `§` positions, shared or per-position payload sets with file loading, four attack modes, up to 32 concurrent requests, and Pretty/Raw/Hex results. Persistent projects save the request and payload configuration and result rows. No payload processing; enforced scope is checked before and during attacks. | Maintain; add payload processing |
-| Decoder / encoder | **Partial**: local transforms work with stacked Text/Hex panels; eight codecs, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms. HTTP history sends full captured messages and message panes send selections. Hex selections currently send displayed hexadecimal text, not binary bytes. Persistent projects save panel contents, operation annotations, view, and selection. 8 MiB input / 16 MiB output caps. | Maintain |
+| Decoder / encoder | **Working**: stacked Text/Hex panels, eight codecs, 46 hashes, Smart decode, and selection-aware transforms including Hex. History sends full captured messages; message-pane Hex selections transfer current-view bytes, not necessarily original wire bytes. Projects save contents, operations, views, and byte selections. 8 MiB input / 16 MiB output caps. See the [promotion check](burp-parity.md#decoder-promotion-check). | Maintain |
 | Comparer / diff | **Working**: one shared item list seeded from history, paste, or file; word/byte diffs; paired Text/Hex result panes with difference navigation and synchronized scrolling. Persistent projects save inputs, selections, and result-window state; the diff is recomputed on open. | Maintain |
 | Match/replace rewriting | **Working**: request/response head and buffered UTF-8 body rules, literal or regex, applied after interception. Rules persist in saved projects. | Maintain |
 
@@ -78,28 +80,32 @@ Burp and ZAP rankings are preserved in the [research section](#burp-and-zap-rese
 
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
-| Persistence and search | **Partial**: temporary projects are RAM-only; saved projects autosave to a user-selected `.perseid` file. Saved retention defaults to unlimited but supports opt-in logical limits; no physical disk cap or encryption. Schema v1 upgrades atomically to v2. Search covers all retained HTTP/WebSocket history and tool results; older HTTP rows are pageable. Clear history deletes captures; whole files are deleted through the filesystem when closed. | **M3 release scope complete; remaining issues in M4** |
+| Persistence and search | **Partial**: temporary projects are RAM-only; saved projects autosave to a user-selected `.perseid` file. Saved retention defaults to unlimited but supports opt-in logical limits; no physical disk cap or encryption. Schema v1 upgrades atomically to v2. Search covers all retained HTTP/WebSocket history and tool results; history tables page across all retained rows. Clear history deletes captures; whole files are deleted through the filesystem when closed. | **P1:** settings/recent projects, nonblocking UI operations, and recovery. |
 | Authentication and session handling | **Partial**: bounded in-memory cookie jar, proxy observation, optional Repeater/Intruder cookie application and response updates, and manual editing. No login macros, automatic re-authentication, or per-user contexts. | Maintain; broader session automation remains a gap |
-| WebSocket testing | **Partial**: full-store virtual history, interception, text/hex editing, and live-connection replay for plain `ws://` and decrypted `wss://`. Metadata windows and lazy payloads keep the table bounded. No new-connection replay or fuzzing. | **P1 — M4** |
-| Evidence capture and reporting | **Partial**: saved projects retain captured exchanges and project-scoped workbench state; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2 — after parity** |
+| WebSocket testing | **Partial**: full-store virtual history, interception, text/hex editing, and live-connection replay for plain `ws://` and decrypted `wss://`. Metadata windows and lazy payloads keep the table bounded. No new-connection replay or fuzzing. | Validate remaining Community gaps; do not displace OAST or usability fixes. |
+| Evidence capture and reporting | **Partial**: saved projects retain captured exchanges and project-scoped workbench state; HTTP history has a Copy as curl clipboard action. No HAR, save-to-file, or report export. | **P2:** incremental export; full reporting is longer-term Pro work. |
 | Sequencer / token analysis | **Partial**: manual and live regex token sampling; character- and bit-level randomness tests; effective-entropy chart and per-analysis settings. No parameter-aware capture; statistics are bounded approximations. | Maintain |
 
-### Outside the current scope
+### Longer-term Professional direction
 
 | Workflow | Perseid snapshot | Priority |
 | --- | --- | --- |
-| Automated scan and alert triage | **Missing**: no scanner, passive checks, or alert management. | **Non-goal** |
-| Spidering and crawling | **Missing**: no crawler or automated content discovery. | **Non-goal** |
-| Extensions, scripts, and automation/API | **Missing**: no extension point, scripting layer, or automation API. Native extensions are post-parity. | **Post-parity** |
+| Automated scan and alert triage | **Missing**: no scanner, passive checks, or alert management. | Deferred Pro-parity goal; scope and safety design required. |
+| Spidering and crawling | **Missing**: no crawler or automated content discovery. | Deferred Pro-parity goal; not a current capability. |
+| Extensions, scripts, and automation/API | **Missing**: no extension point, scripting layer, or automation API. | Longer-term discovery; no BApp binary compatibility. |
 
 For current feature details, see the [README](../README.md), [Burp parity matrix](burp-parity.md), [roadmap](roadmap.md), and [getting started guide](getting-started.md).
 
 ## What this means for the roadmap
 
-### 1. Intruder, Repeater, and Decoder have landed; finish the loop around them
+### 1. Collaborator first; finish the daily loop around existing tools
 
-Milestone 3 is complete for the release scope, including redb-backed project history/workspace state as well as
-search, Repeater, Decoder, and Comparer. The storage foundation has landed, and
+Collaborator/OAST is **P0**, even though it goes beyond Community. Evaluate
+Interactsh behind a provider boundary and ship safe, correlated callback handling;
+see [the research and adoption gates](collaborator.md).
+
+The daily workbench includes redb-backed project history/workspace state,
+Search, Repeater, Decoder, and Comparer. The storage foundation has landed, and
 Search scans all stored HTTP/WebSocket history plus current Repeater and
 Intruder results. Unified HTTP/WebSocket history tables and the site map page across
 all retained records/endpoints with bounded metadata windows and lazy details.
@@ -113,9 +119,9 @@ numeric conversions, Gzip, hashes, and Smart decode, with selection-aware
 transforms and a replaceable downstream chain. That closes the gaps where the
 product stopped after capture or forced payload edits into an external script.
 
-Full-store WebSocket table navigation is implemented. Remaining M3 issues moved to M4:
-recent projects, structured history filters, application settings, site map
-annotations. Decoder transfers, including byte-preserving Hex transfers, and
+Full-store WebSocket table navigation is implemented. Remaining usability work
+includes recent projects, more structured history filters, application settings,
+and site map annotations. Decoder transfers, including byte-preserving Hex transfers, and
 normal quit protection are implemented; crash recovery remains a gap.
 Comparer now closes the "change one thing and compare" loop with a shared item list and paired
 diff views. WebSocket replay uses live connections; project files already
@@ -139,7 +145,7 @@ immediately on real engagements. Login macros and automatic re-authentication
 remain unimplemented. See [Workbench](workbench.md#cookie-jar)
 for defaults, limits, and Intruder payload precedence.
 
-### 3. Finish M4's protocol work
+### 3. Close measured Community workflow gaps
 
 Intruder-style fuzzing and Sequencer, the two testing-tool gaps, have landed:
 Intruder covers all four Burp attack types, editable payload sets, and bounded
@@ -163,18 +169,18 @@ curl has landed for HTTP history; save request/response and HAR export would
 cover more of what testers do with captured evidence. A full templated reporting
 system can wait until after parity.
 
-### 5. Do not chase ZAP's scanner
+### 5. Sequence Professional parity after a dependable manual baseline
 
-ZAP's automated scan is its most prominent workflow, but adding it would change
-Perseid's product category, resource profile, and support burden. It is also
-explicitly outside Burp CE parity. The existing non-goals — scanner, crawler,
-OAST, embedded browser, and BApp binary compatibility — remain correct for this
-stage.
+ZAP's automated scan is its most prominent workflow, but a scanner changes
+Perseid's resource profile and support burden. Scanning/crawling remain outside
+the Community baseline, but are now **deferred longer-term Pro-parity goals**,
+not permanent non-goals. OAST is the explicit early exception and P0 priority.
+External browsers and no BApp binary compatibility remain deliberate differences.
 
 The realistic ZAP migration path for Perseid is the **manual** ZAP user:
 Manual Explore, Requester, contexts/scope, fuzzer, auth, and import/export. A
-scanner-first ZAP user is a different audience and should not drive the
-roadmap.
+scanner-first ZAP user is a different audience: do not let that future work
+delay Collaborator, current usability fixes, or the Community workflow audit.
 
 ## What would change these priorities
 
@@ -223,10 +229,11 @@ The following comparison explains the evidence behind the implementation priorit
   counts, not unique desktop users; ZAP also cautions that cloud and desktop
   pings have significantly different profiles.[30] They still show how central
   automated scanning is to ZAP's identity.
-- For Perseid, the correct reference point is **Burp CE's manual toolkit**, not
-  ZAP's scanner. A scanner, crawler, and OAST workflow should remain deliberate
-  non-goals. ZAP's manual request editor, contexts/authentication, import/export,
-  and automation are the parts worth learning from after parity.
+- For Perseid, **Burp CE's manual toolkit** remains the near-term baseline,
+  rather than ZAP's scanner-first onboarding. The updated product direction
+  deliberately adds OAST early and defers scanning/crawling toward Pro parity.
+  ZAP's manual request editor, contexts/authentication, import/export, and
+  automation remain useful workflow references, not a fixed implementation order.
 
 ## How these rankings were built
 
