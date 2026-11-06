@@ -3,141 +3,105 @@
 [Documentation](README.md) · [Capability matrix](burp-parity.md) ·
 [Contributing](../CONTRIBUTING.md)
 
-The north star is feature parity with Burp Suite Community Edition's manual
-toolkit. See [Burp Community parity](burp-parity.md) for the capability matrix,
-definition of done, and deliberate deviations.
+**Direction: Collaborator first, a usable daily workbench, Burp Community
+manual-workflow parity next, and Burp Professional parity as the longer-term
+goal.** Perseid remains independently implemented; equivalent workflows matter
+more than copying another product's UI or implementation.
 
-**Current focus: Milestone 4, protocols and testing tools.** Milestone 3 is
-complete in the `0.3.0` release; its remaining issues have moved
-to M4, not been implemented or dropped. Proxy core and HTTPS
-milestones are complete. Search, HTTP/HTTPS Intruder, Repeater, Sequencer,
-Decoder, Comparer, WebSocket capture/history, and the first local
-project-persistence workflow are available. Search scans all stored HTTP and
-WebSocket history as well as current Repeater and Intruder results. The remaining
-M4 follow-ups include recent-project workflow polish. Unified HTTP/WebSocket
-tables now navigate all retained captures with lazy details. Normal quit protects unsaved work and
-acknowledges saved workspace commits; crash recovery remains M5 work.
-Stored HTTP paging, lazy details/notes,
-saved-project logical retention, atomic v1→v2 migration, and a full-store site map
-with background indexing, bounded tree/Contents pages, and lazy details are available.
-Temporary and opt-in saved retention use combined count/body limits; physical
-file size is not capped. HTTP/2,
-WebSocket history, Intruder, and Sequencer arrived ahead of the protocol
-milestone. This is a sequence of capabilities, not a schedule or release
-promise.
+## Priorities, not numbered milestones
 
-## Milestones
+The old milestone sequence is retired. Use issue priority labels and focus
+labels to select work; closed milestones remain historical records, not release
+gates. The [live backlog (#73)](https://github.com/andyintheshell/perseid/issues/73)
+is the issue index. This page explains direction, the
+[capability matrix](burp-parity.md) describes shipped behavior, and release notes
+describe specific versions. None is a delivery-date promise.
 
-- [x] **Milestone 0 — Proof of concept:** benchmark idle memory, history
-  rendering, and large-response viewing on modest Linux hardware.
+| Priority | Meaning |
+| --- | --- |
+| **P0** | Immediate focus: Collaborator/OAST and critical safety, data-loss, or unusable-core-workflow blockers. |
+| **P1** | Usability, reliability, accessibility, release quality, and important Community workflow gaps. |
+| **P2** | Planned refinements and remaining parity work after P0/P1. |
+| **P3** | Longer-term discovery, Pro parity, extensibility, and opportunistic work unless explicitly promoted. |
 
-  *Complete: on a 4 vCPU / 5.3 GiB Kali arm64 VM at 200% scaling, a release
-  build used 92.1 MiB RSS idle, 98.9 MiB with 2,000 exchanges, and at most
-  108.6 MiB peak while viewing 8 MiB text and binary responses capped at
-  1 MiB. The status bar now reports allocator heap in use (5.8 MiB with 2,000
-  exchanges) with a peak and rolling graph. Method, breakdown, and full
-  results: [Performance and memory](performance.md).*
+Focus labels are `focus: collaborator`, `focus: usability`,
+`focus: community parity`, and `focus: pro parity`. They can overlap; a focus is
+not a priority. Pro-class OAST is deliberately P0 **before** Community parity.
+Critical defects can interrupt feature work. Safety, scope, privacy, and bounded
+resource handling are part of every feature, not a final hardening phase.
 
-- [x] **Milestone 1 — Proxy core:** reliable HTTP/1.1 capture and forwarding,
-  request/response interception with edit, forward, and drop, explicit scope
-  configuration, and match/replace rules.
+## 1. P0 — Collaborator / OAST
 
-  *Complete: plain-HTTP requests and responses can be held, edited, forwarded,
-  or dropped through a bounded, backpressured interception queue. Scope rules
-  can filter the workspace and optionally block out-of-scope HTTP requests and
-  `CONNECT` tunnels with a `403`. Match/replace rules run after interception on
-  heads and buffered UTF-8 bodies. Requests and responses larger than the
-  interception limit stay header-only. HTTPS interception arrived in Milestone 2.*
+Deliver an integrated manual out-of-band testing workflow: generate payloads,
+use them in Repeater/Intruder, poll asynchronously, correlate callbacks to their
+source, inspect evidence, and retain it safely with the project. Support an
+explicitly selected public or authenticated self-hosted Interactsh server.
 
-- [x] **Milestone 2 — HTTPS:** local CA generation, TLS interception,
-  documented browser trust setup, and pass-through controls.
+**Not available today.** Interactsh is the recommended first backend, not an
+approved Rust dependency yet. The newer `interactsh` crate is a spike candidate;
+the older `interactsh-rs` is unmaintained. See the
+[P0 implementation issue #191](https://github.com/andyintheshell/perseid/issues/191)
+and [client assessment, adoption gates, and safety requirements](collaborator.md).
+No PortSwigger service/protocol compatibility is promised.
 
-  *Complete: a locally generated ECDSA certificate authority is created on
-  first launch, persisted in a stable per-user directory, and reused across
-  updates. Decryption is on by default and can be turned off for a run.
-  The proxy serves the certificate from a local download page; trust is still
-  installed and removed manually in the browser, and Perseid never touches a
-  system or browser trust store. Pass-through hosts stay opaque, scope can still
-  block tunnels, and decrypted exchanges flow through the same interception,
-  match/replace, and bounded-capture pipeline as plain HTTP. See
-  [HTTPS interception](tls.md).*
+## 2. Make the daily workbench dependable
 
-- [x] **Milestone 3 — Daily workbench:** redb-backed persistent project history
-  and supported workspace state, Search, Repeater, Decoder, and Comparer.
+Do not defer usability until all features exist. Prioritize reproducible user
+friction, responsiveness, clear errors, predictable state, and safe project
+boundaries alongside the P0 work:
 
-  *Complete for the release scope: projects start in temporary memory by default. Save As, Open, and Save
-  Copy use a single redb `.perseid` file; captured HTTP/WebSocket records and
-   project-scoped workbench state are written automatically. Unified HTTP and
-   WebSocket history tables cover all retained records with bounded metadata
-   windows and lazy details/notes, alongside full-store Search and the paged Target
-   site map. The site map derives endpoints from all retained HTTP exchanges,
-   using a disposable disk index rather than hydrating the complete store.
-   Temporary storage retains all captures unless aggregate count/body limits
-   are explicitly configured. New Project and Open Project ask Save/Discard/Cancel when the current
-  temporary project has unsaved work; ordinary quit also prompts and waits for
-  acknowledged saved-project writes. A recent-project list is not implemented.
-  Saved projects now support opt-in combined record/body
-   retention, defaulting to unlimited, and atomic v1→v2 schema migration.
-   Retention is logical: it does not cap or compact physical files. Whole-project
-   deletion uses the filesystem after switching away or quitting; files are
-   unencrypted and deletion is not secure erasure.
-  Search scans every stored HTTP exchange and WebSocket message in the
-  background with case, regex, negative-match, in-scope, and live-update filters,
-  and also matches current Repeater tabs and retained Intruder results.
-  Project-scoped workbench state persists: UI selections/views, Inspector notes
-  and sections, Repeater tabs and their last responses, Intruder configuration
-  and result rows, Decoder panels, Comparer items and result-window state,
-  Search state and structured result rows, Sequencer samples/settings, and TLS
-  interception/pass-through hosts. The
-  Comparer diff and Sequencer analysis are recomputed on open. Live capture,
-  running attacks or sends, held interception messages, and CA material do not
-  persist. Live WebSocket Repeater tabs are also session-only. History
-   and message selections can be sent to Decoder; Hex selections preserve binary
-   bytes, and Decoder Hex panels support byte-range transforms and saved selections.*
+- Nonblocking project controls and Search details: [#136](https://github.com/andyintheshell/perseid/issues/136), [#138](https://github.com/andyintheshell/perseid/issues/138).
+- Project-isolated cookies and Repeater scope guardrails: [#174](https://github.com/andyintheshell/perseid/issues/174), [#176](https://github.com/andyintheshell/perseid/issues/176).
+- Effective sent requests, explicit protocol selection, and immutable Repeater
+  history: [#171](https://github.com/andyintheshell/perseid/issues/171), [#172](https://github.com/andyintheshell/perseid/issues/172), [#173](https://github.com/andyintheshell/perseid/issues/173).
+- Settings, recent projects, filtering, crash recovery, and accessibility:
+  [#58](https://github.com/andyintheshell/perseid/issues/58), [#152](https://github.com/andyintheshell/perseid/issues/152), [#57](https://github.com/andyintheshell/perseid/issues/57), [#66](https://github.com/andyintheshell/perseid/issues/66), [#69](https://github.com/andyintheshell/perseid/issues/69).
+- Durable Intruder results and bounded long attacks:
+  [#177](https://github.com/andyintheshell/perseid/issues/177), [#137](https://github.com/andyintheshell/perseid/issues/137).
+- Trusted, clean-machine-tested packages: [#56](https://github.com/andyintheshell/perseid/issues/56).
 
-- [ ] **Milestone 4 — Protocols and testing tools:** WebSocket proxying with
-  history, Sequencer, and unthrottled Intruder-style fuzzing with explicit scope
-  and user-controlled concurrency.
+Normal quit already protects unsaved work and acknowledges saved workspace
+writes; that is not crash recovery. Recent projects must not silently reopen
+files. See [exit guarantees](project-exit-guarantees.md) and
+[Safety and privacy](safety.md).
 
-  *Status: HTTP/2, WebSocket capture/history, Intruder-style fuzzing, and
-  Sequencer landed ahead of this milestone. WebSockets support plain `ws://`,
-  decrypted `wss://`, complete text/binary message reassembly, masking removal,
-  a bounded UI history snapshot, and Pretty/Raw/Hex inspection. WebSocket
-  message interception, editing, and live-connection replay are available. Intruder supports `§`
-  positions, editable and file-loaded payload sets, all four attack modes, up
-  to 32 concurrent requests, live result inspection, and
-  enforced-scope checks for every generated request. Payload processing rules
-  and saved attacks remain. Sequencer supports manual and live regex sampling,
-  character- and bit-level tests, effective-entropy results, and per-analysis
-  settings, with bounded in-memory samples.*
+## 3. Reach Community manual-workflow parity
 
-  **Carried over from M3:** structured HTTP history filters
-  ([#57](https://github.com/andyintheshell/perseid/issues/57)), application settings
-  and opt-in tool-state persistence ([#58](https://github.com/andyintheshell/perseid/issues/58)),
-  site map annotations ([#59](https://github.com/andyintheshell/perseid/issues/59)),
-  and a recent-project list without automatic reopening
-   ([#152](https://github.com/andyintheshell/perseid/issues/152)).
+The near-term baseline is a complete, practical manual loop: Proxy, Target,
+HTTP/WebSocket history and interception, Repeater, Intruder, Decoder, Comparer,
+and Sequencer. Many foundations are already available; the matrix records exact
+limits rather than treating a tool's existence as complete parity.
 
-  **Completed history follow-up (#150):** unified HTTP/WebSocket tables cover
-  all retained captures with bounded metadata windows and lazy details.
+Finish remaining workflows such as history filters/annotations, Intruder payload
+processing and saved attacks, Repeater behavior, and Sequencer collection.
+Publish a repeatable, versioned [parity audit (#68)](https://github.com/andyintheshell/perseid/issues/68)
+with evidence and linked gaps. The historical 82.1% scoped estimate is not an
+overall product-completeness score or a reason to ignore usability bugs.
 
-  **Completed Decoder follow-up (#60):** binary-preserving Hex transfers,
-  Hex-panel selection-aware transforms, and byte-offset selection persistence.
-  Automated regressions and user-confirmed native macOS smoke testing in the
-  `0.3.1` development build complete Decoder's scoped Working parity status.
+## 4. Longer-term — Professional parity
 
-- [ ] **Milestone 5 — Parity hardening:** packaging, crash recovery, safe
-  handling of sensitive traffic, accessibility, performance benchmarks, and a
-  documented parity audit.
+After a dependable Community baseline, expand toward Burp Professional's
+workflows: crawling/discovery, passive and active checks, findings/triage and
+reporting, richer session/authentication automation, and integrations. Search,
+project persistence, and unthrottled fuzzing already go beyond Community in
+selected areas; Collaborator is being prioritized early rather than waiting.
 
-  *Status: tests, rustfmt, clippy, CI, and the M0 memory baseline are in
-  place, and cross-platform release packages are published. Clean-install
-  validation, crash recovery, accessibility, and broader parity benchmarks
-  remain.*
+This is a **longer-term goal, not current support or a full Pro-parity claim**.
+Define each capability and its safety model in a scoped design issue before
+implementation, starting with the [Pro scope inventory #192](https://github.com/andyintheshell/perseid/issues/192).
+Scanner/crawler work is deferred, no longer a permanent
+non-goal. Keep the external-browser approach and no BApp binary compatibility
+as deliberate differences; native extensibility is tracked by
+[#72](https://github.com/andyintheshell/perseid/issues/72).
 
-- [ ] **After parity:** native extension point, passive and guided checks,
-  import/export, integrations, and additional protocol coverage.
+## Evidence required to call work done
 
-Priorities may change based on real-world use and measurements. Safety and
-scope defaults are not deferred: each milestone lands with the relevant
-protections documented.
+- A usable end-to-end workflow with actionable failure and cancellation states.
+- Automated success/error/edge-path tests and a recorded manual check where UI
+  or platform behavior matters; performance claims need measurements.
+- Documented scope, privacy, persistence, retention, and resource limits.
+- Updated guides and capability status, with remaining gaps explicitly tracked.
+
+Test only local labs and systems you own or are explicitly authorized to assess.
+Priorities can change with user reports and measured behavior; closing an old
+milestone never counts as implementing its open issues.

@@ -117,8 +117,14 @@ See the [workbench guide](docs/workbench.md) for tool walkthroughs and the
 
 ## Current limitations
 
+- **Collaborator/OAST is not implemented yet.** It is the P0 feature priority,
+  alongside critical usability and reliability fixes. Community manual-workflow
+  parity is the near-term baseline; Professional parity is the longer-term goal.
+  See the [priority roadmap](docs/roadmap.md) and
+  [Interactsh client assessment](docs/collaborator.md).
 - **Manual testing, not automated scanning.** No crawler, vulnerability scanner,
-  or bundled browser. HTTP/3/QUIC is not supported.
+  or bundled browser. Scanning/crawling are deferred toward the longer-term Pro
+  goal, not available features. HTTP/3/QUIC is not supported.
 - **Save temporary projects.** They live in RAM and are lost on exit unless
   saved. Retention is unlimited by default, with no automatic memory-pressure
   pause. [Persistence and retention details →](docs/workbench.md#projects-and-persistence)

@@ -1,4 +1,4 @@
-# Burp Suite Community Edition parity
+# Burp parity: Community baseline and Professional direction
 
 [Documentation](README.md) · [Workbench](workbench.md) · [Roadmap](roadmap.md)
 
@@ -9,6 +9,11 @@ aggregate count and retained-body limits; saved projects offer opt-in logical
 limits but no physical disk-size cap. This is a progress snapshot, **not a claim of
 full feature or product parity**.
 
+**Priority direction:** Collaborator/OAST is P0, usability and reliability are
+active work, Community manual-workflow parity is the near-term baseline, and
+Professional parity is the longer-term goal. See the [roadmap](roadmap.md) and
+[Interactsh assessment](collaborator.md). OAST is planned, not shipped.
+
 Burp CE's built-in manual toolkit is the comparison point: Proxy, Repeater,
 Decoder, Sequencer, Comparer, Intruder, and WebSocket history. See
 [PortSwigger's CE feature list](https://portswigger.net/burp/communitydownload).
@@ -18,7 +23,7 @@ implementation, or compatibility with Burp extensions.
 **Status key:** ✅ Working · 🟡 Partial · ➕ Beyond CE · 🛠 Planned ·
 ↔ Deliberate difference · ⛔ Non-goal.
 
-## Parity estimate: 82.1%
+## Historical scoped parity estimate: 82.1%
 
 As of **2026-11-03**, for the `0.3.1` development build in PR #166,
 the estimated parity for the manual-workflow scope below is **82.1%**.
@@ -43,7 +48,7 @@ Equal weighting and half credit are judgment calls, not measurements of the
 fraction of each capability implemented. In particular, a Working row denotes a
 usable workflow, not every Burp option: Intruder lacks payload processing, and
 WebSocket replay cannot reopen closed connections. The biggest partial gaps
-include bounded live-history views, session-only WebSocket Repeater tabs, and
+include Repeater send/protocol/history behavior, session-only WebSocket Repeater tabs, and
 approximate Sequencer analysis. Decoder's binary Hex transfers and Hex-panel
 selection transforms are implemented, regression-tested, and manually checked. See the
 matrix for details. Recalculate this snapshot when matrix statuses or scope change.
@@ -73,15 +78,15 @@ Regression checklist (not an itemized record of the manual run):
 
 | ✅ Working | 🟡 Partial | 🛠 Planned |
 | --- | --- | --- |
-| HTTP/HTTPS proxy and intercept | Bounded live history; site map without crawling/discovery | Full-store live WebSocket table |
+| HTTP/HTTPS proxy and intercept | History filtering; site map without crawling/discovery | Collaborator/OAST (P0, beyond CE) |
 | Scope and match/replace; Decoder | Repeater and Sequencer | — |
 | Comparer, Intruder, and WebSocket editing/replay | WebSocket history; project persistence | Further project workflow polish |
 | Memory display | — | — |
 
 **➕ Perseid extra:** search across stored HTTP/WebSocket history and current
 Repeater/Intruder results. **↔ Deliberate differences:** no
-bundled browser or Burp BApp compatibility. **⛔ Non-goals:** automated
-scanning/crawling and Collaborator/OAST. Sequencer provides a bounded,
+bundled browser or Burp BApp compatibility. **🛠 Longer-term Pro goal:** automated
+scanning/crawling, findings, and reporting. These are not shipped. Sequencer provides a bounded,
 expression-based sampling and analysis workflow; it is not a byte-for-byte
 reimplementation of Burp's test suite.
 
@@ -131,15 +136,23 @@ For usage details, limits, and safety behavior, see the
   transient network activity. They are not required to match Burp CE; see the
   matrix for current paging, migration, and saved-state limits.
 
-## Milestones
+## Beyond Community: Professional workflow direction
 
-| Milestone | Status |
-| --- | --- |
-| **M1 — Proxy core** | ✅ Complete: HTTP/1.1 proxy, interception, scope, and match/replace. |
-| **M2 — HTTPS** | ✅ Complete: local CA lifecycle, TLS interception, and pass-through. |
-| **M3 — Daily workbench** | ✅ Complete for the `0.3.0` release scope: Repeater, Decoder, Comparer, full-store Search, stored HTTP paging, a full-store paged site map, and local project files. Remaining issues moved to M4; completion does not imply full capability parity. |
-| **M4 — Protocols and testing tools** | 🟡 Current focus: HTTP/2, WebSocket capture, interception and live-connection replay, Intruder, and Sequencer are available. Full-store WebSocket navigation is implemented. Remaining M3 carryovers include history filters, settings, site map annotations, and recent projects; Decoder transfers are complete with regression and native smoke validation. See the roadmap. |
-| **M5 — Parity hardening** | 🟡 In progress: release packages are published; clean-install testing, crash recovery, accessibility, and broader parity audits remain. |
+These rows are **excluded from the historical CE estimate**. They are a direction,
+not a complete Professional feature inventory, parity percentage, or release plan.
+
+| Workflow | Current status | Direction |
+| --- | --- | --- |
+| Collaborator / OAST | 🛠 Planned; no integrated payload/callback workflow | **P0**, [#191](https://github.com/andyintheshell/perseid/issues/191); Interactsh-first, subject to [client adoption gates](collaborator.md). |
+| Search and project files | Available with the limits above | Harden usability, persistence, and evidence handling; not full Pro equivalence. |
+| Crawling and discovery | Not implemented | Deferred longer-term Pro work; define scope and safe operation first. |
+| Passive/active scanning and findings triage | Not implemented | Deferred longer-term Pro work with explicit authorization, resource limits, and validation. |
+| Session/authentication automation | Optional in-memory cookie jar; no login macros or automatic re-authentication | Isolate project/user contexts first; richer automation later. |
+| Evidence export and reporting | Copy as curl and local projects; no HAR or report export | Incremental export first, richer reporting later. |
+
+Use the [priority backlog](https://github.com/andyintheshell/perseid/issues/73),
+not old milestone completion, to decide what to work on. Before claiming Community
+parity, publish the versioned [workflow audit (#68)](https://github.com/andyintheshell/perseid/issues/68).
 
 ## When does a capability count as parity?
 

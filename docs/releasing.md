@@ -7,8 +7,8 @@ The workflow is deliberately separate from the normal `main`/pull-request CI.
 
 **Current version status:** `v0.3.0` is the latest published crate and GitHub
 release; project persistence was introduced in `v0.2.0`. The workspace
-version is `0.3.1` (development; not yet published). M3 is complete
-for the `0.3.0` release scope; remaining M3 issues moved to M4 (see the [roadmap](roadmap.md)).
+version is `0.3.1` (development; not yet published). Planning now follows
+the [priority roadmap](roadmap.md), not the retired numbered milestones.
 
 ## Current release formats
 
@@ -37,8 +37,9 @@ also need real-device smoke testing before we treat them as supported downloads.
 
 ### 0.3.0 release highlights
 
-- M3 daily-workbench release scope is complete; six remaining issues moved to
-  M4, not silently marked implemented. The parity estimate remains 78.6%.
+- The daily-workbench release scope was completed; remaining work stayed open
+  rather than being silently marked implemented. The scoped parity estimate at
+  that release was 78.6%; see the [matrix](burp-parity.md) for later assessments.
 - Full-store HTTP paging/lazy details, full-store paged site map, saved logical
   retention, and atomic schema-v1→v2 migration are available. **Back up v1 files
   before opening: `0.2.x` cannot open upgraded projects.**

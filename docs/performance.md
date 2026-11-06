@@ -4,7 +4,7 @@
 [Runtime limits](workbench.md#limits-and-persistence)
 
 Perseid aims to stay comfortable on modest hardware. This page records the
-Milestone 0 proof-of-concept measurements: idle memory, a full 2,000-entry
+Original proof-of-concept measurements: idle memory, a full 2,000-entry
 history, and viewing large responses.
 
 ![Perseid memory window showing current and peak memory with a rolling graph](images/perseid-memory.png)
@@ -18,7 +18,7 @@ history, and viewing large responses.
 > predates persistent projects and does not measure redb writes, project-open
 > time, or saved-file disk growth.
 
-## Milestone 0 results
+## Original baseline results
 
 All figures in the results table are process resident set size (RSS) from Linux
 `/proc/<pid>/status` (`VmRSS` and `VmHWM`). The status bar separately reports

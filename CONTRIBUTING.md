@@ -11,6 +11,10 @@ the easiest to review.
 
 - For larger features, open an issue first so the approach can be discussed
   against the [roadmap](docs/roadmap.md) and [design](docs/design.md).
+- Choose work by priority and focus labels in the [live backlog (#73)](https://github.com/andyintheshell/perseid/issues/73),
+  not the retired numbered milestones. Collaborator/OAST is P0; usability and
+  reliability fixes accompany the near-term Community parity effort. Professional
+  parity is the longer-term goal, not a reason to delay daily-workbench fixes.
 - Never include captured credentials, tokens, personal data, or other
   sensitive traffic in issues, pull requests, or test fixtures.
 
