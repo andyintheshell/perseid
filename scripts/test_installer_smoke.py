@@ -43,7 +43,6 @@ class SmokeTests(PlatformMocks):
                 patch.object(sys, "platform", platform),
                 patch.object(sys, "argv", ["smoke", "installed-app", output]),
                 patch.object(smoke.subprocess, "Popen", return_value=process) as launch,
-                patch.object(smoke.os, "killpg"),
                 patch.object(smoke, "window", return_value=(0, 0, 800, 600) if visible else None),
                 patch.object(smoke.time, "sleep"),
                 patch.object(smoke.time, "monotonic", side_effect=[0, 1, 100]),
@@ -63,6 +62,10 @@ class SmokeTests(PlatformMocks):
         grab.grab.assert_called_once_with(bbox=(0, 0, 800, 600))
         image.save.assert_called_once()
         process.wait.assert_any_call()
+        self.assertEqual(smoke.os.killpg.call_args_list, [
+            call(process.pid, smoke.signal.SIGTERM),
+            call(process.pid, smoke.signal.SIGKILL),
+        ])
 
     def test_windows_capture_does_not_use_process_groups(self):
         process, grab, image = self.run_smoke(platform="win32")
