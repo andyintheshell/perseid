@@ -2,7 +2,9 @@
 
 import argparse
 import ctypes
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -47,11 +49,24 @@ def window(pid):
                         b["X"], b["Y"], b["X"] + b["Width"], b["Y"] + b["Height"]
                     ))
         return None
-    result = subprocess.run(
-        ["xdotool", "search", "--onlyvisible", "--pid", str(pid)],
-        capture_output=True, text=True,
-    )
-    for wid in result.stdout.splitlines():
+    # AppImage launchers can spawn the GUI instead of replacing themselves.
+    # The app runs in its own session, so only inspect that process group.
+    processes = subprocess.check_output(["ps", "-eo", "pid=,pgid="], text=True)
+    pids = [int(owner) for owner, group in
+            (line.split() for line in processes.splitlines()) if int(group) == pid]
+    for owner in pids:
+        result = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--pid", str(owner)],
+            capture_output=True, text=True,
+        )
+        bounds = linux_window_bounds(result.stdout.splitlines())
+        if bounds:
+            return bounds
+    return None
+
+
+def linux_window_bounds(window_ids):
+    for wid in window_ids:
         geometry = subprocess.check_output(
             ["xdotool", "getwindowgeometry", "--shell", wid], text=True
         )
@@ -60,6 +75,28 @@ def window(pid):
         if w > 200 and h > 200:
             return x, y, x + w, y + h
     return None
+
+
+def stop_process(process):
+    if sys.platform == "linux":
+        # Include the GUI child and mount helpers, even if the launcher exited.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+    elif process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
 
 def main():
@@ -71,7 +108,10 @@ def main():
 
     args.screenshot.parent.mkdir(parents=True, exist_ok=True)
     with args.screenshot.with_suffix(".log").open("w") as log:
-        process = subprocess.Popen([str(args.executable.resolve())], stdout=log, stderr=log)
+        process = subprocess.Popen(
+            [str(args.executable.resolve())], stdout=log, stderr=log,
+            start_new_session=sys.platform == "linux",
+        )
         try:
             deadline = time.monotonic() + 90
             bounds = None
@@ -93,13 +133,7 @@ def main():
             if max(ImageStat.Stat(image.convert("RGB")).stddev) < 2:
                 raise RuntimeError("Captured window is blank")
         finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+            stop_process(process)
 
 
 if __name__ == "__main__":
