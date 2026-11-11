@@ -12,6 +12,16 @@ pub(super) struct SettingsState {
     error: Option<String>,
 }
 
+impl SettingsState {
+    pub(super) fn reset_cookie_editor(&mut self) {
+        *self = Self {
+            open: self.open,
+            jar_open: self.jar_open,
+            ..Default::default()
+        };
+    }
+}
+
 impl PerseidApp {
     pub(super) fn settings_window(&mut self, ctx: &egui::Context) {
         let mut open = self.settings.open;
@@ -49,7 +59,7 @@ impl PerseidApp {
             if ui.button("Open cookie jar").clicked() { self.settings.jar_open = true; }
             ui.add_space(12.0);
             ui.separator();
-            ui.small("Session-only storage · Shared across projects · Never saved with projects")
+            ui.small("Session-only storage · Isolated per project · Never saved with projects")
                 .on_hover_text("Existing captured requests may still contain cookies. Only proxied browser traffic is observed; HTTPS requires TLS interception.");
         });
         }
@@ -233,6 +243,26 @@ impl PerseidApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resetting_cookie_editor_discards_credentials_and_selection() {
+        let mut settings = SettingsState {
+            open: true,
+            jar_open: true,
+            editor_open: true,
+            selected: Some(("localhost".into(), "/".into(), "sid".into())),
+            url: "http://localhost/".into(),
+            cookie: "sid=project-a".into(),
+            error: Some("old error".into()),
+        };
+        settings.reset_cookie_editor();
+        assert!(settings.open && settings.jar_open);
+        assert!(!settings.editor_open);
+        assert!(settings.selected.is_none());
+        assert!(settings.url.is_empty());
+        assert!(settings.cookie.is_empty());
+        assert!(settings.error.is_none());
+    }
 
     #[test]
     fn settings_window_renders_with_a_cookie() {
