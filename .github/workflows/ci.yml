@@ -37,18 +37,6 @@ jobs:
         if: runner.os == 'macOS'
         run: test "$(uname -m)" = arm64
 
-      - name: Install Linux desktop build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libssl-dev
-
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
         with:
           components: rustfmt, clippy
