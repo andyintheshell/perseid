@@ -533,6 +533,9 @@ impl PerseidApp {
             .default_size(300.0)
             .show(ui, |ui| {
                 ui.weak("Retained endpoints · paged URL tree");
+                if stored.page.tree_more {
+                    ui.weak("More nodes available — use More nodes.");
+                }
                 if let Some(node) = &self.site_map_ui.selected_node {
                     ui.label(match node {
                         SiteNodeId::Host { host } => host.clone(),
@@ -651,13 +654,16 @@ impl PerseidApp {
                     self.site_map_ui.stored.backwards = false;
                 }
                 ui.label(format!(
-                    "{} / {total} endpoints",
+                    "Showing {} of {total} matching endpoints",
                     map.hosts.iter().map(|h| h.entries.len()).sum::<usize>()
                 ));
                 if busy {
                     ui.spinner();
                 }
             });
+            if page_more || self.site_map_ui.stored.cursor.is_some() {
+                ui.weak("Contents are paged (500 per page), not capped. Use Previous / Next contents; search and sorting cover all matching retained endpoints.");
+            }
             if let Some(error) = error {
                 ui.colored_label(theme::RED, error);
                 if ui.button("Retry site map").clicked() {
@@ -872,6 +878,14 @@ mod tests {
         query.tree_after = first.children.last().map(|n| n.label.clone());
         let next_nodes = index.query(&query, &cancel).unwrap();
         assert_eq!(next_nodes.children[0].label, "000501");
+        // Search is global, not restricted to the first displayed page.
+        query.cursor = None;
+        query.backwards = false;
+        query.search = "001003".into();
+        let searched = index.query(&query, &cancel).unwrap();
+        assert_eq!(searched.total, 1);
+        assert_eq!(searched.entries[0].id, 1003);
+        assert!(!searched.more);
         let snapshot = project.database_snapshot().unwrap();
         let mut stored = StoredMap::default();
         stored.select(snapshot, 1);
