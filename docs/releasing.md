@@ -5,11 +5,6 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version status:** `v0.3.0` is the latest published crate and GitHub
-release; project persistence was introduced in `v0.2.0`. The workspace
-version is `0.3.1` (development; not yet published). Planning now follows
-the [priority roadmap](roadmap.md), not the retired numbered milestones.
-
 ## Current release formats
 
 The release matrix builds these eleven application downloads:
@@ -26,29 +21,6 @@ from opening normally on another Mac. The Linux formats and native ARM builds
 also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
-
-### 0.3.1 development highlights
-
-- Binary-preserving Send to Decoder from Hex message selections; selection-aware
-  Decoder Hex transforms, copying, and byte-offset selection persistence.
-- Automated regressions and user-confirmed native macOS smoke testing promote
-  Decoder to Working; the scoped manual-workflow parity estimate is **82.1%**.
-- This version bump does not itself publish release artifacts.
-
-### 0.3.0 release highlights
-
-- The daily-workbench release scope was completed; remaining work stayed open
-  rather than being silently marked implemented. The scoped parity estimate at
-  that release was 78.6%; see the [matrix](burp-parity.md) for later assessments.
-- Full-store HTTP paging/lazy details, full-store paged site map, saved logical
-  retention, and atomic schema-v1→v2 migration are available. **Back up v1 files
-  before opening: `0.2.x` cannot open upgraded projects.**
-- Cookie/session settings provide a bounded in-memory jar; application of cookies
-  and response updates for Repeater/Intruder are opt-in. No automatic login.
-- Normal quit protects unsaved temporary work and acknowledges saved workspace
-  writes, with recovery choices on failure/timeout. This is not crash recovery;
-  see [exit guarantees](project-exit-guarantees.md).
-- Platform package smoke tests below are still required before publication.
 
 ### Release procedure
 
@@ -159,7 +131,7 @@ wix extension add -g WixToolset.UI.wixext/5.0.2
 pwsh scripts/package-windows.ps1 -Arch x64 # or arm64
 ```
 
-The previous release completed all five hosted package builders. That
-checks artifact generation, not every installer and runtime on clean machines.
+Successful hosted package builds check artifact generation, not every installer
+and runtime on clean machines.
 Continue smoke-testing native ARM64 builds, MSI install/upgrade behavior, the
 macOS Gatekeeper experience, and Linux runtime dependencies before each release.

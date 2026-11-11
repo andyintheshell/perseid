@@ -7,10 +7,8 @@ Perseid is a **public alpha** for manual, authorized web security testing.
 These guides describe the code on the branch you are reading. A planned feature
 in the roadmap is not necessarily available in the application.
 
-The latest published release, Perseid `0.3.0`, includes the local
-project-persistence support introduced in `0.2.0`; install
-the published crate or a prebuilt release, or build from source for current
-development.
+Install the published crate or a prebuilt release, or build from source for
+current development.
 
 **Current direction:** [Collaborator/OAST (P0)](collaborator.md), usability and
 reliability fixes, then Community manual-workflow parity. Professional parity is
