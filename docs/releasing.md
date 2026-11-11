@@ -7,7 +7,7 @@ The workflow is deliberately separate from the normal `main`/pull-request CI.
 
 **Current version status:** `v0.3.0` is the latest published crate and GitHub
 release; project persistence was introduced in `v0.2.0`. The workspace
-version is `0.3.1` (development; not yet published). Planning now follows
+version is `0.4.0` (development; not yet published). Planning now follows
 the [priority roadmap](roadmap.md), not the retired numbered milestones.
 
 ## Current release formats
