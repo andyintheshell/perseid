@@ -72,7 +72,7 @@ pub fn create_initializing(path: &Path, meta: &ProjectMeta) -> Result<Database> 
 
     let mut builder = Database::builder();
     builder.set_cache_size(DISK_CACHE_BYTES);
-    let db = builder.create_file(file)?;
+    let db = builder.create_with_backend(redb::backends::FileBackend::new(file)?)?;
     let mut initializing = meta.clone();
     initializing.state = STATE_INITIALIZING.to_string();
     let mut tx = db.begin_write()?;
