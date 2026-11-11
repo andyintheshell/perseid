@@ -14,7 +14,7 @@
 | Intercept and edit | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Message inspection | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Scope and rewrite rules | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Target site map](#target-site-map) | ✅ Captured endpoints | ✅ | ✅ | ✅ | ✅ |
+| [Target site map](#target-site-map) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | [HTTP history](#http-history) | 🟡 | ✅ | ✅ | ✅ | ✅ |
 | Search | ✅ | 🟡 Local search | ✅ | ✅ | ✅ HTTPQL |
 | [WebSocket history](#websocket-history) | 🟡 | ✅ | ✅ | 🧩 | ✅ |
@@ -40,16 +40,10 @@
 
 | Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
 | --- | --- | --- | --- | --- | --- |
-| Browse captured endpoints | ✅ All retained endpoints; continuous Contents | ✅ | ✅ | ✅ Sites tree | ✅ Sitemap |
+| Browse captured endpoints | ✅ Retained history | ✅ | ✅ | ✅ Sites tree | ✅ Sitemap |
 | Filter / inspect endpoints | ✅ Scope, search, sorting | ✅ | ✅ | ✅ | ✅ |
-| Tree navigation / expansion | ✅ Expandable URL tree; continuous scrolling | ✅ Branch navigation | ✅ Branch navigation | ✅ Sites tree | ✅ Shift-click expands subtree [C1] |
+| Tree navigation / expansion | ✅ | ✅ Branch navigation | ✅ Branch navigation | ✅ Sites tree | ✅ Shift-click expands subtree [C1] |
 | Discover uncaptured URLs | ❌ No inference or parameter discovery | 🟡 Manual mapping | ✅ Crawl / discovery | ✅ Spiders / add-ons | 🧩 |
-
-Contents and tree windows load automatically in the background; 500 is an internal
-window bound, not a page or endpoint limit. Multiple tree selection and expand-all
-remain unsupported. See [continuous site-map browsing](site-map-pagination.md)
-for implementation and validation details. The historical parity percentage above
-has not been recalculated.
 
 ## HTTP history
 
