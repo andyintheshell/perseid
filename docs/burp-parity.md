@@ -1,163 +1,205 @@
-# Burp parity: Community baseline and Professional direction
+# Capability matrix
 
-[Documentation](README.md) · [Workbench](workbench.md) · [Roadmap](roadmap.md)
+**Burp Community scoped parity: 82.1%** · Historical estimate: **2026-11-03**, `0.3.1` development build ([#166](https://github.com/andyintheshell/perseid/pull/166)). Not overall product parity or a fresh audit.
 
-Perseid aims to cover the core **manual web-testing workflows** in Burp Suite
-Community Edition (CE), with a Rust-native desktop app and explicit body,
-operation, and UI-cache limits. Temporary project storage has configurable
-aggregate count and retained-body limits; saved projects offer opt-in logical
-limits but no physical disk-size cap. This is a progress snapshot, **not a claim of
-full feature or product parity**.
+[Documentation](README.md) · [Workbench](workbench.md) · [Roadmap](roadmap.md) · [Screenshots](screenshots.md)
 
-**Priority direction:** Collaborator/OAST is P0, usability and reliability are
-active work, Community manual-workflow parity is the near-term baseline, and
-Professional parity is the longer-term goal. See the [roadmap](roadmap.md) and
-[Interactsh assessment](collaborator.md). OAST is planned, not shipped.
+## High-level comparison
 
-Burp CE's built-in manual toolkit is the comparison point: Proxy, Repeater,
-Decoder, Sequencer, Comparer, Intruder, and WebSocket history. See
-[PortSwigger's CE feature list](https://portswigger.net/burp/communitydownload).
-The goal is an equivalent documented workflow—not an identical UI, internal
-implementation, or compatibility with Burp extensions.
+✅ Available workflow · 🟡 Partial / limited · 🛠 Planned, not shipped · ❌ Not included · ↔ Perseid deliberate difference · 🧩 Add-on / plugin · ? Not verified
 
-**Status key:** ✅ Working · 🟡 Partial · ➕ Beyond CE · 🛠 Planned ·
-↔ Deliberate difference · ⛔ Non-goal.
+| Feature | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| HTTP(S) proxy | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Intercept and edit | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Message inspection | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Scope and rewrite rules | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [Target site map](#target-site-map) | 🟡 | ✅ | ✅ | ✅ | ✅ |
+| [HTTP history](#http-history) | 🟡 | ✅ | ✅ | ✅ | ✅ |
+| Search | ✅ | 🟡 Local search | ✅ | ✅ | ✅ HTTPQL |
+| [WebSocket history](#websocket-history) | 🟡 | ✅ | ✅ | 🧩 | ✅ |
+| [WebSocket editing and replay](#websocket-editing-and-replay) | ✅ Live connection | ✅ | ✅ | 🧩 | ✅ Replay |
+| [Repeater / manual replay](#repeater) | 🟡 | ✅ | ✅ | 🧩 Requester | ✅ Replay |
+| Decoder / transforms | ✅ | ✅ | ✅ | 🧩 | ✅ Convert workflows |
+| Comparer / diff | ✅ | ✅ | ✅ | 🧩 | 🧩 Compare |
+| [Intruder / fuzzing](#intruder) | ✅ No processing | 🟡 Throttled | ✅ | 🧩 | ✅ Automate |
+| [Sequencer / token analysis](#sequencer) | 🟡 | ✅ | ✅ | 🧩 | 🧩 Sequencer |
+| Memory display | ✅ Heap only | ✅ | ✅ | ✅ | ? UI undocumented |
+| [Project persistence](#project-persistence) | 🟡 | ❌ Project files | ✅ | ✅ Sessions | ✅ Plan limits |
+| [Collaborator / OAST](#collaborator--oast) | 🛠 P0 | ❌ | ✅ | 🧩 | 🧩 |
+| [Crawling and discovery](#crawling-and-discovery) | 🛠 | ❌ Automated crawler | ✅ | ✅ | 🧩 |
+| [Scanning and findings](#scanning-and-findings) | 🛠 | ❌ Scanner | ✅ | ✅ | 🧩 Scanner; ✅ Findings |
+| [Session / auth automation](#session--auth-automation) | 🟡 | ✅ Rules / macros | ✅ | ✅ | 🧩 / workflows |
+| [Evidence export and reports](#evidence-export-and-reports) | 🟡 | 🟡 No scan reports | ✅ | 🧩 | 🟡 JSON / CSV; external reports |
+| [Browser integration](#browser-integration) | ↔ External browser | ✅ Bundled | ✅ Bundled | ✅ Launch external | ✅ Browser setup |
+| [Extensions](#extensions) | ↔ No BApps | ✅ BApps¹ | ✅ BApps | ✅ ZAP add-ons | ✅ Caido plugins |
 
-## Historical scoped parity estimate: 82.1%
+✅ means a usable workflow, **not every competitor option**. Detail tables cover Perseid gaps and qualified comparisons. Competitor availability is documentation-based, not hands-on validation; 🧩 does not imply equivalent scope or quality. Caido includes its plugin ecosystem; Basic has project/workflow/plugin limits. ¹ Some BApps require Pro.
 
-As of **2026-11-03**, for the `0.3.1` development build in PR #166,
-the estimated parity for the manual-workflow scope below is **82.1%**.
-This updates the previous 78.6% snapshot after automated regression tests and
-user-confirmed native macOS Decoder smoke testing. The other rows retain their
-previous assessment; this is not a new full-toolkit audit or a measurement of all
-Burp CE features, reliability, or product maturity.
+## Target site map
 
-The calculation gives each of the 14 CE-scope matrix rows equal weight: Working
-earns 1 point, Partial earns 0.5, and Planned or missing earns 0. The nine
-Working rows are HTTP(S) proxy, intercept and edit, message inspection, scope
-and rewrite rules, WebSocket editing and replay, Comparer, Intruder, Decoder, and memory
-display. The five Partial rows are target site map, HTTP history, WebSocket
-history, Repeater, and Sequencer. Thus **(9 + 5 × 0.5) / 14 × 100 =
-82.1%** (rounded to one decimal place). Search and project persistence are
-excluded as Perseid extras; bundled browser and BApp compatibility are deliberate
-differences outside this project's scoped target. Scanner, crawler, and OAST are
-also excluded. These exclusions mean the number must not be read as overall
-Burp CE product parity.
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Browse captured endpoints | ✅ Retained history | ✅ | ✅ | ✅ Sites tree | ✅ Sitemap |
+| Filter / inspect endpoints | ✅ Scope, search, sorting | ✅ | ✅ | ✅ | ✅ |
+| Tree navigation / expansion | 🟡 500-row pages; no expand-all | ✅ Branch navigation | ✅ Branch navigation | ✅ Sites tree | ✅ Shift-click expands subtree [C1] |
+| Discover uncaptured URLs | ❌ No inference or parameter discovery | 🟡 Manual mapping | ✅ Crawl / discovery | ✅ Spiders / add-ons | 🧩 |
 
-Equal weighting and half credit are judgment calls, not measurements of the
-fraction of each capability implemented. In particular, a Working row denotes a
-usable workflow, not every Burp option: Intruder lacks payload processing, and
-WebSocket replay cannot reopen closed connections. The biggest partial gaps
-include Repeater send/protocol/history behavior, session-only WebSocket Repeater tabs, and
-approximate Sequencer analysis. Decoder's binary Hex transfers and Hex-panel
-selection transforms are implemented, regression-tested, and manually checked. See the
-matrix for details. Recalculate this snapshot when matrix statuses or scope change.
+## HTTP history
 
-### Decoder promotion check
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Browse / filter captures | ✅ All retained rows; lazy details | ✅ | ✅ | ✅ | ✅ HTTPQL |
+| Search captured bodies | ✅ Background search | 🟡 Local search | ✅ Project search | ✅ Search | ✅ HTTPQL |
+| Delete a capture | 🟡 Finished exchanges only | ✅ | ✅ | ✅ | ❌ No supported UI / CLI [C2] |
+| Full Burp filtering / table options | 🟡 Not full equivalence | ✅ Baseline | ✅ | Different UI | Different UI |
 
-The binary-selection implementation is covered by headless egui interaction and
-workspace round-trip tests. The user confirmed that the native macOS `0.3.1`
-development build worked on **2026-11-03** ("Yep, seems to work"). This was
-general confirmation after smoke-check instructions, not an item-by-item report;
-individual manual results, including save/reopen, were not recorded. Binary
-selection persistence is covered by the automated workspace round-trip test.
-This is a targeted smoke check, not exhaustive platform or toolkit validation.
-Regression checklist (not an itemized record of the manual run):
+## WebSocket history
 
-- Send a Hex selection containing `00 ff` to Decoder with both Append and
-  Start new chain; verify byte values, not ASCII `30 30 20 66 66`.
-- Drag backwards across Hex rows in both columns; copy the selection and apply
-  ASCII hex encoding or a hash. Verify only selected bytes change.
-- Save/reopen a project containing non-UTF-8 bytes and a Hex selection; verify
-  bytes, selection, and the next transform survive.
-- Confirm Raw/Pretty sends remain labeled displayed/derived text, preview
-  limits remain bounded, and no transform makes network requests.
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Capture text / binary traffic | ✅ `ws://` and decrypted `wss://` | ✅ | ✅ | 🧩 WebSockets | ✅ |
+| Browse retained messages | ✅ Virtual table; lazy payloads | ✅ | ✅ | 🧩 | ✅ |
+| Full Burp history options | 🟡 Not full equivalence | ✅ Baseline | ✅ | Add-on UI | Different UI |
 
+## WebSocket editing and replay
 
-## Status at a glance
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Intercept / edit messages | ✅ Both directions; text / binary | ✅ | ✅ | 🧩 | ✅ Interception |
+| Send messages on live connection | ✅ Repeated sends | ✅ | ✅ | 🧩 | ✅ Replay session [C3] |
+| Reconnect / new handshake | ❌ | ✅ | ✅ | 🧩 Reopen [Z1] | ✅ New session / URL [C3] |
+| WebSocket fuzzing | ❌ | 🧩 WS Turbo Intruder [B1] | 🧩 WS Turbo Intruder [B1] | 🧩 | ? Automated fuzzing undocumented |
 
-| ✅ Working | 🟡 Partial | 🛠 Planned |
-| --- | --- | --- |
-| HTTP/HTTPS proxy and intercept | History filtering; site map without crawling/discovery | Collaborator/OAST (P0, beyond CE) |
-| Scope and match/replace; Decoder | Repeater and Sequencer | — |
-| Comparer, Intruder, and WebSocket editing/replay | WebSocket history; project persistence | Further project workflow polish |
-| Memory display | — | — |
+## Repeater
 
-**➕ Perseid extra:** search across stored HTTP/WebSocket history and current
-Repeater/Intruder results. **↔ Deliberate differences:** no
-bundled browser or Burp BApp compatibility. **🛠 Longer-term Pro goal:** automated
-scanning/crawling, findings, and reporting. These are not shipped. Sequencer provides a bounded,
-expression-based sampling and analysis workflow; it is not a byte-for-byte
-reimplementation of Burp's test suite.
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Edit / resend HTTP(S) | ✅ | ✅ Repeater | ✅ Repeater | 🧩 Requester | ✅ Replay |
+| Send / protocol / history options | 🟡 Not full Burp equivalence | ✅ Baseline | ✅ | Different options | Different options |
+| Persist HTTP tabs | ✅ Saved project | ❌ Project files | ✅ | 🧩 Session-dependent | ✅ Projects |
+| WebSocket tabs | 🟡 Session-only; live connection | ✅ | ✅ | 🧩 Separate UI | ✅ Replay; free tier: 1 session [C3] |
+| Proxy rules on direct sends | ↔ Bypasses scope, intercept, rewrites | Tool-specific | Tool-specific | Tool-specific | Tool-specific |
 
-![Perseid HTTP history with request, response, and Inspector panes](images/perseid-main.png)
+## Intruder
 
-Browse the [screenshot gallery](screenshots.md) for Search, Intruder, Repeater,
-Decoder, Comparer, and Sequencer.
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Payload attacks | ✅ Four Burp-style attack modes | 🟡 Rate-limited | ✅ | 🧩 Fuzzer | ✅ Automate |
+| Payload input | ✅ Editable / file-loaded | ✅ | ✅ | 🧩 | ✅ |
+| Payload processing | ❌ | ✅ | ✅ | 🧩 Processors | ✅ Workflows |
+| Concurrency | ✅ Up to 32; scope checks | 🟡 Throttled | ✅ Resource pools | 🧩 Configurable | ✅ Configurable |
 
-## Capability matrix
+## Sequencer
 
-| Capability | Status | What works today / what is missing |
-| --- | --- | --- |
-| **HTTP(S) proxy** | ✅ Working | HTTP/1.1 and HTTP/2 forwarding; HTTPS interception with a local CA, manual browser trust, and per-host pass-through. Perseid never installs trust automatically. |
-| **Intercept and edit** | ✅ Working | Hold, edit, forward, or drop HTTP/1.1 and HTTP/2 requests; response interception is opt-in. Buffered bodies can be edited; streaming or oversized bodies are header-only. |
-| **Message inspection** | ✅ Working | Pretty, Raw, and Hex views; bounded gzip, deflate, and Brotli decoding; parsed Inspector and per-exchange Notes. |
-| **Scope and rewrite rules** | ✅ Working | Filter views by scope; optionally block out-of-scope proxy requests and `CONNECT` tunnels; recheck edited targets. Match/replace supports literal or regex rules on message heads and buffered UTF-8 bodies. |
-| **Target site map** | 🟡 Partial | All retained HTTP history, including old endpoints after reopen. Background disk-backed endpoint indexing; host/folder/resource navigation and Contents independently page 500 summaries, with lazy details, Inspector notes, cURL, and tool sends. Host, Method, URL, Params, Status, Length, MIME, Title, Notes, and Time sorting/search cover the selected subtree. Default display filters and scope apply across retained endpoints. Pause freezes summaries, not capture; retention/clear/project switches invalidate paused views too. Latest means greatest capture ID. No crawler, crawl paths, scanner Issues, parameter discovery, or unrequested-URL inference; expand-all is unavailable for the lazy paged tree. |
-| **HTTP history** | 🟡 Partial | One virtual table covers all retained HTTP rows, with full-store metadata filters and lazy details/notes. Search scans retained bodies. Complete captures can be copied as curl. **Delete item** removes a finished exchange and its bodies from the active project; in-flight deletion is disabled. |
-| **Search** | ➕ Beyond CE | Search all stored HTTP and WebSocket history plus current Repeater tabs and retained Intruder results, with case, regex, negative-match, in-scope, and live-update filters; stored scans run in the background with progress and stop when superseded. Results highlight in Pretty/Raw/Hex. Query, options, structured result rows, selection, and views persist with a project; old HTTP-only workspaces drop IDs missing from the loaded snapshot. |
-| **WebSocket history** | 🟡 Partial | Capture, intercept, edit, forward and drop text/binary messages for `ws://` and decrypted `wss://`. The virtual table covers all retained messages with bounded metadata windows and lazy payload loading. |
-| **WebSocket editing and replay** | ✅ Working | Hold and edit text or binary messages in both directions; replay captured messages repeatedly on the existing live connection. Reopening closed connections and fuzzing are not supported. |
-| **Repeater** | 🟡 Partial | Editable HTTP/HTTPS requests and live-connection WebSocket replay with text/hex editing and message views. HTTP tabs persist; WebSocket tabs are session-only and cannot reopen closed connections. Direct HTTP sends bypass proxy scope, interception, and rewrite rules. |
-| **Decoder** | ✅ Working | Stacked Text/Hex panels, common encode/decode operations, 46 hashes including SKEIN and TupleHash, standard digest OID aliases, Smart decode, and selection-aware transforms in Text and Hex. Projects save panel contents, operation annotations, view, and byte-range selection. History sends full captured messages; message-pane Hex selections transfer original selected binary bytes, while clipboard copies remain hexadecimal text. Raw/Pretty selections are explicitly displayed/derived text, not byte-exact exports. Binary transfers, reverse/multiline Hex selection, and persistence have automated regression coverage; the user confirmed native macOS smoke testing on 2026-11-03. |
-| **Comparer** | ✅ Working | Shared item list, word- and byte-level differences, Text/Hex views, difference navigation, and synchronized scrolling. Persistent projects save input items, selections, and result-window state; the diff is recomputed on open. |
-| **Intruder** | ✅ Working | `§` positions; editable or file-loaded payloads; Sniper, Battering ram, Pitchfork, and Cluster bomb; up to 32 concurrent requests with scope checks. Projects save request/payload configuration and result rows. No payload processing. |
-| **Sequencer** | 🟡 Partial | Manual token loading and live regex capture from HTTP history; character-level count/transition tests; bit-position and whole-stream tests; effective-entropy chart and per-analysis settings. Capture is expression-based rather than parameter-aware, and the statistical results are bounded approximations. |
-| **Memory display** | ✅ Working | Current and peak allocator heap with a rolling graph; this is not total process RSS. |
-| **Project persistence** | 🟡 Partial · ➕ Beyond CE | Temporary projects by default; Save As/Open/Save Copy use a local redb `.perseid` file with automatic writes. Saved retention is unlimited by default, with opt-in combined count/body limits; these are not physical file-size caps. Schema v1 migrates atomically to v2. New/Open prompt for unsaved temporary work; failed opens preserve the running proxy. Files are unencrypted. Clear history removes captures; delete a closed project file through the filesystem, not a dedicated UI. Local CA material and transient network activity are not stored. Burp CE itself does not include project files. |
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Load / collect tokens | ✅ Manual / HTTP-history regex | ✅ | ✅ | 🧩 Token Generation and Analysis [Z2] | 🧩 Replay / manual / live [C4] |
+| Structured token selection | ❌ Expression-based only | ✅ | ✅ | 🧩 Token selector [Z2] | 🧩 Cookie / header / JSONPath [C4] |
+| Randomness analysis | 🟡 Bounded statistical approximations | ✅ Sequencer tests | ✅ Sequencer tests | 🧩 Different analysis | 🧩 10 tests [C4] |
+| Entropy output | ✅ Effective-entropy chart | ✅ | ✅ | 🧩 Analysis dialog | 🧩 Shannon entropy results [C4] |
 
-For usage details, limits, and safety behavior, see the
-[Workbench guide](workbench.md), [HTTPS guide](tls.md), and
-[Safety and privacy](safety.md).
+## Project persistence
 
-## Deliberate differences
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Save / reopen work | ✅ Local `.perseid`; automatic writes | ❌ Project files | ✅ | ✅ Sessions | ✅ Projects |
+| Tool-state coverage | 🟡 HTTP tabs / tool state; WS tabs excluded | — | ✅ | 🟡 Add-on-dependent | ✅ Project context |
+| Retention | 🟡 Opt-in count / body limits; no disk-size cap | Session-only | ✅ Disk projects | ✅ Disk sessions | 🟡 Basic: 2 projects |
+| Delete project | 🟡 Close, then delete file externally | — | ✅ File management | ✅ Session management | ✅ Project management |
+| Sensitive data | ⚠️ Unencrypted; no CA material or transient activity | ⚠️ Captures may contain secrets | ⚠️ Captures may contain secrets | ⚠️ Captures may contain secrets | ⚠️ Captures may contain secrets |
 
-- **External browser:** use a browser or HTTP client configured to proxy through
-  Perseid. This avoids bundling Chromium and supports users' existing browser
-  profiles and tools.
-- **No BApp (Burp App Extension) compatibility:** Burp extensions are Java-based.
-  A native extension point may follow core parity; Burp's extension ABI is not a
-  target.
-- **No artificial Intruder throttle:** Perseid does not copy Burp CE's demo rate
-  limit. Concurrency is user-controlled and bounded, and scope checks are
-  explicit.
-- **Persistence is a Perseid extra:** local `.perseid` projects are implemented
-  for captures and project-scoped workbench state, excluding CA material and
-  transient network activity. They are not required to match Burp CE; see the
-  matrix for current paging, migration, and saved-state limits.
+## Collaborator / OAST
 
-## Beyond Community: Professional workflow direction
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Integrated payloads / callbacks | 🛠 Not shipped | ❌ | ✅ Collaborator | 🧩 OAST Support | 🧩 OmniOAST |
+| Direction / provider | P0: Interactsh-first [#191](https://github.com/andyintheshell/perseid/issues/191) | External tools | Public / private Collaborator | Interactsh / BOAST / callbacks | Plugin-dependent |
 
-These rows are **excluded from the historical CE estimate**. They are a direction,
-not a complete Professional feature inventory, parity percentage, or release plan.
+[Perseid adoption gates](collaborator.md)
 
-| Workflow | Current status | Direction |
-| --- | --- | --- |
-| Collaborator / OAST | 🛠 Planned; no integrated payload/callback workflow | **P0**, [#191](https://github.com/andyintheshell/perseid/issues/191); Interactsh-first, subject to [client adoption gates](collaborator.md). |
-| Search and project files | Available with the limits above | Harden usability, persistence, and evidence handling; not full Pro equivalence. |
-| Crawling and discovery | Not implemented | Deferred longer-term Pro work; define scope and safe operation first. |
-| Passive/active scanning and findings triage | Not implemented | Deferred longer-term Pro work with explicit authorization, resource limits, and validation. |
-| Session/authentication automation | Optional in-memory cookie jar; no login macros or automatic re-authentication | Isolate project/user contexts first; richer automation later. |
-| Evidence export and reporting | Copy as curl and local projects; no HAR or report export | Incremental export first, richer reporting later. |
+## Crawling and discovery
 
-Use the [priority backlog](https://github.com/andyintheshell/perseid/issues/73),
-not old milestone completion, to decide what to work on. Before claiming Community
-parity, publish the versioned [workflow audit (#68)](https://github.com/andyintheshell/perseid/issues/68).
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Automated crawling | 🛠 Longer-term | ❌ | ✅ | ✅ Traditional / AJAX spiders | 🧩 Crawler |
+| Hidden-content discovery | ❌ | ❌ Built-in automated discovery | ✅ | 🧩 Forced Browse / Parameter Digger | 🧩 |
 
-## When does a capability count as parity?
+## Scanning and findings
 
-A capability moves to **Working** when it has a usable workflow, practical
-automated tests plus a manual check, and documented safety behavior (scope,
-retention, and CA trust). Status and user documentation should be updated
-together. Testing is limited to local labs or systems you are explicitly
-authorized to assess.
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Passive / active scanning | 🛠 Longer-term | ❌ Built-in scanner | ✅ | ✅ / add-on rules | 🧩 |
+| Findings triage | 🛠 | ❌ Scanner findings | ✅ Issues | ✅ Alerts | ✅ Findings |
+
+## Session / auth automation
+
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Cookie handling | 🟡 Optional in-memory jar | ✅ | ✅ | ✅ Sessions | ✅ / workflows |
+| Login macros / re-authentication | ❌ | ✅ Session rules / macros | ✅ Plus scan logins | ✅ Authentication / scripts | 🧩 / workflows |
+
+## Evidence export and reports
+
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Copy request as cURL | ✅ Complete captures | ✅ | ✅ | ✅ | ✅ |
+| HAR export | ❌ | 🧩 Logger++ [B2] | 🧩 Logger++ [B2] | 🧩 Import/Export [Z3] | ❌ Documented formats: JSON / CSV [C5] |
+| Findings reports | 🛠 No report export | ❌ Scan reports | ✅ | 🧩 Report Generation | External reporting tools |
+
+## Browser integration
+
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Browser choice | ↔ Bring your own | ✅ Bundled Chromium | ✅ Bundled Chromium | ✅ Launch installed browser | ✅ Browser setup |
+| Perseid trust policy | Manual proxy / CA setup; never installs trust automatically | — | — | — | — |
+
+## Extensions
+
+| Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
+| --- | --- | --- | --- | --- | --- |
+| Native ecosystem | 🛠 Possible after core parity | ✅ BApps / API | ✅ BApps / API | ✅ Add-ons / scripts | ✅ Plugins / workflows |
+| Burp BApp compatibility | ↔ Non-goal | ✅ Edition-dependent | ✅ | ❌ Own ecosystem | ❌ Own ecosystem |
+
+## Parity accounting
+
+| Rule | Value |
+| --- | --- |
+| Baseline | 14 equally weighted CE manual-workflow rows; not the entire comparison above |
+| ✅ Working: 9 × 1 | Proxy; intercept; inspection; scope / rewrites; WS editing / replay; Decoder; Comparer; Intruder; memory display |
+| 🟡 Partial: 5 × 0.5 | Site map; HTTP history; WS history; Repeater; Sequencer |
+| Calculation | **(9 + 5 × 0.5) / 14 × 100 = 82.1%** |
+| Excluded | Search; project files; browser; extensions; crawling; scanning; OAST; auth automation; reports |
+| Interpretation | Equal weights and half credit are judgment calls, not implementation percentages |
+| Last status change | Decoder promoted after automated regression tests and general native macOS smoke confirmation, 2026-11-03; not an itemized manual audit |
+| Promotion bar | Usable workflow, practical automated tests, manual check, documented safety behavior |
+| Next audit | Versioned [workflow audit #68](https://github.com/andyintheshell/perseid/issues/68); recalculate when scoped statuses change |
+
+## Sources and operating limits
+
+Verification: public documentation and plugin READMEs, **not hands-on testing**. Remaining `?` cells are unresolved after checking Caido's tool, Replay, Automate, UI, and logging docs; they do not mean unsupported. Caido's new-session workflow does not establish reuse of a captured proxy connection. Token-analysis results do not imply identical statistics or charts.
+
+| Evidence | Confirmed comparison |
+| --- | --- |
+| [C1: Caido sitemap navigation](https://docs.caido.io/app/guides/sitemap_viewing) | Shift-click fully expands a sitemap element; no large-project performance claim |
+| [C2: Caido data deletion](https://docs.caido.io/app/guides/data_deleting) | No supported capture-deletion UI / CLI; manual SQLite edits are explicitly discouraged |
+| [C3: Caido WebSocket Replay](https://docs.caido.io/app/guides/replay_websocket) · [0.57 release](https://caido.io/blog/2026-06-05-release-v0-57-0/) | New WS session, URL, handshake, message sends; release notes limit free tier to one WS session |
+| [C4: Caido tool mapping](https://docs.caido.io/burp-suite/core/tools) · [Compare README](https://github.com/caido-community/Compare#readme) · [Sequencer README](https://github.com/caido-community/sequencer#readme) | Plugin availability, collection / extraction methods, statistical tests and entropy results |
+| [C5: Caido export formats](https://docs.caido.io/app/guides/exports_requests) | JSON / CSV; exporting current rows requires Individual / Team; generic JSON is not HAR |
+| [B1: WebSocket Turbo Intruder](https://portswigger.net/bappstore/ba292c5982ea426c95c9d7325d9a1066) | WebSocket fuzzing extension listed for Professional and Community |
+| [B2: Logger++ listing](https://portswigger.net/bappstore/470b7057b86f41c396a97903377f3d81) · [Maintainer HAR fix](https://github.com/nccgroup/LoggerPlusPlus/issues/138) | Both editions supported; HAR export evidenced by maintainer-confirmed fix, not native Burp export |
+| [Z1: ZAP WebSocket history](https://www.zaproxy.org/docs/desktop/addons/websockets/about/) | Add-on v18 added reopening connections to resend messages |
+| [Z2: ZAP token generation](https://www.zaproxy.org/docs/desktop/addons/token-generator/) | Select a token, generate samples, inspect the analysis dialog |
+| [Z3: ZAP Import/Export](https://www.zaproxy.org/docs/desktop/addons/import-export/) | Save selected messages as HAR; HAR export API |
+| [Unresolved: Caido UI](https://docs.caido.io/app/guides/ui) · [Logs](https://docs.caido.io/app/guides/logs_viewing) · [Automate](https://docs.caido.io/app/quickstart/automate) | No confirmation of application memory display or automated WebSocket fuzzing |
+
+| Reference | Purpose |
+| --- | --- |
+| [Burp editions](https://portswigger.net/burp/communitydownload) · [Tools](https://portswigger.net/burp/documentation/desktop/tools) | Public feature / edition comparison |
+| [ZAP features](https://www.zaproxy.org/docs/desktop/start/features/) · [Add-ons](https://www.zaproxy.org/docs/desktop/addons/) | Core and add-on workflows |
+| [Caido features](https://caido.io/features/) · [Docs](https://docs.caido.io/quickstart/) · [Plans](https://caido.io/pricing/) | Core tools, ecosystem and plan limits |
+| [Caido plugins](https://caido.io/plugins/) · [Reporting](https://docs.caido.io/burp-suite/core/reporting) | Plugin availability; no native formatted report generation |
+| Comparison checked | 2026-11-11; ? = unverified, not a claim of absence |
+| [Workbench](workbench.md) | Shipped behavior, paging, body / operation / UI-cache limits; ✅ does not remove these limits |
+| [HTTPS](tls.md) · [Safety and privacy](safety.md) | CA trust, unencrypted evidence, retention; test only authorized systems |
+| [Roadmap](roadmap.md) · [Priority backlog #73](https://github.com/andyintheshell/perseid/issues/73) | Planned work, not shipped capability |
