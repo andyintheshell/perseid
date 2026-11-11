@@ -80,29 +80,27 @@ jobs:
     needs: changes
     if: needs.changes.outputs.screenshots == 'true'
     runs-on: ubuntu-26.04
+    # Debian 13 (Trixie), with Xvfb, Mesa, and libxkbcommon-x11 preinstalled.
+    # Pin the image index rather than following the mutable debiantrixie tag.
+    container:
+      image: ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:d5e900e9dbc7e0ec830758355cbb80f0b773ce55da82f59e7785298a510bc0f6
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Linux and Xvfb dependencies
+      - name: Verify preinstalled screenshot runtime
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libssl-dev \
-            xvfb \
-            xauth \
-            libgl1-mesa-dri \
-            libglx-mesa0 \
-            libegl1 \
-            libxkbcommon-x11-0 \
-            libxcursor1 \
-            libxrandr2 \
-            libxi6
+          cat /etc/os-release
+          command -v Xvfb xvfb-run xauth gcc python3
+          python3 - <<'PY'
+          import ctypes
+          for library in ("libxkbcommon-x11.so.0", "libGL.so.1", "libEGL.so.1"):
+              ctypes.CDLL(library)
+              print(f"Loaded {library}")
+          PY
 
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
