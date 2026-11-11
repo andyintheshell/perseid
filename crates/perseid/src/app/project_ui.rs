@@ -1440,6 +1440,14 @@ impl PerseidApp {
     }
 
     fn apply_opened_project(&mut self, opened: OpenedProject, path: Option<&Path>) {
+        // Engines capture the jar when started. Drop them before installing a
+        // fresh jar so new sends cannot reuse the previous project's session.
+        // Any late proxy observations retain only the detached old Arc.
+        self.repeater = None;
+        self.intruder_engine = None;
+        self.intruder = super::intruder::IntruderState::new();
+        self.cookie_jar = Default::default();
+        self.settings.reset_cookie_editor();
         self.project.retention_sweep = None;
         self.project.retention_seen = (0, 0);
         self.http_table = Default::default();
@@ -2789,8 +2797,141 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn new_and_open_isolate_cookie_sessions_and_late_observations() {
+        use std::io::{Read, Write};
+
+        let path = temp_path("cookie-isolation");
+        let source = ProjectHandle::temporary().unwrap();
+        wait_for(source.save_copy(path.clone(), false));
+        let mut app = PerseidApp::test_app();
+        for open in [false, true] {
+            let old = app.cookie_jar.clone();
+            {
+                let mut jar = old.lock().unwrap();
+                jar.insert("http://localhost/", "sid=project-a; Path=/")
+                    .unwrap();
+                jar.apply = true;
+                jar.update = true;
+            }
+            app.repeater = Some(
+                crate::proxy::Repeater::start(crate::proxy::RepeaterConfig {
+                    cookie_jar: Some(old.clone()),
+                    ..Default::default()
+                })
+                .unwrap(),
+            );
+            app.intruder_engine = Some(
+                crate::proxy::Intruder::start(crate::proxy::IntruderConfig {
+                    cookie_jar: Some(old.clone()),
+                    ..Default::default()
+                })
+                .unwrap(),
+            );
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (received_tx, received_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                received_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                // Shutdown may already have closed the connection.
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nSet-Cookie: sid=late-project-a\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            });
+            app.repeater
+                .as_ref()
+                .unwrap()
+                .send(
+                    crate::proxy::RepeaterRequest::parse(
+                        "GET / HTTP/1.1\n\n",
+                        vec![],
+                        "http",
+                        &address.to_string(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            received_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            if open {
+                app.begin_open_project(path.clone());
+            } else {
+                app.begin_new_project();
+            }
+            poll_until_idle(&mut app);
+            release_tx.send(()).unwrap();
+            server.join().unwrap();
+            assert!(!std::sync::Arc::ptr_eq(&old, &app.cookie_jar));
+            assert!(app.repeater.is_none());
+            assert!(app.intruder_engine.is_none());
+            // Model responses already holding the previous project's jar,
+            // including proxy observers that outlive shutdown.
+            old.lock().unwrap().observe_proxy_response(
+                "http://localhost/",
+                &vec![("Set-Cookie".into(), "sid=late-project-a; Path=/".into())],
+            );
+            let jar = app.cookie_jar.lock().unwrap();
+            assert!(jar.entries().is_empty());
+            assert!(!jar.apply);
+            assert!(!jar.update);
+            assert!(jar.update_proxy);
+        }
+        app.shutdown_project();
+        drop(app);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn saves_and_cancelled_switches_preserve_cookie_session() {
+        let mut app = PerseidApp::test_app();
+        let jar = app.cookie_jar.clone();
+        jar.lock()
+            .unwrap()
+            .insert("http://localhost/", "sid=project-a")
+            .unwrap();
+        for copy in [false, true] {
+            let path = temp_path("cookie-save");
+            let handle = app.project.handle().unwrap();
+            let receiver = if copy {
+                handle.save_copy(path.clone(), false)
+            } else {
+                handle.save_as(path.clone(), false)
+            };
+            app.project.pending.push(PendingProject::Save {
+                copy,
+                path: path.clone(),
+                receiver,
+            });
+            poll_until_idle(&mut app);
+            assert!(std::sync::Arc::ptr_eq(&jar, &app.cookie_jar));
+            assert_eq!(app.cookie_jar.lock().unwrap().entries().len(), 1);
+            std::fs::remove_file(path).unwrap();
+        }
+        app.project.ask_before_switch(ProjectSwitch::New);
+        let ctx = egui::Context::default();
+        assert!(click_window_text(&ctx, "Cancel", |ctx| app.project_windows(ctx)));
+        app.project.open_dialog(ProjectDialogKind::Open, None);
+        assert!(click_window_text(&ctx, "Cancel", |ctx| app.project_windows(ctx)));
+        assert!(std::sync::Arc::ptr_eq(&jar, &app.cookie_jar));
+        assert_eq!(app.cookie_jar.lock().unwrap().entries().len(), 1);
+    }
+
+    #[test]
     fn failed_opens_keep_the_same_running_listener_workspace_and_project() {
         let mut app = PerseidApp::test_app();
+        let jar = app.cookie_jar.clone();
+        jar.lock()
+            .unwrap()
+            .insert("http://localhost/", "sid=project-a")
+            .unwrap();
         app.scope.insert("keep.example".into());
         app.start_proxy(app.notify.clone());
         let address = app.proxy.as_ref().unwrap().local_addr();
@@ -2815,6 +2956,8 @@ pub(super) mod tests {
             assert!(std::net::TcpStream::connect(address).is_ok());
             assert!(app.scope.contains("keep.example"));
             assert!(app.project.notice().unwrap().1);
+            assert!(std::sync::Arc::ptr_eq(&jar, &app.cookie_jar));
+            assert_eq!(app.cookie_jar.lock().unwrap().entries().len(), 1);
             app.project.handle().unwrap().capture(&started_event(10));
             app.project.handle().unwrap().capture(&finished_event(10));
             wait_for(app.project.handle().unwrap().flush());

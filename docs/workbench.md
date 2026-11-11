@@ -637,10 +637,16 @@ jar can reuse cookies observed through the proxy; review copied cookies and toke
 
 ### Cookie jar
 
-Open **Settings** using the gear beside global Search. The shared cookie jar is
-empty initially and stays in application memory until Perseid exits, including
-when switching projects. It is not saved or exported with a project. Captured
-requests, responses and projects may independently contain cookie values.
+Open **Settings** using the gear beside global Search. Repeater, Intruder and
+the proxy share an in-memory jar within the active project. Successful **New**
+or **Open** installs an empty jar, resets its settings to defaults, and clears
+the cookie editor. Failed/cancelled switches preserve the current jar.
+**Save As** and **Save Copy** preserve the active session; neither saves or
+copies the jar. Old replay engines are stopped and old proxy observations are
+detached, so pending responses cannot update the new project's jar. The jar is
+not saved or exported and is lost on exit. Captured requests, responses and
+projects may independently contain cookie values; browser traffic after a
+switch can repopulate the jar, so isolate browser sessions as well.
 
 Proxy request cookies and response Set-Cookie headers update the jar by default,
 even when history capture is paused. Turn this off in Settings if needed. New
