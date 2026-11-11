@@ -55,10 +55,6 @@ fi
 
 cd "$ROOT"
 
-if ! command -v xvfb-run >/dev/null 2>&1; then
-    echo "screenshots: xvfb-run is required (install the 'xvfb' package)" >&2
-    exit 1
-fi
 if ! command -v python3 >/dev/null 2>&1; then
     echo "screenshots: python3 is required for the verification step" >&2
     exit 1
@@ -81,15 +77,14 @@ TMP="$(mktemp -d "$ROOT/.perseid-screenshots.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 status=0
-xvfb-run -a -s "-screen 0 3000x2000x24" \
-    env LIBGL_ALWAYS_SOFTWARE=1 WINIT_X11_SCALE_FACTOR=2 RUST_LOG=info \
-    timeout 180 "$BIN" \
+env RUST_LOG=info \
+    timeout 660 "$BIN" \
     --screenshot-dir "$TMP" \
     --ui-scale 2 || status=$?
 
 if [[ "$status" -ne 0 ]]; then
     if [[ "$status" -eq 124 ]]; then
-        echo "screenshots: the app timed out after 180s" >&2
+        echo "screenshots: the app timed out after 660s" >&2
     else
         echo "screenshots: the app exited with status $status" >&2
     fi

@@ -40,6 +40,8 @@ mod rules;
 mod scale;
 #[cfg(feature = "screenshots")]
 mod screenshots;
+#[cfg(feature = "screenshots")]
+pub(crate) use screenshots::render_screenshots;
 mod search;
 mod selection;
 mod sequencer;

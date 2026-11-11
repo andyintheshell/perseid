@@ -84,8 +84,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Ubuntu 26.04 hosted runners include Xvfb and the graphics runtime.
-      # Use the preinstalled stack rather than contacting apt mirrors.
+      # Offscreen wgpu rendering uses the runner's graphics backend directly;
+      # no X11 window, Xvfb, or apt installation is needed.
 
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 
@@ -101,7 +101,7 @@ jobs:
         run: cargo build -p perseid --features screenshots --locked
 
       - name: Generate screenshots
-        run: scripts/screenshots.sh --no-build --out artifacts/screenshots
+        run: env -u DISPLAY -u WAYLAND_DISPLAY scripts/screenshots.sh --no-build --out artifacts/screenshots
 
       - name: Verify screenshots exist
         run: python3 scripts/check_screenshots.py artifacts/screenshots

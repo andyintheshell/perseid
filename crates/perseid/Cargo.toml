@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 [features]
 # Development-only mode that renders the documentation screenshots headlessly.
-screenshots = []
+screenshots = ["dep:egui_kittest"]
 # Enables the main-thread AppKit integration test used by coverage CI.
 native-menu-test = []
 
@@ -51,6 +51,7 @@ digest = "0.11"
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
+egui_kittest = { version = "0.37", default-features = false, features = ["wgpu", "eframe"], optional = true }
 env_logger.workspace = true
 flate2.workspace = true
 form_urlencoded.workspace = true

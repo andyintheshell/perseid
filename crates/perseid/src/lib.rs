@@ -123,6 +123,12 @@ pub fn run() -> eframe::Result {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
 
+    #[cfg(feature = "screenshots")]
+    if args.screenshot_dir.is_some() {
+        app::render_screenshots(args);
+        return Ok(());
+    }
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Perseid")
         .with_inner_size([1280.0, 820.0])

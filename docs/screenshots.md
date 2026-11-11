@@ -227,7 +227,8 @@ records the source commit. The main scenes are captured at 2× (2560×1640);
 the memory panel is a smaller close-up. They illustrate the UI, not platform
 support or performance guarantees.
 
-To refresh them locally on Linux with the build dependencies and Xvfb installed:
+To refresh them locally with Rust and a wgpu-compatible graphics backend installed
+(for example Metal on macOS or Vulkan/Mesa on Linux):
 
 ```sh
 scripts/screenshots.sh
@@ -235,7 +236,9 @@ python3 scripts/check_screenshots.py docs/images
 ```
 
 The script builds the app with the `screenshots` feature, seeds synthetic scenes,
-and verifies the PNGs before replacing files in `docs/images`.
+and verifies the PNGs before replacing files in `docs/images`. It renders the real
+egui application offscreen through `egui_kittest`/wgpu, without X11, Xvfb, or a
+proxy listener. The graphics backend is still a system runtime dependency.
 
 Alternatively, run **Actions > Screenshots > Run workflow** for the desired
 branch. Download the `perseid-screenshots` artifact, review the images, and copy

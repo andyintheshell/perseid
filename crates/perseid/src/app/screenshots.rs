@@ -2,9 +2,8 @@
 //!
 //! This module is compiled only with the `screenshots` feature and is driven
 //! by `scripts/screenshots.sh`. It seeds a representative HTTP history, walks
-//! every documented tab, asks egui for a framebuffer capture, saves the PNGs,
-//! and exits. No window manager, mouse coordinates, or screenshot utility is
-//! involved.
+//! every documented tab, and saves offscreen wgpu framebuffer captures. No
+//! desktop window, display server, or screenshot utility is involved.
 //!
 //! The history is intentionally synthetic: screenshots should be reproducible
 //! in CI and must not depend on a demo server or network access. The memory
@@ -42,7 +41,8 @@ const MEMORY_FILE: &str = "perseid-memory.png";
 const MAIN_WIDTH: u32 = 2560;
 const MEMORY_WIDTH: u32 = 970;
 const CROP_MARGIN_POINTS: f32 = 0.0;
-const TIMEOUT: Duration = Duration::from_secs(150);
+// Allow software graphics backends and unoptimized PNG encoding in CI.
+const TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Every UI tab captured for the documentation and pull-request preview.
 /// `perseid-main.png` is the Proxy > HTTP history scene used by the README.
@@ -85,6 +85,27 @@ const PRODUCTS_HTML: &[u8] = b"<!DOCTYPE html><html><head><title>Products</title
 
 type ShotResult = Arc<Mutex<Option<Result<(), String>>>>;
 
+/// Drive the same application and scene state machine without creating a window.
+pub(crate) fn render_screenshots(mut args: crate::Args) {
+    // Synthetic scenes must not bind a listener or touch real traffic.
+    args.no_proxy = true;
+    args.ui_scale = Some(2.0);
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(DESIGN_WIDTH, DESIGN_HEIGHT))
+        .with_pixels_per_point(2.0)
+        .with_accessibility_check(false)
+        .wgpu()
+        .build_eframe(|cc| PerseidApp::new(cc, args));
+    while !harness
+        .state()
+        .screenshots
+        .as_ref()
+        .is_some_and(|driver| matches!(driver.phase, Phase::Done))
+    {
+        harness.step();
+    }
+}
+
 pub(super) struct ScreenshotDriver {
     out_dir: PathBuf,
     phase: Phase,
@@ -94,12 +115,18 @@ pub(super) struct ScreenshotDriver {
 }
 
 enum Phase {
+    Done,
     /// Wait for the zoom-driven window resize to settle, then capture.
     Warmup(u32),
     /// A scene has been prepared; let its scroll areas and tables lay out.
-    SceneSettle { index: usize, frames_left: u32 },
+    SceneSettle {
+        index: usize,
+        frames_left: u32,
+    },
     /// Capture requested for a scene; waiting for the paint callback.
-    SceneCapture { index: usize },
+    SceneCapture {
+        index: usize,
+    },
     /// Memory window opened; let it lay out before capturing.
     MemoryWait(u32),
     /// Capture requested; waiting for the paint callback.
@@ -135,6 +162,7 @@ impl ScreenshotDriver {
         };
 
         match self.phase {
+            Phase::Done => {}
             Phase::Warmup(frames_left) => {
                 if !settled {
                     // The window starts at the native scale and is resized for
@@ -216,7 +244,7 @@ impl ScreenshotDriver {
                         self.fail(&err);
                     }
                     log::info!("screenshots written to {}", self.out_dir.display());
-                    std::process::exit(0);
+                    self.phase = Phase::Done;
                 }
                 ctx.request_repaint();
             }
@@ -1097,6 +1125,34 @@ fn write_png(path: &Path, image: &image::RgbaImage) -> Result<(), String> {
 #[cfg(test)]
 mod scene_tests {
     use super::*;
+
+    #[test]
+    fn screenshot_scenes_prepare_without_a_proxy_or_native_window() {
+        let mut app = PerseidApp::test_app();
+        app.history = History::new(128, crate::history::default_history_bytes());
+        app.prepare_screenshot_base().unwrap();
+        for (index, file) in SCENE_FILES.iter().enumerate() {
+            app.prepare_screenshot_scene(index).unwrap();
+            assert!(app.proxy.is_none(), "scene {} started a proxy", file);
+        }
+    }
+
+    #[test]
+    fn screenshot_completion_returns_control_to_the_headless_runner() {
+        let mut app = PerseidApp::test_app();
+        let ctx = egui::Context::default();
+        let mut driver = ScreenshotDriver {
+            out_dir: PathBuf::new(),
+            phase: Phase::Memory,
+            memory_rect: None,
+            result: Arc::new(Mutex::new(Some(Ok(())))),
+            started: Instant::now(),
+        };
+        driver.drive(&mut app, &ctx);
+        assert!(matches!(driver.phase, Phase::Done));
+        driver.drive(&mut app, &ctx);
+        assert!(matches!(driver.phase, Phase::Done));
+    }
 
     #[test]
     fn websocket_repeater_scene_uses_seeded_history() {
