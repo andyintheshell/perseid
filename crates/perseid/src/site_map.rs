@@ -102,7 +102,9 @@ pub struct SiteMap {
     pub hosts: Vec<SiteHost>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum SiteNodeId {
     Host {
         host: String,

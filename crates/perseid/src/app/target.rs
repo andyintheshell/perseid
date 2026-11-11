@@ -491,6 +491,9 @@ impl PerseidApp {
 
         let needle = self.site_map_ui.search.trim().to_lowercase();
         let filter = self.site_map_ui.filter;
+        let mut selected_row = self.site_map_ui.stored.selected_row;
+        let mut pending_row = self.site_map_ui.stored.pending_row;
+        let mut wanted_row = None;
         let mut rows: Vec<SiteRowRef<'_>> = Vec::new();
         for host in &map.hosts {
             for entry in &host.entries {
@@ -509,7 +512,22 @@ impl PerseidApp {
             }
         }
 
-        if rows.is_empty() {
+        let stored_active = self.site_map_ui.stored.active();
+        let offset = if stored_active {
+            self.site_map_ui.stored.offset()
+        } else {
+            0
+        };
+        let total = if stored_active {
+            self.site_map_ui.stored.total()
+        } else {
+            rows.len()
+        };
+        if stored_active && rows.is_empty() && self.site_map_ui.stored.loading_view() {
+            ui.spinner();
+            return None;
+        }
+        if rows.is_empty() && (!stored_active || total == 0) {
             let (title, body) = if !needle.is_empty() {
                 (
                     "No contents match the search",
@@ -535,10 +553,21 @@ impl PerseidApp {
         );
         self.site_map_ui.visible_ids = rows.iter().map(|row| row.entry.id).collect();
 
+        if stored_active
+            && let Some(ordinal) = pending_row
+            && let Some(row) = ordinal.checked_sub(offset).and_then(|i| rows.get(i))
+        {
+            self.selected = Some(row.entry.id);
+            self.detail = None;
+            selected_row = Some(ordinal);
+            pending_row = None;
+            self.site_map_ui.scroll_to_selected = true;
+        }
+
         let selected_in_rows = self
             .selected
             .is_some_and(|id| rows.iter().any(|row| row.entry.id == id));
-        if !selected_in_rows {
+        if !selected_in_rows && !stored_active {
             let next = if node_changed {
                 rows.iter()
                     .max_by_key(|row| (row.entry.timestamp, row.entry.id))
@@ -582,7 +611,7 @@ impl PerseidApp {
                     .selected
                     .and_then(|id| rows.iter().position(|row| row.entry.id == id))
                 {
-                    table = table.scroll_to_row(row, Some(Align::Center));
+                    table = table.scroll_to_row(row + offset, Some(Align::Center));
                 }
                 self.site_map_ui.scroll_to_selected = false;
             }
@@ -616,9 +645,15 @@ impl PerseidApp {
                     }
                 })
                 .body(|body| {
-                    body.rows(20.0, rows.len(), |mut row| {
+                    let mut first_visible = None;
+                    body.rows(20.0, total, |mut row| {
                         let index = row.index();
-                        let site_row = &rows[index];
+                        first_visible.get_or_insert(index);
+                        let Some(site_row) = index.checked_sub(offset).and_then(|i| rows.get(i)) else {
+                            row.col(|ui| { ui.weak("Loading…"); });
+                            for _ in 1..10 { row.col(|_| {}); }
+                            return;
+                        };
                         let entry = site_row.entry;
                         row.set_selected(self.selected == Some(entry.id));
 
@@ -748,6 +783,7 @@ impl PerseidApp {
                         let response = row.response().on_hover_text(hover);
                         if response.clicked() || response.secondary_clicked() {
                             clicked = Some(entry.id);
+                            if stored_active { selected_row = Some(index); }
                         }
                         response.context_menu(|ui| {
                             let can_send = site_row.item.is_some();
@@ -808,6 +844,10 @@ impl PerseidApp {
                             }
                         });
                     });
+                    if stored_active && let Some(first) = first_visible
+                        && pending_row.is_none() {
+                            wanted_row = Some(first);
+                    }
                 });
         });
 
@@ -850,6 +890,14 @@ impl PerseidApp {
             None => {}
         }
 
+        drop(rows);
+        if stored_active {
+            self.site_map_ui.stored.selected_row = selected_row;
+            self.site_map_ui.stored.pending_row = pending_row;
+            if let Some(row) = wanted_row {
+                self.site_map_ui.stored.want(row);
+            }
+        }
         action
     }
 
@@ -869,6 +917,17 @@ impl PerseidApp {
 
     /// Move the Contents selection by `delta`, clamped to the visible rows.
     pub(super) fn move_site_map_selection(&mut self, delta: isize) {
+        if self.site_map_ui.stored.active() {
+            let stored = &mut self.site_map_ui.stored;
+            if let Some(row) = super::selection::moved_row_index(
+                stored.total(),
+                stored.pending_row.or(stored.selected_row),
+                delta,
+            ) {
+                stored.navigate(row);
+            }
+            return;
+        }
         let len = self.site_map_ui.visible_ids.len();
         let current = self.selected.and_then(|id| {
             self.site_map_ui
@@ -884,6 +943,15 @@ impl PerseidApp {
 
     /// Select the first or last Contents row for Home/End.
     pub(super) fn select_site_map_edge(&mut self, first: bool) {
+        if self.site_map_ui.stored.active() {
+            let row = if first {
+                0
+            } else {
+                self.site_map_ui.stored.total().saturating_sub(1)
+            };
+            self.site_map_ui.stored.navigate(row);
+            return;
+        }
         if self.site_map_ui.visible_ids.is_empty() {
             return;
         }
