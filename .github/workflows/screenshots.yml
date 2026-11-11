@@ -79,13 +79,13 @@ jobs:
     name: Generate and verify
     needs: changes
     if: needs.changes.outputs.screenshots == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Offscreen wgpu rendering uses the runner's graphics backend directly;
-      # no X11 window, Xvfb, or apt installation is needed.
+      # Use Metal on Apple Silicon rather than requiring a Linux Vulkan driver.
+      # Offscreen rendering needs no X11 window, Xvfb, or package installation.
 
       - uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
 

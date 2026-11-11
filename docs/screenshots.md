@@ -241,7 +241,8 @@ egui application offscreen through `egui_kittest`/wgpu, without X11, Xvfb, or a
 proxy listener. The graphics backend is still a system runtime dependency.
 
 Alternatively, run **Actions > Screenshots > Run workflow** for the desired
-branch. Download the `perseid-screenshots` artifact, review the images, and copy
+branch. CI renders on `macos-26` (Apple Silicon) using Metal, without installing
+graphics packages. Download the `perseid-screenshots` artifact, review the images, and copy
 the PNGs into `docs/images`. Update the source run and capture date above,
 check the captions, and commit the refreshed files together.
 

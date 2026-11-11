@@ -78,9 +78,18 @@ trap 'rm -rf "$TMP"' EXIT
 
 status=0
 env RUST_LOG=info \
-    timeout 660 "$BIN" \
+    python3 - "$BIN" \
     --screenshot-dir "$TMP" \
-    --ui-scale 2 || status=$?
+    --ui-scale 2 <<'PY' || status=$?
+import subprocess
+import sys
+
+try:
+    result = subprocess.run(sys.argv[1:], timeout=660, check=False)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+sys.exit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
+PY
 
 if [[ "$status" -ne 0 ]]; then
     if [[ "$status" -eq 124 ]]; then
