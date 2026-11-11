@@ -6,7 +6,7 @@
 
 ## High-level comparison
 
-✅ Available workflow · 🟡 Partial / limited · 🛠 Planned, not shipped · ❌ Not included · ↔ Deliberate difference · 🧩 Add-on / plugin · ? Not verified
+✅ Available workflow · 🟡 Partial / limited · 🛠 Planned, not shipped · ❌ Not included · ↔ Perseid deliberate difference · 🧩 Add-on / plugin · ? Not verified
 
 | Feature | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
 | --- | --- | --- | --- | --- | --- |
@@ -18,19 +18,19 @@
 | [HTTP history](#http-history) | 🟡 | ✅ | ✅ | ✅ | ✅ |
 | Search | ✅ | 🟡 Local search | ✅ | ✅ | ✅ HTTPQL |
 | [WebSocket history](#websocket-history) | 🟡 | ✅ | ✅ | 🧩 | ✅ |
-| [WebSocket editing and replay](#websocket-editing-and-replay) | ✅ Live connection | ✅ | ✅ | 🧩 | ? Replay |
+| [WebSocket editing and replay](#websocket-editing-and-replay) | ✅ Live connection | ✅ | ✅ | 🧩 | ✅ Replay |
 | [Repeater / manual replay](#repeater) | 🟡 | ✅ | ✅ | 🧩 Requester | ✅ Replay |
 | Decoder / transforms | ✅ | ✅ | ✅ | 🧩 | ✅ Convert workflows |
-| Comparer / diff | ✅ | ✅ | ✅ | 🧩 | ? |
+| Comparer / diff | ✅ | ✅ | ✅ | 🧩 | 🧩 Compare |
 | [Intruder / fuzzing](#intruder) | ✅ No processing | 🟡 Throttled | ✅ | 🧩 | ✅ Automate |
-| [Sequencer / token analysis](#sequencer) | 🟡 | ✅ | ✅ | 🧩 | ? |
-| Memory display | ✅ Heap only | ✅ | ✅ | ✅ | ? |
+| [Sequencer / token analysis](#sequencer) | 🟡 | ✅ | ✅ | 🧩 | 🧩 Sequencer |
+| Memory display | ✅ Heap only | ✅ | ✅ | ✅ | ? UI undocumented |
 | [Project persistence](#project-persistence) | 🟡 | ❌ Project files | ✅ | ✅ Sessions | ✅ Plan limits |
 | [Collaborator / OAST](#collaborator--oast) | 🛠 P0 | ❌ | ✅ | 🧩 | 🧩 |
 | [Crawling and discovery](#crawling-and-discovery) | 🛠 | ❌ Automated crawler | ✅ | ✅ | 🧩 |
 | [Scanning and findings](#scanning-and-findings) | 🛠 | ❌ Scanner | ✅ | ✅ | 🧩 Scanner; ✅ Findings |
 | [Session / auth automation](#session--auth-automation) | 🟡 | ✅ Rules / macros | ✅ | ✅ | 🧩 / workflows |
-| [Evidence export and reports](#evidence-export-and-reports) | 🟡 | 🟡 No scan reports | ✅ | 🧩 | 🧩 / exports |
+| [Evidence export and reports](#evidence-export-and-reports) | 🟡 | 🟡 No scan reports | ✅ | 🧩 | 🟡 JSON / CSV; external reports |
 | [Browser integration](#browser-integration) | ↔ External browser | ✅ Bundled | ✅ Bundled | ✅ Launch external | ✅ Browser setup |
 | [Extensions](#extensions) | ↔ No BApps | ✅ BApps¹ | ✅ BApps | ✅ ZAP add-ons | ✅ Caido plugins |
 
@@ -42,7 +42,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Browse captured endpoints | ✅ Retained history | ✅ | ✅ | ✅ Sites tree | ✅ Sitemap |
 | Filter / inspect endpoints | ✅ Scope, search, sorting | ✅ | ✅ | ✅ | ✅ |
-| Large-tree navigation | 🟡 500-row pages; no expand-all | ✅ | ✅ | ✅ | ? |
+| Tree navigation / expansion | 🟡 500-row pages; no expand-all | ✅ Branch navigation | ✅ Branch navigation | ✅ Sites tree | ✅ Shift-click expands subtree [C1] |
 | Discover uncaptured URLs | ❌ No inference or parameter discovery | 🟡 Manual mapping | ✅ Crawl / discovery | ✅ Spiders / add-ons | 🧩 |
 
 ## HTTP history
@@ -51,8 +51,8 @@
 | --- | --- | --- | --- | --- | --- |
 | Browse / filter captures | ✅ All retained rows; lazy details | ✅ | ✅ | ✅ | ✅ HTTPQL |
 | Search captured bodies | ✅ Background search | 🟡 Local search | ✅ Project search | ✅ Search | ✅ HTTPQL |
-| Delete a capture | 🟡 Finished exchanges only | ✅ | ✅ | ✅ | ? |
-| Full Burp filtering / table options | 🟡 Not full equivalence | ✅ Baseline | ✅ | ↔ Different UI | ↔ Different UI |
+| Delete a capture | 🟡 Finished exchanges only | ✅ | ✅ | ✅ | ❌ No supported UI / CLI [C2] |
+| Full Burp filtering / table options | 🟡 Not full equivalence | ✅ Baseline | ✅ | Different UI | Different UI |
 
 ## WebSocket history
 
@@ -60,26 +60,26 @@
 | --- | --- | --- | --- | --- | --- |
 | Capture text / binary traffic | ✅ `ws://` and decrypted `wss://` | ✅ | ✅ | 🧩 WebSockets | ✅ |
 | Browse retained messages | ✅ Virtual table; lazy payloads | ✅ | ✅ | 🧩 | ✅ |
-| Full Burp history options | 🟡 Not full equivalence | ✅ Baseline | ✅ | ↔ Add-on UI | ↔ Different UI |
+| Full Burp history options | 🟡 Not full equivalence | ✅ Baseline | ✅ | Add-on UI | Different UI |
 
 ## WebSocket editing and replay
 
 | Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
 | --- | --- | --- | --- | --- | --- |
 | Intercept / edit messages | ✅ Both directions; text / binary | ✅ | ✅ | 🧩 | ✅ Interception |
-| Replay on live connection | ✅ Repeated sends | ✅ | ✅ | 🧩 | ? |
-| Reopen closed connection | ❌ | ✅ | ✅ | ? | ? |
-| WebSocket fuzzing | ❌ | ? | ? | 🧩 | ? |
+| Send messages on live connection | ✅ Repeated sends | ✅ | ✅ | 🧩 | ✅ Replay session [C3] |
+| Reconnect / new handshake | ❌ | ✅ | ✅ | 🧩 Reopen [Z1] | ✅ New session / URL [C3] |
+| WebSocket fuzzing | ❌ | 🧩 WS Turbo Intruder [B1] | 🧩 WS Turbo Intruder [B1] | 🧩 | ? Automated fuzzing undocumented |
 
 ## Repeater
 
 | Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
 | --- | --- | --- | --- | --- | --- |
 | Edit / resend HTTP(S) | ✅ | ✅ Repeater | ✅ Repeater | 🧩 Requester | ✅ Replay |
-| Send / protocol / history options | 🟡 Not full Burp equivalence | ✅ Baseline | ✅ | ↔ Different options | ↔ Different options |
+| Send / protocol / history options | 🟡 Not full Burp equivalence | ✅ Baseline | ✅ | Different options | Different options |
 | Persist HTTP tabs | ✅ Saved project | ❌ Project files | ✅ | 🧩 Session-dependent | ✅ Projects |
-| WebSocket tabs | 🟡 Session-only; live connection | ✅ | ✅ | 🧩 Separate UI | ? Replay |
-| Proxy rules on direct sends | ↔ Bypasses scope, intercept, rewrites | ↔ Tool-specific | ↔ Tool-specific | ↔ Tool-specific | ↔ Tool-specific |
+| WebSocket tabs | 🟡 Session-only; live connection | ✅ | ✅ | 🧩 Separate UI | ✅ Replay; free tier: 1 session [C3] |
+| Proxy rules on direct sends | ↔ Bypasses scope, intercept, rewrites | Tool-specific | Tool-specific | Tool-specific | Tool-specific |
 
 ## Intruder
 
@@ -94,10 +94,10 @@
 
 | Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
 | --- | --- | --- | --- | --- | --- |
-| Load / collect tokens | ✅ Manual / HTTP-history regex | ✅ | ✅ | 🧩 Token Generation and Analysis | ? |
-| Parameter-aware capture | ❌ Expression-based only | ✅ | ✅ | ? | ? |
-| Randomness analysis | 🟡 Bounded statistical approximations | ✅ Sequencer tests | ✅ Sequencer tests | 🧩 Different analysis | ? |
-| Entropy visualization | ✅ Effective-entropy chart | ✅ | ✅ | 🧩 | ? |
+| Load / collect tokens | ✅ Manual / HTTP-history regex | ✅ | ✅ | 🧩 Token Generation and Analysis [Z2] | 🧩 Replay / manual / live [C4] |
+| Structured token selection | ❌ Expression-based only | ✅ | ✅ | 🧩 Token selector [Z2] | 🧩 Cookie / header / JSONPath [C4] |
+| Randomness analysis | 🟡 Bounded statistical approximations | ✅ Sequencer tests | ✅ Sequencer tests | 🧩 Different analysis | 🧩 10 tests [C4] |
+| Entropy output | ✅ Effective-entropy chart | ✅ | ✅ | 🧩 Analysis dialog | 🧩 Shannon entropy results [C4] |
 
 ## Project persistence
 
@@ -144,8 +144,8 @@
 | Workflow | Perseid | Burp Community | Burp Pro | OWASP ZAP | Caido |
 | --- | --- | --- | --- | --- | --- |
 | Copy request as cURL | ✅ Complete captures | ✅ | ✅ | ✅ | ✅ |
-| HAR export | ❌ | ? | ? | 🧩 Import/Export | ✅ Export |
-| Findings reports | 🛠 No report export | ❌ Scan reports | ✅ | 🧩 Report Generation | ↔ External reporting tools |
+| HAR export | ❌ | 🧩 Logger++ [B2] | 🧩 Logger++ [B2] | 🧩 Import/Export [Z3] | ❌ Documented formats: JSON / CSV [C5] |
+| Findings reports | 🛠 No report export | ❌ Scan reports | ✅ | 🧩 Report Generation | External reporting tools |
 
 ## Browser integration
 
@@ -176,6 +176,22 @@
 | Next audit | Versioned [workflow audit #68](https://github.com/andyintheshell/perseid/issues/68); recalculate when scoped statuses change |
 
 ## Sources and operating limits
+
+Verification: public documentation and plugin READMEs, **not hands-on testing**. Remaining `?` cells are unresolved after checking Caido's tool, Replay, Automate, UI, and logging docs; they do not mean unsupported. Caido's new-session workflow does not establish reuse of a captured proxy connection. Token-analysis results do not imply identical statistics or charts.
+
+| Evidence | Confirmed comparison |
+| --- | --- |
+| [C1: Caido sitemap navigation](https://docs.caido.io/app/guides/sitemap_viewing) | Shift-click fully expands a sitemap element; no large-project performance claim |
+| [C2: Caido data deletion](https://docs.caido.io/app/guides/data_deleting) | No supported capture-deletion UI / CLI; manual SQLite edits are explicitly discouraged |
+| [C3: Caido WebSocket Replay](https://docs.caido.io/app/guides/replay_websocket) · [0.57 release](https://caido.io/blog/2026-06-05-release-v0-57-0/) | New WS session, URL, handshake, message sends; release notes limit free tier to one WS session |
+| [C4: Caido tool mapping](https://docs.caido.io/burp-suite/core/tools) · [Compare README](https://github.com/caido-community/Compare#readme) · [Sequencer README](https://github.com/caido-community/sequencer#readme) | Plugin availability, collection / extraction methods, statistical tests and entropy results |
+| [C5: Caido export formats](https://docs.caido.io/app/guides/exports_requests) | JSON / CSV; exporting current rows requires Individual / Team; generic JSON is not HAR |
+| [B1: WebSocket Turbo Intruder](https://portswigger.net/bappstore/ba292c5982ea426c95c9d7325d9a1066) | WebSocket fuzzing extension listed for Professional and Community |
+| [B2: Logger++ listing](https://portswigger.net/bappstore/470b7057b86f41c396a97903377f3d81) · [Maintainer HAR fix](https://github.com/nccgroup/LoggerPlusPlus/issues/138) | Both editions supported; HAR export evidenced by maintainer-confirmed fix, not native Burp export |
+| [Z1: ZAP WebSocket history](https://www.zaproxy.org/docs/desktop/addons/websockets/about/) | Add-on v18 added reopening connections to resend messages |
+| [Z2: ZAP token generation](https://www.zaproxy.org/docs/desktop/addons/token-generator/) | Select a token, generate samples, inspect the analysis dialog |
+| [Z3: ZAP Import/Export](https://www.zaproxy.org/docs/desktop/addons/import-export/) | Save selected messages as HAR; HAR export API |
+| [Unresolved: Caido UI](https://docs.caido.io/app/guides/ui) · [Logs](https://docs.caido.io/app/guides/logs_viewing) · [Automate](https://docs.caido.io/app/quickstart/automate) | No confirmation of application memory display or automated WebSocket fuzzing |
 
 | Reference | Purpose |
 | --- | --- |
