@@ -91,6 +91,7 @@ pub(crate) fn render_screenshots(mut args: crate::Args) {
     args.no_proxy = true;
     args.ui_scale = Some(2.0);
     let mut harness = egui_kittest::Harness::builder()
+        .with_theme(egui::Theme::Light)
         .with_size(egui::vec2(DESIGN_WIDTH, DESIGN_HEIGHT))
         .with_pixels_per_point(2.0)
         .with_accessibility_check(false)
@@ -1125,6 +1126,20 @@ fn write_png(path: &Path, image: &image::RgbaImage) -> Result<(), String> {
 #[cfg(test)]
 mod scene_tests {
     use super::*;
+
+    #[test]
+    fn screenshot_harness_preserves_the_light_palette() {
+        let harness = egui_kittest::Harness::builder()
+            .with_theme(egui::Theme::Light)
+            .with_accessibility_check(false)
+            .with_context_setup(crate::theme::apply)
+            .build_ui(|_| {});
+        assert_eq!(harness.ctx.theme(), egui::Theme::Light);
+        let style = harness.ctx.style_of(harness.ctx.theme());
+        assert!(!style.visuals.dark_mode);
+        assert_eq!(style.visuals.selection.bg_fill, crate::theme::SELECTED);
+        assert_eq!(style.visuals.text_edit_bg_color, Some(egui::Color32::WHITE));
+    }
 
     #[test]
     fn screenshot_scenes_prepare_without_a_proxy_or_native_window() {
