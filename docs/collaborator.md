@@ -96,10 +96,6 @@ Tracked in the [P0 implementation issue #191](https://github.com/andyintheshell/
 - Stop workers and reject stale results on project switch, disable, or quit.
   Never mix payloads, credentials, or events across projects. Do not automatically
   browse callback URLs, execute returned content, or render captured HTML.
-- Project files are currently unencrypted. Do not casually serialize server
-  tokens or private keys into them; redact credentials and polling query strings
-  from diagnostics. Clearing evidence and ending a server session are separate
-  operations, neither a secure-erasure guarantee.
 
 ## Validation before shipping
 

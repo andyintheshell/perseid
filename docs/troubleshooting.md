@@ -99,8 +99,7 @@ exchanges are also separate from Proxy history by design.
 - **A file need not shrink after deletion.** Freed redb pages are reusable;
   retention is not a physical file-size cap. Save Copy writes retained data to a
   fresh file and may be smaller. To delete a whole project, switch away or quit
-  and delete its `.perseid` file and backups through the filesystem. These
-  operations are not secure erasure; project files are not encrypted.
+  and delete its `.perseid` file and backups through the filesystem.
 - **Check the project status widget** for the last persistence error or capture
   loss. If a saved write failed, do not assume the newest changes reached disk;
   address the reported path/permission/disk-space issue before closing.

@@ -68,11 +68,6 @@ running attacks or sends, held interception messages, pending operations, and
 proxy lifecycle state stay in the current session. The local TLS CA certificate
 and private key stay outside the project file.
 
-Project files are not encrypted. Treat a `.perseid` file as sensitive traffic:
-it can contain cookies, tokens, credentials, personal data, and binary bodies.
-See [Safety and privacy](safety.md#data-handling) before saving or
-sharing one.
-
 ### Browse older history
 
 The HTTP and WebSocket history tables cover every retained capture in the
@@ -105,7 +100,7 @@ These are **logical retention limits, not physical file-size limits**. redb can
 reuse freed pages; removing records need not shrink the `.perseid` file. There
 is no automatic compaction command. **Save Project Copy…** writes retained data
 to a fresh file, which may be smaller; it also includes all saved workbench
-state. Neither operation securely erases old disk bytes.
+state.
 
 ### Migrations and deletion
 
@@ -121,8 +116,7 @@ HTTP Clear also removes Inspector notes. Independently retained tool snapshots
 are not cleared by history retention or Clear history. To discard temporary
 work, leave it unsaved. To delete a whole saved project, switch to **New Project**
 or quit Perseid, then delete its `.perseid` file using your file manager. Remove
-any copies/backups separately. This does not delete the local CA or securely
-erase disk contents. There is no separate whole-project deletion button.
+any copies/backups separately. There is no separate whole-project deletion button.
 
 ## Target and scope
 
@@ -904,7 +898,7 @@ separate Space, matching the system green-button behavior.
 | Comparer work | 200 items of up to 8 MiB each; word diffs accept 2 MiB and 250,000 words per item; byte diffs accept 512 KiB per item. Both diff modes use a 500 ms deadline. |
 | Temporary project | History and workspace state exist only in memory and are lost on exit unless saved as a project. |
 | Temporary storage growth | Unbounded by default; save to disk before exhausting RAM. No automatic memory-pressure pause. Optional retention limits exclude headers, indexes, workbench data, and database overhead. |
-| Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Files are unencrypted; saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
+| Persistent project | One user-selected `.perseid` redb file; captures and workbench state auto-save. Saved retention defaults to unlimited but supports opt-in logical count/body limits. These do not cap physical file size. |
 | Project history view | Both HTTP and WebSocket tables cover all retained records, filtering before loading bounded metadata windows. Selected bodies load lazily. Search covers stored bodies; the site map pages all retained HTTP endpoints. |
 | Persisted workspace | Scope, match/replace, selected tab/section, filters, message views, Inspector notes and sections, Repeater tabs/responses, Intruder configuration/results, Decoder panels, Comparer items/result view, Search state, Sequencer samples/settings/analysis, and TLS interception/pass-through hosts. Active attacks/sends, held interception, pending operations, proxy lifecycle, and CA certificate/key are not stored. |
 | Project transitions | New/Open ask Save/Discard/Cancel first when the temporary project has unsaved records or workbench edits; Save opens Save As and continues only after a successful save. Save As/Copy ask before replacing an existing file and stage the replacement before publishing it. |

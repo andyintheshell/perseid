@@ -246,8 +246,8 @@ Optional aggregate retention limits delete the oldest eligible records. New and 
 Save/Discard/Cancel before replacing a temporary project with unsaved work; a
 failed open keeps the current project and running proxy. Saved retention defaults
 to unlimited; **Settings > Automatic deletion…** enables combined record/body limits. These
-are logical limits, not a physical file-size cap or secure erasure. Projects
-are not encrypted. Schema-v1 projects migrate atomically to v2 on open; older
+are logical limits, not a physical file-size cap.
+Schema-v1 projects migrate atomically to v2 on open; older
 applications cannot reopen upgraded files. To remove a saved project, switch
 away or quit, then delete its `.perseid` file and any copies using your file manager.
 WebSocket messages can be intercepted, edited, and replayed on live connections;

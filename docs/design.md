@@ -237,8 +237,8 @@ Current technology choices:
 - **base64**, **flate2**, **html-escape**, **num-bigint**, and the RustCrypto
   digest crates for Decoder. The transforms are implemented in-process and
   bounded; Decoder does not embed a scripting engine.
-- **redb** for single-file persistent projects with a versioned schema. Files are
-  not encrypted; schema v1 upgrades atomically to v2 on open.
+- **redb** for single-file persistent projects with a versioned schema.
+  Schema v1 upgrades atomically to v2 on open.
 
 ## Performance philosophy
 
@@ -261,7 +261,7 @@ Important implementation principles:
   record of each stream and in-flight HTTP are always kept. Saved retention
   defaults to unlimited and can be configured under **Settings > Automatic deletion…**.
   Clear history and retention remove logical records; filesystem deletion after
-  closing/switching removes a project file. None provides secure erasure.
+  closing/switching removes a project file.
 - Concurrent proxy connection/tunnel limits and a bounded capture-event channel
   with drop counters. Loss recovery applies queued events before resolving
   in-flight rows; late or duplicate completions do not decrement unrelated

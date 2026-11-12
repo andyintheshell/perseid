@@ -128,15 +128,9 @@ See the [workbench guide](docs/workbench.md) for tool walkthroughs and the
 - **Save temporary projects.** They live in RAM and are lost on exit unless
   saved. Retention is unlimited by default, with no automatic memory-pressure
   pause. [Persistence and retention details →](docs/workbench.md#projects-and-persistence)
-- **Project files are not encrypted.** They may contain credentials and other
-  sensitive traffic. [Deletion is not secure erasure](docs/safety.md#data-handling).
-  Back up older projects before [schema upgrades](docs/workbench.md#migrations-and-deletion).
 - **Editing has limits.** Large, streaming, or binary HTTP bodies may be
   header-editable only; previews can be truncated. WebSocket replay needs a
   live connection. [Tool limits →](docs/workbench.md#limits-and-persistence)
-- **No blanket performance or security guarantees.** Sequencer results are
-  indicative, not proof of token safety. Resource controls are configurable;
-  see the [measured performance baseline](docs/performance.md).
 
 Found a missing workflow or a bug? [Open an issue](https://github.com/andyintheshell/perseid/issues)
 with your OS, reproduction steps, and what you expected.

@@ -41,8 +41,8 @@ The `perseid` package provides both the desktop application and the
 - WebSocket history, message interception, and live-connection replay for `ws://` and decrypted `wss://` traffic.
 - Bounded per-message capture and UI caches, plus a live memory indicator.
 
-WebSocket replay cannot reopen closed connections; automated scanning is not implemented. Project
-persistence has no encryption. Unified HTTP/WebSocket history tables cover all
+WebSocket replay cannot reopen closed connections; automated scanning is not implemented.
+Unified HTTP/WebSocket history tables cover all
 retained captures with bounded metadata windows and lazy details/notes.
 Schema-v1 projects migrate atomically to v2 on open; back up
 before upgrading if older application compatibility is needed. See the
@@ -56,8 +56,7 @@ in-flight HTTP exchanges are kept until they complete, and headers, indexes,
 and database overhead are outside the byte budget. Saved projects default to
 unlimited retention, with opt-in logical limits under **Settings > Automatic deletion…**;
 these do not cap physical file size. To delete a whole project, switch away or
-quit and delete the `.perseid` file and any copies via the filesystem. Neither
-retention nor deletion securely erases disk data. Burp Suite and Burp
+quit and delete the `.perseid` file and any copies via the filesystem. Burp Suite and Burp
 Suite Community Edition are
 trademarks of PortSwigger Ltd. Perseid is independently developed, contains no
 PortSwigger software or logos, and is not affiliated with, sponsored by, or
