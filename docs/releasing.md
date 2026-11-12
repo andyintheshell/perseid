@@ -98,11 +98,11 @@ and may be smaller.
 
 Release notes for the schema-v2 change must mention the atomic v1 upgrade and
 that `0.2.x` cannot open upgraded files: preserve a closed-file backup before
-opening if backward compatibility is needed. Files are not encrypted. Clear
+opening if backward compatibility is needed. Clear
 history removes captures, not independent tool snapshots or the project file.
 Delete a whole project through the filesystem after switching away or quitting,
-and remove copies/backups separately. None of these operations securely erases
-disk bytes. See [Safety and privacy](safety.md) and [Workbench](workbench.md).
+and remove copies/backups separately. See [Safety and privacy](safety.md) and
+[Workbench](workbench.md).
 
 ## Local packaging helpers
 

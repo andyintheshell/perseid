@@ -107,7 +107,6 @@
 | Tool-state coverage | 🟡 HTTP tabs / tool state; WS tabs excluded | — | ✅ | 🟡 Add-on-dependent | ✅ Project context |
 | Retention | 🟡 Opt-in count / body limits; no disk-size cap | Session-only | ✅ Disk projects | ✅ Disk sessions | 🟡 Basic: 2 projects |
 | Delete project | 🟡 Close, then delete file externally | — | ✅ File management | ✅ Session management | ✅ Project management |
-| Sensitive data | ⚠️ Unencrypted; no CA material or transient activity | ⚠️ Captures may contain secrets | ⚠️ Captures may contain secrets | ⚠️ Captures may contain secrets | ⚠️ Captures may contain secrets |
 
 ## Collaborator / OAST
 
@@ -201,5 +200,5 @@ Verification: public documentation and plugin READMEs, **not hands-on testing**.
 | [Caido plugins](https://caido.io/plugins/) · [Reporting](https://docs.caido.io/burp-suite/core/reporting) | Plugin availability; no native formatted report generation |
 | Comparison checked | 2026-11-11; ? = unverified, not a claim of absence |
 | [Workbench](workbench.md) | Shipped behavior, paging, body / operation / UI-cache limits; ✅ does not remove these limits |
-| [HTTPS](tls.md) · [Safety and privacy](safety.md) | CA trust, unencrypted evidence, retention; test only authorized systems |
+| [HTTPS](tls.md) · [Safety and privacy](safety.md) | CA trust, retention; test only authorized systems |
 | [Roadmap](roadmap.md) · [Priority backlog #73](https://github.com/andyintheshell/perseid/issues/73) | Planned work, not shipped capability |

@@ -247,7 +247,7 @@ through the bounded channel.
   distinguish desktop from library defaults, and do not advertise untested
   platforms or historical benchmarks as current release guarantees.
 - Use synthetic examples. Preserve warnings about CA trust, sensitive traffic,
-  temporary versus saved project state, plaintext project files, and Repeater
+  temporary versus saved project state, and Repeater
   bypassing proxy scope.
 - Keep `Cargo.lock` in use with `--locked` in reproducible build/run examples.
   Do not change dependency versions just to update documentation.

@@ -27,7 +27,7 @@ Implemented in `crates/perseid/src/project/` (`schema`, `codec`, `records`, `bac
 - Save/Discard/Cancel confirmation before New or Open replaces a temporary project that has captured records or workbench edits. Save opens Save As and continues the switch only after a successful save; cancelling or failing the save keeps the current project.
 - Project status widget (mode, counts, capture loss, retention evictions, last error) and a final flush in `eframe::App::on_exit`.
 - Oldest-first aggregate retention by combined HTTP/WebSocket count and retained body/payload bytes. Temporary limits default to unlimited and can be overridden with `--temporary-retention-*`, independently of UI-cache limits. Saved limits default to unlimited and are configurable under **Settings > Automatic deletion…**; Apply atomically updates the policy and prunes eligible records. The policy survives reopen/copy. Each stream's newest record and in-flight HTTP exchanges are kept even over budget; `0` disables a dimension. Headers, indexes, and workbench data are excluded. Caches reconcile pruned IDs asynchronously.
-- **Physical storage:** retention does not cap the database file. redb reuses freed pages without necessarily shrinking it; there is no automatic compaction. Save Copy writes retained tables to a fresh file and may reduce size. Project files are unencrypted; Clear history, retention, and filesystem deletion are not secure erasure.
+- **Physical storage:** retention does not cap the database file. redb reuses freed pages without necessarily shrinking it; there is no automatic compaction. Save Copy writes retained tables to a fresh file and may reduce size.
 - **Deletion:** Clear history deletes captures (and HTTP Inspector notes), leaving independent tool snapshots. Discard temporary work by leaving it unsaved; delete a closed saved `.perseid` file and any copies/backups using the filesystem. No dedicated whole-project deletion UI is needed; see the Burp parity note below.
 - A corrupt requested snapshot fails with a contextual error instead of substituting empty state. Desktop open loads only the configured bounded recent caches, not the full history. Corruption in those snapshots or workspace state fails open; corruption encountered in older history during lazy reads is reported in the history view.
 
@@ -80,7 +80,6 @@ cannot install stale results into a new project, including reused IDs.
 Temporary index directories are owner-only on Unix and removed on normal drop.
 An abnormal process exit can leave a `perseid-site-map-*` directory in the OS
 temporary directory; it contains sensitive URL/title summaries, not bodies.
-As with project files, deletion is not secure erasure.
 
 Regression tests cover reopened stores beyond the live cache, multi-page
 timestamp ties, backwards navigation, old binary details/tool sends, grouping,
@@ -136,7 +135,6 @@ redb's copy-on-write, crash-recovery design guarantees consistency of committed 
 | Search | Indexed metadata first; cancellable bounded scans for content/regex; more indexes later if benchmarks justify them |
 | Durability | `Durability::Immediate` for disk commits; batch related changes in one transaction |
 | CA private key | Remains in per-user app data, **never** embedded in a project |
-| Encryption | Not provided in v1; projects contain sensitive plaintext traffic |
 | Multiple processes | One write-open process per project; no collaborative or multiprocess writing |
 
 ## 2. Goals and non-goals
@@ -677,9 +675,9 @@ Tests must cover each earlier supported schema fixture, unsupported future schem
 
 ## 12. Security, privacy and validation
 
-A `.perseid` file will frequently contain **cookies, bearer tokens, credentials, personal information and binary uploads**. It is not encrypted by redb.
+A `.perseid` file will frequently contain **cookies, bearer tokens, credentials, personal information and binary uploads**.
 
-- Use restrictive newly-created-file permissions where possible (`0600` on Unix) and document Windows ACL behavior. Respect user-selected permissions without claiming encryption.
+- Use restrictive newly-created-file permissions where possible (`0600` on Unix) and document Windows ACL behavior. Respect user-selected permissions.
 - Never store the local TLS CA **private key**, OS trust-store state, API secrets from global app config, or filesystem-local absolute paths that aren't necessary for project reproduction.
 - Warn before exporting or sharing a complete project. Add optional redaction/export later, with tests that cookies/Authorization headers are actually removed from every relevant record/body.
 - Treat project bytes as **untrusted on open**: set maximum sizes for parsed DTOs, counts and strings, disallow panics from malformed data, constrain decompression, validate key/index relationships and avoid arbitrary path traversal.
@@ -738,7 +736,6 @@ Implement in narrowly scoped PRs; make the smallest vertical slice functional be
 - [ ] Implement reopen-time in-flight repair, schema migrations, integrity errors, graceful disk-full behavior and interruption diagnostics.
 - [ ] Implement Save Copy through a consistent read snapshot; verify the copy opens independently.
 - [ ] Add crash injection at every transaction/transfer state and keep persistent format fixtures in the test suite.
-- [ ] Document sensitivity of plaintext projects and backup behavior in the user guide.
 
 **Done when:** forced kill / abrupt shutdown tests never expose half-committed multi-table state, copies are independent, searches cannot hang the UI, and release docs clearly state what is actually persisted.
 
