@@ -1000,6 +1000,59 @@ mod tests {
     }
 
     #[test]
+    fn continuous_view_matches_repeated_slashes_with_sparse_scope_boundaries() {
+        let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(0, 0)).unwrap();
+        capture(&project, 1, 1);
+        let original = index(&project);
+        let cancel = AtomicBool::new(false);
+        let base = original.query(&query(), &cancel).unwrap().entries.remove(0);
+        let source = Index::empty().unwrap();
+        let write = source.db.as_ref().unwrap().begin_write().unwrap();
+        {
+            let mut entries = write.open_table(ENTRIES).unwrap();
+            write.open_table(HOST_SCHEMES).unwrap();
+            for i in 0..1024 {
+                let mut entry = base.clone();
+                entry.id = i + 1;
+                entry.path = format!("/a//b?item={i}");
+                // Exclude every old commit boundary while retaining writes
+                // throughout the scan.
+                if i % 256 == 255 {
+                    entry.host = "excluded.test".into();
+                }
+                let key = format!("{i:04}");
+                let bytes = serde_json::to_vec(&entry).unwrap();
+                entries.insert(key.as_str(), bytes.as_slice()).unwrap();
+            }
+        }
+        write.commit().unwrap();
+        let mut query = query();
+        query.scope = Some(BTreeSet::from(["example.test".into()]));
+        for node in [
+            SiteNodeId::Directory {
+                host: "example.test".into(),
+                path: "/a".into(),
+            },
+            SiteNodeId::Endpoint {
+                host: "example.test".into(),
+                path: "/a/b".into(),
+            },
+        ] {
+            query.node = Some(node);
+            let view = viewport::View::build(&source, &query, &BTreeMap::new(), &cancel).unwrap();
+            assert_eq!(view.total, 1020);
+            let window = view.window(0, 0).unwrap();
+            assert_eq!(window.entries.len(), PAGE);
+            assert!(
+                window
+                    .entries
+                    .iter()
+                    .all(|entry| entry.path.starts_with("/a//b?"))
+            );
+        }
+    }
+
+    #[test]
     fn reopened_store_exceeds_cache_pages_tied_timestamps_and_loads_old_details_lazily() {
         let project = ProjectHandle::temporary_with_retention(RetentionLimits::new(0, 0)).unwrap();
         capture(&project, 1, 1003);

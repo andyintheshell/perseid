@@ -167,6 +167,12 @@ impl View {
             if cancel.load(Ordering::Relaxed) {
                 return Err(ProjectError::ServiceUnavailable);
             }
+            // Bound transactions by scanned rows, including out-of-scope rows.
+            if i > 0 && i % 256 == 0 {
+                write.commit()?;
+                write = db.begin_write()?;
+                write.set_durability(redb::Durability::None)?;
+            }
             let (_, value) = value?;
             let entry: SiteEntry = serde_json::from_slice(value.value())?;
             if query
@@ -217,11 +223,6 @@ impl View {
                 write
                     .open_table(SORTED)?
                     .insert(key.as_slice(), value.value())?;
-            }
-            if i % 256 == 255 {
-                write.commit()?;
-                write = db.begin_write()?;
-                write.set_durability(redb::Durability::None)?;
             }
         }
         write.commit()?;

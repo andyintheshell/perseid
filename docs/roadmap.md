@@ -75,7 +75,7 @@ limits rather than treating a tool's existence as complete parity.
 Finish remaining workflows such as history filters/annotations, Intruder payload
 processing and saved attacks, Repeater behavior, and Sequencer collection.
 Publish a repeatable, versioned [parity audit (#68)](https://github.com/andyintheshell/perseid/issues/68)
-with evidence and linked gaps. The historical 82.1% scoped estimate is not an
+with evidence and linked gaps. The [85.7% scoped estimate](burp-parity.md#parity-accounting) is not an
 overall product-completeness score or a reason to ignore usability bugs.
 
 ## Longer-term — Professional parity

@@ -1,6 +1,6 @@
 # Capability matrix
 
-**Burp Community scoped parity: 82.1%** · Historical estimate: **2026-11-03**, `0.3.1` development build ([#166](https://github.com/andyintheshell/perseid/pull/166)). Not overall product parity or a fresh audit.
+**Burp Community scoped parity: 85.7%** · Updated: **2026-11-12**, `0.4.0` development build ([#203](https://github.com/andyintheshell/perseid/pull/203)). Not overall product parity or a fresh audit.
 
 [Documentation](README.md) · [Workbench](workbench.md) · [Roadmap](roadmap.md) · [Screenshots](screenshots.md)
 
@@ -166,12 +166,12 @@
 | Rule | Value |
 | --- | --- |
 | Baseline | 14 equally weighted CE manual-workflow rows; not the entire comparison above |
-| ✅ Working: 9 × 1 | Proxy; intercept; inspection; scope / rewrites; WS editing / replay; Decoder; Comparer; Intruder; memory display |
-| 🟡 Partial: 5 × 0.5 | Site map; HTTP history; WS history; Repeater; Sequencer |
-| Calculation | **(9 + 5 × 0.5) / 14 × 100 = 82.1%** |
+| ✅ Working: 10 × 1 | Proxy; intercept; inspection; scope / rewrites; Site map; WS editing / replay; Decoder; Comparer; Intruder; memory display |
+| 🟡 Partial: 4 × 0.5 | HTTP history; WS history; Repeater; Sequencer |
+| Calculation | **(10 + 4 × 0.5) / 14 × 100 = 85.7%** |
 | Excluded | Search; project files; browser; extensions; crawling; scanning; OAST; auth automation; reports |
 | Interpretation | Equal weights and half credit are judgment calls, not implementation percentages |
-| Last status change | Decoder promoted after automated regression tests and general native macOS smoke confirmation, 2026-11-03; not an itemized manual audit |
+| Last status change | Site map promoted: automated regressions and local 550-endpoint trial, 2026-11-12 ([#203](https://github.com/andyintheshell/perseid/pull/203)) |
 | Promotion bar | Usable workflow, practical automated tests, manual check, documented safety behavior |
 | Next audit | Versioned [workflow audit #68](https://github.com/andyintheshell/perseid/issues/68); recalculate when scoped statuses change |
 
