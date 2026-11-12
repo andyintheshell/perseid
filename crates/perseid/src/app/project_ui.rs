@@ -945,7 +945,6 @@ fn target_section_record(section: TargetSection) -> TargetSectionRecord {
     match section {
         TargetSection::SiteMap => TargetSectionRecord::SiteMap,
         TargetSection::Scope => TargetSectionRecord::Scope,
-        TargetSection::Issues => TargetSectionRecord::Issues,
     }
 }
 
@@ -953,7 +952,8 @@ fn target_section_from_record(section: TargetSectionRecord) -> TargetSection {
     match section {
         TargetSectionRecord::SiteMap => TargetSection::SiteMap,
         TargetSectionRecord::Scope => TargetSection::Scope,
-        TargetSectionRecord::Issues => TargetSection::Issues,
+        // Older projects may have the removed placeholder tab selected.
+        TargetSectionRecord::Issues => TargetSection::SiteMap,
     }
 }
 
@@ -1976,16 +1976,16 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn target_issues_section_round_trips_through_the_workspace() {
+    fn legacy_target_issues_section_restores_site_map() {
         let mut app = PerseidApp::test_app();
-        app.target_section = TargetSection::Issues;
-
-        let workspace = app.workspace_snapshot();
-        assert_eq!(workspace.ui.target_section, TargetSectionRecord::Issues);
-
-        app.target_section = TargetSection::SiteMap;
+        let mut workspace = app.workspace_snapshot();
+        workspace.ui.target_section = TargetSectionRecord::Issues;
         app.apply_workspace(&workspace);
-        assert_eq!(app.target_section, TargetSection::Issues);
+        assert_eq!(app.target_section, TargetSection::SiteMap);
+        assert_eq!(
+            app.workspace_snapshot().ui.target_section,
+            TargetSectionRecord::SiteMap
+        );
     }
 
     #[test]

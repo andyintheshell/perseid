@@ -410,6 +410,11 @@ impl StoredMap {
         self.want(row);
     }
     fn poll_window(&mut self) {
+        // The visible tree remains on screen while its replacement is built.
+        // Do not read windows from the previous Contents query in that interval.
+        if self.query.is_some() {
+            return;
+        }
         if let Some(result) = receive(&mut self.window_query) {
             match result {
                 Ok(window) => self.window = window,
@@ -579,9 +584,16 @@ impl PerseidApp {
                             stored.want(ordinal);
                         }
                     }
-                    stored.view = Some(Arc::new(view));
-                    stored.window = Default::default();
-                    stored.window_query = None;
+                    let view = Arc::new(view);
+                    let row = stored.wanted_row.min(view.total.saturating_sub(1));
+                    let tree = stored.wanted_tree.min(view.tree_total.saturating_sub(1));
+                    stored.view = Some(view.clone());
+                    stored.window.entries.clear();
+                    let (tx, rx) = mpsc::channel();
+                    stored.window_query = Some(rx);
+                    std::thread::spawn(move || {
+                        let _ = tx.send(view.window(row, tree));
+                    });
                 }
                 Err(err) => stored.error = Some(err.to_string()),
             }
@@ -701,6 +713,7 @@ impl PerseidApp {
             .frame(egui::Frame::NONE.fill(theme::SURFACE))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.set_min_height(20.0);
                     ui.weak(format!("{total} matching endpoints"));
                     if busy {
                         ui.spinner();
@@ -712,12 +725,15 @@ impl PerseidApp {
                         self.site_map_ui.stored = StoredMap::default();
                     }
                 }
-                if self.site_map_ui.tab == SiteMapTab::Contents {
+                {
                     egui::Panel::bottom(SITE_MAP_DETAIL_ID)
                         .resizable(true)
                         .default_size((ui.available_height() * 0.46).max(220.0))
                         .min_size(190.0)
-                        .show(ui, |ui| self.detail_panel(ui));
+                        .show(ui, |ui| {
+                            ui.take_available_space();
+                            self.detail_panel(ui);
+                        });
                 }
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::SURFACE))
@@ -751,7 +767,6 @@ impl PerseidApp {
             stored.wanted_row = 0;
             stored.selected_row = None;
             stored.pending_row = Some(0);
-            stored.view = None;
             stored.window_query = None;
         }
         let open_changed = stored.open != self.site_map_ui.open;
@@ -860,6 +875,54 @@ mod tests {
     use crate::proxy::{
         CapturedBody, ExchangeEnd, ExchangeResult, ProxyEvent, RequestInfo, ResponseHead,
     };
+
+    #[test]
+    fn pending_view_does_not_consume_previous_window() {
+        let mut stored = StoredMap::default();
+        let (_query_tx, query_rx) = mpsc::channel();
+        stored.query = Some(query_rx);
+        let (window_tx, window_rx) = mpsc::channel();
+        let window = viewport::Window {
+            row: 123,
+            ..Default::default()
+        };
+        window_tx.send(Ok(window)).unwrap();
+        stored.window_query = Some(window_rx);
+        stored.poll_window();
+        assert_eq!(stored.window.row, 0);
+        assert!(stored.window_query.is_some());
+    }
+
+    #[test]
+    fn detail_panel_keeps_height_without_selected_exchange() {
+        let ctx = egui::Context::default();
+        let mut app = PerseidApp::test_app();
+        for _ in 0..3 {
+            let mut height = 0.0;
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let panel = egui::Panel::bottom(SITE_MAP_DETAIL_ID)
+                        .resizable(true)
+                        .default_size(400.0)
+                        .min_size(190.0)
+                        .show(ui, |ui| {
+                            ui.take_available_space();
+                            app.detail_panel(ui);
+                        });
+                    height = panel.response.rect.height();
+                },
+            )
+            .drop_without_applying_deltas();
+            assert!(height >= 400.0, "detail panel shrank to {height}");
+        }
+    }
 
     fn wait<T>(rx: Reply<T>) -> T {
         rx.recv_timeout(Duration::from_secs(60)).unwrap().unwrap()
