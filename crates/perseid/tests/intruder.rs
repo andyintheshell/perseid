@@ -237,6 +237,52 @@ async fn sniper_attack_sends_every_payload_and_reports_results() {
 }
 
 #[tokio::test]
+async fn stopping_an_attack_finishes_in_flight_requests_and_reports_cancellation() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let service = service_fn(|_request: Request<Incoming>| async {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    Ok::<_, Infallible>(Response::new(Full::new(Bytes::new())))
+                });
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), service)
+                    .await;
+            });
+        }
+    });
+
+    let mut intruder = Intruder::start(IntruderConfig {
+        timeout: TIMEOUT,
+        ..IntruderConfig::default()
+    })
+    .unwrap();
+    let total = 200;
+    let payloads: Vec<String> = (0..total).map(|value| value.to_string()).collect();
+    let mut attack_plan = plan(
+        addr,
+        "GET /?id=§1§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        &["x"],
+    );
+    attack_plan.payload_sets = vec![payloads];
+    attack_plan.concurrency = 2;
+    intruder.start_attack(attack_plan).unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    intruder.stop();
+
+    let (results, completed, cancelled) = collect_attack(&mut intruder).await;
+    assert!(cancelled);
+    assert!(completed < total as u64);
+    // Every admitted request finishes and is delivered before Finished.
+    assert_eq!(results.len() as u64, completed);
+}
+
+#[tokio::test]
 async fn payloads_cannot_redirect_an_attack_outside_scope() {
     let (addr, seen) = start_origin().await;
     let mut intruder = Intruder::start(IntruderConfig {

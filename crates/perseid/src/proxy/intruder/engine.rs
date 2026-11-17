@@ -1,6 +1,8 @@
 //! Intruder runtime: the background engine, attack dispatch, and events.
 
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -39,6 +41,9 @@ pub struct IntruderConfig {
     pub extra_roots_pem: Vec<String>,
     /// Called when an event is ready. The desktop UI uses this to repaint.
     pub notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Test-only high-water mark of task entries retained during an attack.
+    #[cfg(test)]
+    pub(crate) max_tracked_tasks: Option<Arc<AtomicUsize>>,
 }
 
 impl Default for IntruderConfig {
@@ -49,6 +54,8 @@ impl Default for IntruderConfig {
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),
             notify: None,
+            #[cfg(test)]
+            max_tracked_tasks: None,
         }
     }
 }
@@ -181,6 +188,8 @@ impl Intruder {
                                     notify.clone(),
                                     running_thread.clone(),
                                     config.cookie_jar.clone(),
+                                    #[cfg(test)]
+                                    config.max_tracked_tasks.clone(),
                                 ));
                             }
                             Command::Stop => {
@@ -291,6 +300,7 @@ async fn run_attack(
     notify: Option<Arc<dyn Fn() + Send + Sync>>,
     running: Arc<AtomicBool>,
     cookie_jar: Option<crate::proxy::cookies::SharedCookieJar>,
+    #[cfg(test)] max_tracked_tasks: Option<Arc<AtomicUsize>>,
 ) {
     let prepared = match plan.prepare() {
         Ok(prepared) => prepared,
@@ -319,9 +329,21 @@ async fn run_attack(
             cancelled = true;
             break;
         }
-        let Ok(permit) = semaphore.clone().acquire_owned().await else {
+        // Wait for capacity while joining tasks that finish in the meantime.
+        // A long attack must not retain one completed JoinSet entry per
+        // request until scheduling ends.
+        let permit = loop {
+            tokio::select! {
+                permit = semaphore.clone().acquire_owned() => break permit,
+                _ = tasks.join_next(), if !tasks.is_empty() => {}
+            }
+        };
+        let Ok(permit) = permit else {
             break;
         };
+        // A completing task releases its permit just before JoinSet records
+        // the task as finished, so reap again before adding another entry.
+        reap_completed(&mut tasks);
         // Stop may arrive while this task waits for an in-flight request to
         // release a permit. Recheck after admission so stopping cannot schedule
         // one more request.
@@ -405,6 +427,9 @@ async fn run_attack(
             let _ = send_event(&results, event, &notify).await;
             drop(permit);
         });
+        #[cfg(test)]
+        record_tracked_tasks(&max_tracked_tasks, &tasks);
+        reap_completed(&mut tasks);
         sequence = sequence.saturating_add(1);
     }
 
@@ -421,6 +446,21 @@ async fn run_attack(
         &notify,
     )
     .await;
+}
+
+/// Join every task that has already finished without waiting for more.
+///
+/// A completed entry keeps its task bookkeeping until it is joined, so the
+/// scheduling loop reaps continuously instead of only after the last request.
+fn reap_completed(tasks: &mut JoinSet<()>) {
+    while tasks.try_join_next().is_some() {}
+}
+
+#[cfg(test)]
+fn record_tracked_tasks(max_tracked_tasks: &Option<Arc<AtomicUsize>>, tasks: &JoinSet<()>) {
+    if let Some(max_tracked_tasks) = max_tracked_tasks {
+        max_tracked_tasks.fetch_max(tasks.len(), Ordering::Relaxed);
+    }
 }
 
 /// Reject a generated request whose effective target is outside the plan's
@@ -477,4 +517,99 @@ async fn send_event(
         notify();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use bytes::Bytes;
+    use http::{Request, Response};
+    use http_body_util::Full;
+    use hyper::body::Incoming;
+    use hyper::service::service_fn;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::TcpListener;
+
+    use super::super::plan::AttackType;
+    use super::*;
+
+    #[tokio::test]
+    async fn long_attack_reaps_completed_tasks_while_scheduling() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let service = service_fn(|_request: Request<Incoming>| async {
+                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::new())))
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+
+        const TOTAL: u64 = 1_000;
+        const CONCURRENCY: usize = 8;
+        let max_tracked = Arc::new(AtomicUsize::new(0));
+        let mut intruder = Intruder::start(IntruderConfig {
+            capture_limit: 1024,
+            timeout: Duration::from_secs(5),
+            max_tracked_tasks: Some(max_tracked.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+        intruder
+            .start_attack(IntruderPlan {
+                body_escaped: false,
+                preserved_body: None,
+                attack: AttackType::Sniper,
+                scheme: "http".to_string(),
+                host: address.to_string(),
+                template: "GET /?n=§n§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_string(),
+                payload_sets: vec![(0..TOTAL).map(|value| value.to_string()).collect()],
+                concurrency: CONCURRENCY,
+                scope: Vec::new(),
+            })
+            .unwrap();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let mut received = 0;
+        loop {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the long attack did not finish before the test timeout"
+            );
+            match intruder.try_recv() {
+                Some(IntruderEvent::Result(_)) => received += 1,
+                Some(IntruderEvent::Finished {
+                    completed,
+                    total,
+                    cancelled,
+                    ..
+                }) => {
+                    assert_eq!(completed, TOTAL);
+                    assert_eq!(total, TOTAL);
+                    assert!(!cancelled);
+                    break;
+                }
+                None => tokio::time::sleep(Duration::from_millis(1)).await,
+            }
+        }
+        assert_eq!(received, TOTAL);
+
+        // The high-water mark stays near the configured concurrency instead of
+        // growing with the number of completed requests.
+        let peak = max_tracked.load(Ordering::Relaxed);
+        assert!(peak > 0, "the attack never recorded its task bookkeeping");
+        assert!(
+            peak <= CONCURRENCY * 2,
+            "retained {peak} task entries while running a {TOTAL}-request attack at concurrency {CONCURRENCY}"
+        );
+    }
 }

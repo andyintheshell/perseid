@@ -10,8 +10,9 @@
 //! while the other attack types replace every marked position.
 //!
 //! Work is generated lazily. Only the configured number of requests is in
-//! flight, and completed results wait in a bounded channel. The desktop UI
-//! drains that channel every frame and keeps its own bounded result history.
+//! flight, finished task entries are reaped while scheduling continues, and
+//! completed results wait in a bounded channel. The desktop UI drains that
+//! channel every frame and keeps its own bounded result history.
 //!
 //! The module is split into [`plan`], which parses templates and renders
 //! requests, and [`engine`], which runs attacks on a small background runtime.
