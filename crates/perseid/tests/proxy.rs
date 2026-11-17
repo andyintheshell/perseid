@@ -622,12 +622,13 @@ async fn connect_tunnel_relays_bytes_and_reports_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_upstream_connect_yields_502_and_failed_event() {
-    // Nothing listens here: bind a port, then drop the listener.
+    // Reserve the target port until the proxy has bound its own listener, so
+    // Windows cannot reuse the target port for the proxy's certificate portal.
     let dead = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead_addr = dead.local_addr().unwrap();
-    drop(dead);
 
     let proxy = test_proxy(64 * 1024, 64);
+    drop(dead);
     let request = format!(
         "GET http://{dead_addr}/ HTTP/1.1\r\nHost: {dead_addr}\r\nConnection: close\r\n\r\n"
     );

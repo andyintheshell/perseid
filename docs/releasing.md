@@ -5,11 +5,6 @@ protected `release` branch, the workflow creates or refreshes an unpublished
 GitHub Release, and a maintainer tests the downloads and publishes it manually.
 The workflow is deliberately separate from the normal `main`/pull-request CI.
 
-**Current version status:** `v0.3.0` is the latest published crate and GitHub
-release; project persistence was introduced in `v0.2.0`. The workspace
-version is `0.3.1` (development; not yet published). M3 is complete
-for the `0.3.0` release scope; remaining M3 issues moved to M4 (see the [roadmap](roadmap.md)).
-
 ## Current release formats
 
 The release matrix builds these eleven application downloads:
@@ -26,28 +21,6 @@ from opening normally on another Mac. The Linux formats and native ARM builds
 also need real-device smoke testing before we treat them as supported downloads.
 
 ## Preparing a release
-
-### 0.3.1 development highlights
-
-- Binary-preserving Send to Decoder from Hex message selections; selection-aware
-  Decoder Hex transforms, copying, and byte-offset selection persistence.
-- Automated regressions and user-confirmed native macOS smoke testing promote
-  Decoder to Working; the scoped manual-workflow parity estimate is **82.1%**.
-- This version bump does not itself publish release artifacts.
-
-### 0.3.0 release highlights
-
-- M3 daily-workbench release scope is complete; six remaining issues moved to
-  M4, not silently marked implemented. The parity estimate remains 78.6%.
-- Full-store HTTP paging/lazy details, full-store paged site map, saved logical
-  retention, and atomic schema-v1→v2 migration are available. **Back up v1 files
-  before opening: `0.2.x` cannot open upgraded projects.**
-- Cookie/session settings provide a bounded in-memory jar; application of cookies
-  and response updates for Repeater/Intruder are opt-in. No automatic login.
-- Normal quit protects unsaved temporary work and acknowledges saved workspace
-  writes, with recovery choices on failure/timeout. This is not crash recovery;
-  see [exit guarantees](project-exit-guarantees.md).
-- Platform package smoke tests below are still required before publication.
 
 ### Release procedure
 
@@ -125,11 +98,11 @@ and may be smaller.
 
 Release notes for the schema-v2 change must mention the atomic v1 upgrade and
 that `0.2.x` cannot open upgraded files: preserve a closed-file backup before
-opening if backward compatibility is needed. Files are not encrypted. Clear
+opening if backward compatibility is needed. Clear
 history removes captures, not independent tool snapshots or the project file.
 Delete a whole project through the filesystem after switching away or quitting,
-and remove copies/backups separately. None of these operations securely erases
-disk bytes. See [Safety and privacy](safety.md) and [Workbench](workbench.md).
+and remove copies/backups separately. See [Safety and privacy](safety.md) and
+[Workbench](workbench.md).
 
 ## Local packaging helpers
 
@@ -158,7 +131,7 @@ wix extension add -g WixToolset.UI.wixext/5.0.2
 pwsh scripts/package-windows.ps1 -Arch x64 # or arm64
 ```
 
-The previous release completed all five hosted package builders. That
-checks artifact generation, not every installer and runtime on clean machines.
+Successful hosted package builds check artifact generation, not every installer
+and runtime on clean machines.
 Continue smoke-testing native ARM64 builds, MSI install/upgrade behavior, the
 macOS Gatekeeper experience, and Linux runtime dependencies before each release.

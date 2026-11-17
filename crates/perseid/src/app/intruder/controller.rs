@@ -117,6 +117,8 @@ impl PerseidApp {
             timeout: DEFAULT_REPEATER_TIMEOUT,
             extra_roots_pem: Vec::new(),
             notify: Some(self.notify.clone()),
+            #[cfg(test)]
+            max_tracked_tasks: None,
         };
         match Intruder::start(config) {
             Ok(engine) => {

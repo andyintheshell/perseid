@@ -34,15 +34,17 @@ Perseid aims to be:
 - **Extensible.** Optional, narrowly scoped checks and extensions rather than
   a mandatory monolithic scanning engine.
 - **Local-first.** Captured traffic stays on the user's machine unless the
-  user explicitly exports or shares it.
+  user explicitly exports or shares it. Planned OAST must disclose the external
+  callback provider and require explicit opt-in before registration/polling.
 
 ## Architecture
 
 Perseid currently ships as one Cargo package. The proxy and byte-transform
 engines have module boundaries so their behavior can be tested without opening
 the UI; they are not separate, GUI-free build targets. The following diagram
-shows the current capture and storage path. The UI still uses bounded in-memory
-snapshots for history views; paging older saved records is planned.
+shows the current capture and storage path. History tables cover all retained
+records using bounded metadata windows and background lazy detail loading;
+bounded in-memory snapshots also serve live workflows.
 
 ```text
 External browser
@@ -62,7 +64,7 @@ Local HTTP/1.1 and HTTP/2 proxy (TLS interception on by default)
        Temporary RAM DB       Persistent .perseid file
                        |
                        v
-       Bounded in-memory HTTP/WebSocket snapshots
+       Paged HTTP/WebSocket metadata + lazy details
                        |
                        v
                Native egui interface
@@ -235,8 +237,8 @@ Current technology choices:
 - **base64**, **flate2**, **html-escape**, **num-bigint**, and the RustCrypto
   digest crates for Decoder. The transforms are implemented in-process and
   bounded; Decoder does not embed a scripting engine.
-- **redb** for single-file persistent projects with a versioned schema. Files are
-  not encrypted; schema v1 upgrades atomically to v2 on open.
+- **redb** for single-file persistent projects with a versioned schema.
+  Schema v1 upgrades atomically to v2 on open.
 
 ## Performance philosophy
 
@@ -259,7 +261,7 @@ Important implementation principles:
   record of each stream and in-flight HTTP are always kept. Saved retention
   defaults to unlimited and can be configured under **Settings > Automatic deletion…**.
   Clear history and retention remove logical records; filesystem deletion after
-  closing/switching removes a project file. None provides secure erasure.
+  closing/switching removes a project file.
 - Concurrent proxy connection/tunnel limits and a bounded capture-event channel
   with drop counters. Loss recovery applies queued events before resolving
   in-flight rows; late or duplicate completions do not decrement unrelated
@@ -291,21 +293,24 @@ Important implementation principles:
   allocator overhead.
 - A live memory meter so allocator behavior is visible during use.
 
-The Milestone 0 baseline and measurement method are published in
+The original proof-of-concept baseline and measurement method are published in
 [Performance and memory](performance.md).
 
-## Non-goals
+## Scope and deliberate differences
 
-For the initial parity target, Perseid is not trying to:
+The immediate focus is Collaborator/OAST, usability, and a dependable Community
+manual-testing baseline. Professional parity is the longer-term goal, so
+scanning/crawling are deferred rather than permanent non-goals. Search and local
+project files are already implemented with documented limits. See the
+[OAST assessment](collaborator.md) before selecting an Interactsh client.
 
-- Replace a commercial vulnerability scanner or reproduce Burp Suite
-  Professional's automated scanning, crawler, Collaborator/OAST, or project
-  files.
+Perseid is not trying to:
+
 - Build a browser engine, embed Chromium, or ship a full JavaScript crawler.
 - Automatically exploit discovered issues.
 - Run unattended scans against arbitrary hosts.
 - Provide binary compatibility with Java Burp extensions (BApps). A native
   extension point is planned after core parity.
 
-See [Burp Community parity](burp-parity.md) for the capability target and
+See [Burp parity](burp-parity.md) for current capabilities and longer-term goals and
 [Roadmap](roadmap.md) for sequencing.

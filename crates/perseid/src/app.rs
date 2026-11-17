@@ -183,7 +183,6 @@ enum TargetSection {
     #[default]
     SiteMap,
     Scope,
-    Issues,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

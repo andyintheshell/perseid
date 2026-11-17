@@ -26,13 +26,6 @@ const SITE_MAP_DETAIL_ID: &str = "perseid.site-map.detail";
 mod stored;
 pub(super) const SITE_MAP_SEARCH_ID: &str = "perseid.site-map.search";
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum SiteMapTab {
-    #[default]
-    Contents,
-    Issues,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SiteMapSort {
     Host,
@@ -73,8 +66,6 @@ pub(super) struct SiteMapUi {
     open: BTreeMap<String, bool>,
     filter: SiteMapFilter,
     filter_open: bool,
-    help_open: bool,
-    tab: SiteMapTab,
     search: String,
     sort: SiteMapSort,
     sort_ascending: bool,
@@ -99,8 +90,6 @@ impl SiteMapUi {
             open: BTreeMap::new(),
             filter: SiteMapFilter::default(),
             filter_open: false,
-            help_open: false,
-            tab: SiteMapTab::Contents,
             search: String::new(),
             sort: SiteMapSort::Url,
             sort_ascending: true,
@@ -114,24 +103,9 @@ impl SiteMapUi {
         self.paused
     }
 
-    /// Whether the Contents table is the active right-hand tab.
-    pub(super) fn on_contents(&self) -> bool {
-        self.tab == SiteMapTab::Contents
-    }
-
     /// Whether a site-map window is open over the workspace.
     pub(super) fn windows_open(&self) -> bool {
-        self.filter_open || self.help_open
-    }
-
-    #[cfg(test)]
-    pub(super) fn set_issues_tab(&mut self) {
-        self.tab = SiteMapTab::Issues;
-    }
-
-    #[cfg(test)]
-    pub(super) fn set_contents_tab(&mut self) {
-        self.tab = SiteMapTab::Contents;
+        self.filter_open
     }
 
     #[cfg(test)]
@@ -142,7 +116,6 @@ impl SiteMapUi {
     #[cfg(test)]
     pub(super) fn set_windows_open(&mut self, open: bool) {
         self.filter_open = open;
-        self.help_open = open;
     }
 
     #[cfg(feature = "screenshots")]
@@ -171,7 +144,6 @@ enum SiteMapMenuAction {
 
 #[derive(Clone, Copy, Debug)]
 enum SiteMapIcon {
-    Help,
     Pause,
     Play,
     Settings,
@@ -200,16 +172,11 @@ impl PerseidApp {
                 self.target_section = TargetSection::Scope;
                 ui.ctx().memory_mut(|memory| memory.stop_text_input());
             }
-            if section_tab(ui, self.target_section == TargetSection::Issues, "Issues").clicked() {
-                self.target_section = TargetSection::Issues;
-                ui.ctx().memory_mut(|memory| memory.stop_text_input());
-            }
         });
 
         match self.target_section {
             TargetSection::SiteMap => self.site_map_view(ui),
             TargetSection::Scope => self.scope_view(ui),
-            TargetSection::Issues => target_issues_view(ui),
         }
     }
 
@@ -287,7 +254,7 @@ impl PerseidApp {
                     .inner_margin(egui::Margin::same(0)),
             )
             .show(ui, |ui| {
-                if self.site_map_ui.tab == SiteMapTab::Contents {
+                {
                     egui::Panel::bottom(SITE_MAP_DETAIL_ID)
                         .resizable(true)
                         .default_size((ui.available_height() * 0.46).max(220.0))
@@ -334,22 +301,15 @@ impl PerseidApp {
                             "Perseid does not crawl. Crawl paths require Burp Scanner or a crawler.",
                         );
 
-                    let controls_width = 3.0 * 26.0 + 3.0 * ui.spacing().item_spacing.x;
+                    let controls_width = 2.0 * 26.0 + 2.0 * ui.spacing().item_spacing.x;
                     let summary = self.site_map_ui.filter.summary();
-                    let filter_width = (ui.available_width() - controls_width)
-                        .clamp(120.0, 900.0);
+                    let filter_width = (ui.available_width() - controls_width).max(0.0);
                     let response = filter_bar(ui, filter_width, &summary);
                     if response.clicked() {
                         self.site_map_ui.filter_open = true;
                     }
                     response.on_hover_text("Configure the site map display filter");
 
-                    if icon_button(ui, SiteMapIcon::Help, false)
-                        .on_hover_text("About the site map")
-                        .clicked()
-                    {
-                        self.site_map_ui.help_open = true;
-                    }
                     let icon = if self.site_map_ui.paused {
                         SiteMapIcon::Play
                     } else {
@@ -391,16 +351,7 @@ impl PerseidApp {
             .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if contents_tab(ui, self.site_map_ui.tab == SiteMapTab::Contents, "Contents")
-                        .clicked()
-                    {
-                        self.site_map_ui.tab = SiteMapTab::Contents;
-                    }
-                    if contents_tab(ui, self.site_map_ui.tab == SiteMapTab::Issues, "Issues (0)")
-                        .clicked()
-                    {
-                        self.site_map_ui.tab = SiteMapTab::Issues;
-                    }
+                    contents_tab(ui, true, "Contents");
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.menu_button("...", |ui| {
@@ -463,12 +414,6 @@ impl PerseidApp {
             });
         ui.separator();
 
-        if self.site_map_ui.tab == SiteMapTab::Issues {
-            self.site_map_ui.visible_ids.clear();
-            site_map_issues(ui);
-            return None;
-        }
-
         let Some(node) = self.site_map_ui.selected_node.clone() else {
             let filtered = self.site_map_ui.filter != SiteMapFilter::SHOW_ALL;
             let (title, body) = if filtered {
@@ -491,6 +436,9 @@ impl PerseidApp {
 
         let needle = self.site_map_ui.search.trim().to_lowercase();
         let filter = self.site_map_ui.filter;
+        let mut selected_row = self.site_map_ui.stored.selected_row;
+        let mut pending_row = self.site_map_ui.stored.pending_row;
+        let mut wanted_row = None;
         let mut rows: Vec<SiteRowRef<'_>> = Vec::new();
         for host in &map.hosts {
             for entry in &host.entries {
@@ -509,7 +457,22 @@ impl PerseidApp {
             }
         }
 
-        if rows.is_empty() {
+        let stored_active = self.site_map_ui.stored.active();
+        let offset = if stored_active {
+            self.site_map_ui.stored.offset()
+        } else {
+            0
+        };
+        let total = if stored_active {
+            self.site_map_ui.stored.total()
+        } else {
+            rows.len()
+        };
+        if stored_active && rows.is_empty() && self.site_map_ui.stored.loading_view() {
+            ui.spinner();
+            return None;
+        }
+        if rows.is_empty() && (!stored_active || total == 0) {
             let (title, body) = if !needle.is_empty() {
                 (
                     "No contents match the search",
@@ -535,10 +498,21 @@ impl PerseidApp {
         );
         self.site_map_ui.visible_ids = rows.iter().map(|row| row.entry.id).collect();
 
+        if stored_active
+            && let Some(ordinal) = pending_row
+            && let Some(row) = ordinal.checked_sub(offset).and_then(|i| rows.get(i))
+        {
+            self.selected = Some(row.entry.id);
+            self.detail = None;
+            selected_row = Some(ordinal);
+            pending_row = None;
+            self.site_map_ui.scroll_to_selected = true;
+        }
+
         let selected_in_rows = self
             .selected
             .is_some_and(|id| rows.iter().any(|row| row.entry.id == id));
-        if !selected_in_rows {
+        if !selected_in_rows && !stored_active {
             let next = if node_changed {
                 rows.iter()
                     .max_by_key(|row| (row.entry.timestamp, row.entry.id))
@@ -582,7 +556,7 @@ impl PerseidApp {
                     .selected
                     .and_then(|id| rows.iter().position(|row| row.entry.id == id))
                 {
-                    table = table.scroll_to_row(row, Some(Align::Center));
+                    table = table.scroll_to_row(row + offset, Some(Align::Center));
                 }
                 self.site_map_ui.scroll_to_selected = false;
             }
@@ -616,9 +590,15 @@ impl PerseidApp {
                     }
                 })
                 .body(|body| {
-                    body.rows(20.0, rows.len(), |mut row| {
+                    let mut first_visible = None;
+                    body.rows(20.0, total, |mut row| {
                         let index = row.index();
-                        let site_row = &rows[index];
+                        first_visible.get_or_insert(index);
+                        let Some(site_row) = index.checked_sub(offset).and_then(|i| rows.get(i)) else {
+                            row.col(|ui| { ui.weak("Loading…"); });
+                            for _ in 1..10 { row.col(|_| {}); }
+                            return;
+                        };
                         let entry = site_row.entry;
                         row.set_selected(self.selected == Some(entry.id));
 
@@ -748,6 +728,7 @@ impl PerseidApp {
                         let response = row.response().on_hover_text(hover);
                         if response.clicked() || response.secondary_clicked() {
                             clicked = Some(entry.id);
+                            if stored_active { selected_row = Some(index); }
                         }
                         response.context_menu(|ui| {
                             let can_send = site_row.item.is_some();
@@ -808,6 +789,10 @@ impl PerseidApp {
                             }
                         });
                     });
+                    if stored_active && let Some(first) = first_visible
+                        && pending_row.is_none() {
+                            wanted_row = Some(first);
+                    }
                 });
         });
 
@@ -850,6 +835,14 @@ impl PerseidApp {
             None => {}
         }
 
+        drop(rows);
+        if stored_active {
+            self.site_map_ui.stored.selected_row = selected_row;
+            self.site_map_ui.stored.pending_row = pending_row;
+            if let Some(row) = wanted_row {
+                self.site_map_ui.stored.want(row);
+            }
+        }
         action
     }
 
@@ -869,6 +862,17 @@ impl PerseidApp {
 
     /// Move the Contents selection by `delta`, clamped to the visible rows.
     pub(super) fn move_site_map_selection(&mut self, delta: isize) {
+        if self.site_map_ui.stored.active() {
+            let stored = &mut self.site_map_ui.stored;
+            if let Some(row) = super::selection::moved_row_index(
+                stored.total(),
+                stored.pending_row.or(stored.selected_row),
+                delta,
+            ) {
+                stored.navigate(row);
+            }
+            return;
+        }
         let len = self.site_map_ui.visible_ids.len();
         let current = self.selected.and_then(|id| {
             self.site_map_ui
@@ -884,6 +888,15 @@ impl PerseidApp {
 
     /// Select the first or last Contents row for Home/End.
     pub(super) fn select_site_map_edge(&mut self, first: bool) {
+        if self.site_map_ui.stored.active() {
+            let row = if first {
+                0
+            } else {
+                self.site_map_ui.stored.total().saturating_sub(1)
+            };
+            self.site_map_ui.stored.navigate(row);
+            return;
+        }
         if self.site_map_ui.visible_ids.is_empty() {
             return;
         }
@@ -1007,43 +1020,6 @@ impl PerseidApp {
             if changed {
                 self.site_map_ui.filter = filter;
             }
-        }
-
-        if self.site_map_ui.help_open {
-            let mut open = self.site_map_ui.help_open;
-            egui::Window::new("Site map help")
-                .id(egui::Id::unique("perseid.site-map.help-window"))
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(false)
-                .default_width(460.0)
-                .show(ctx, |ui| {
-                    ui.label(
-                        RichText::new("Mapping captured traffic")
-                            .strong()
-                            .color(theme::TEXT),
-                    );
-                    ui.label(
-                        "The site map is built from HTTP exchanges captured by the proxy. \
-                         HTTPS requests appear after decryption. Hosts contain folders and \
-                         resources; selecting a node filters the Contents table to that node \
-                         and everything below it.",
-                    );
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("What this view does not do").strong());
-                    ui.label(
-                        "Perseid does not crawl or infer unrequested URLs. The crawl-paths \
-                         view and scanner Issues are therefore unavailable. Capturing a URL \
-                         through the proxy is what adds it to the map.",
-                    );
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("Filters").strong());
-                    ui.label(
-                        "The filter bar only changes what is displayed. Hidden items are never \
-                         deleted; clearing a filter makes them visible again.",
-                    );
-                });
-            self.site_map_ui.help_open = open;
         }
     }
 
@@ -1417,26 +1393,6 @@ fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
 
-fn site_map_issues(ui: &mut egui::Ui) {
-    empty_state(
-        ui,
-        "No issues to show",
-        "Perseid does not run a vulnerability scanner. Issues from Burp Scanner or another \
-         scanner are not imported into this workspace.",
-    );
-}
-
-fn target_issues_view(ui: &mut egui::Ui) {
-    page_pad(ui, |ui| {
-        empty_state(
-            ui,
-            "No issues to show",
-            "Perseid does not run a vulnerability scanner, so it has no Target issues to list. \
-             Captured requests are still available in Target > Site map and Proxy > HTTP history.",
-        );
-    });
-}
-
 fn site_map_empty_contents(ui: &mut egui::Ui, state: &mut SiteMapUi, title: &str, body: &str) {
     ui.add_space(38.0);
     ui.vertical_centered(|ui| {
@@ -1617,17 +1573,6 @@ fn icon_button(ui: &mut egui::Ui, icon: SiteMapIcon, active: bool) -> egui::Resp
         };
         let center = rect.center();
         match icon {
-            SiteMapIcon::Help => {
-                ui.painter()
-                    .circle_stroke(center, 7.0, Stroke::new(1.2, color));
-                ui.painter().text(
-                    center,
-                    Align2::CENTER_CENTER,
-                    "?",
-                    FontId::proportional(11.0),
-                    color,
-                );
-            }
             SiteMapIcon::Pause => {
                 ui.painter().rect_filled(
                     Rect::from_center_size(center + egui::vec2(-3.0, 0.0), egui::vec2(2.4, 10.0)),
@@ -1665,7 +1610,6 @@ fn icon_button(ui: &mut egui::Ui, icon: SiteMapIcon, active: bool) -> egui::Resp
         }
     }
     let label = match icon {
-        SiteMapIcon::Help => "Site map help",
         SiteMapIcon::Pause => "Pause live updates",
         SiteMapIcon::Play => "Resume live updates",
         SiteMapIcon::Settings => "Site map filter settings",
@@ -2448,7 +2392,6 @@ mod tests {
         let text = rendered_text(&output);
         for expected in [
             "Contents",
-            "Issues (0)",
             "Site map filter: Hiding not found items",
             "example.com",
             "mixed.test",
@@ -2549,17 +2492,10 @@ mod tests {
     }
 
     #[test]
-    fn site_map_toolbar_opens_filter_and_help_windows() {
+    fn site_map_toolbar_opens_filter_window() {
         let mut app = captured_app();
         let ctx = test_context();
         target_frame(&ctx, &mut app, Vec::new());
-
-        assert!(click_primary(&ctx, &mut app, "Site map help"));
-        assert!(app.site_map_ui.help_open);
-        assert!(app.site_map_ui.windows_open());
-        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
-        assert!(text.contains("Mapping captured traffic"));
-        assert!(text.contains("What this view does not do"));
 
         assert!(click_primary(&ctx, &mut app, "Site map filter settings"));
         assert!(app.site_map_ui.filter_open);
@@ -2581,7 +2517,6 @@ mod tests {
         assert!(click_primary(&ctx, &mut app, "Resume live updates"));
         assert!(!app.site_map_ui.paused());
 
-        app.site_map_ui.help_open = false;
         assert!(!app.site_map_ui.windows_open());
     }
 
@@ -2757,20 +2692,42 @@ mod tests {
     }
 
     #[test]
-    fn site_map_issues_tabs_and_target_issues_explain_their_empty_state() {
+    fn target_has_no_placeholder_issues_tabs_or_help_button() {
         let mut app = captured_app();
-        app.site_map_ui.tab = SiteMapTab::Issues;
         app.target_section = TargetSection::SiteMap;
         let ctx = test_context();
-        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
-        assert!(text.contains("No issues to show"));
-        assert!(text.contains("Perseid does not run a vulnerability scanner"));
-        assert!(app.site_map_ui.visible_ids.is_empty());
+        let output = target_frame(&ctx, &mut app, Vec::new());
+        let text = rendered_text(&output);
+        assert!(text.contains("Contents"));
+        assert!(!text.contains("Issues"));
+        assert!(!text.contains("No issues to show"));
+        assert!(accesskit_rect(&output, "Site map help", true).is_none());
+    }
 
-        app.target_section = TargetSection::Issues;
-        let text = rendered_text(&target_frame(&ctx, &mut app, Vec::new()));
-        assert!(text.contains("No issues to show"));
-        assert!(text.contains("Captured requests are still available"));
+    #[test]
+    fn filter_bar_fills_wide_and_narrow_toolbars() {
+        for width in [800.0, 2400.0] {
+            let ctx = test_context();
+            let mut app = captured_app();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.site_map_toolbar(ui),
+            );
+            output.textures_delta.clear();
+            let filter = accesskit_rect(&output, "Site map filter", true).unwrap();
+            let settings = accesskit_rect(&output, "Site map filter settings", true).unwrap();
+            assert!((settings.right() - (width - 10.0)).abs() < 2.0);
+            assert!(filter.right() < settings.left());
+            if width > 2000.0 {
+                assert!(filter.width() > 1500.0);
+            }
+        }
     }
 
     #[test]

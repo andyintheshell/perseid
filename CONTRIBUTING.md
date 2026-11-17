@@ -11,6 +11,10 @@ the easiest to review.
 
 - For larger features, open an issue first so the approach can be discussed
   against the [roadmap](docs/roadmap.md) and [design](docs/design.md).
+- Choose work by priority and focus labels in the [live backlog (#73)](https://github.com/andyintheshell/perseid/issues/73),
+  not the retired numbered milestones. Collaborator/OAST is P0; usability and
+  reliability fixes accompany the near-term Community parity effort. Professional
+  parity is the longer-term goal, not a reason to delay daily-workbench fixes.
 - Never include captured credentials, tokens, personal data, or other
   sensitive traffic in issues, pull requests, or test fixtures.
 
@@ -243,7 +247,7 @@ through the bounded channel.
   distinguish desktop from library defaults, and do not advertise untested
   platforms or historical benchmarks as current release guarantees.
 - Use synthetic examples. Preserve warnings about CA trust, sensitive traffic,
-  temporary versus saved project state, plaintext project files, and Repeater
+  temporary versus saved project state, and Repeater
   bypassing proxy scope.
 - Keep `Cargo.lock` in use with `--locked` in reproducible build/run examples.
   Do not change dependency versions just to update documentation.

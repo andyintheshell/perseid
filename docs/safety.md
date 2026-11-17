@@ -7,10 +7,14 @@ Perseid is intended for systems you own or are explicitly authorized to test,
 including purpose-built training labs. Intercepted requests may contain
 passwords, session tokens, cookies, or personal data.
 
-The optional Settings cookie jar holds session credentials in application memory
-until exit, including across project switches. It is not saved to projects or
-exported, but captured messages and project files can contain the same secrets.
-Clear the jar when changing engagements, and avoid sharing screenshots of it.
+The optional Settings cookie jar holds session credentials only in memory.
+Successful New/Open replaces it with an empty jar and default session settings;
+failed or cancelled switches preserve it. Save As and Save Copy preserve the
+active session, but never save the jar. Old senders are stopped/detached so late
+responses cannot populate the new jar. Captured messages and project files can
+still contain the same secrets, and proxied browser traffic can supply them
+again: use a separate browser session when changing engagements. Avoid sharing
+screenshots of the jar.
 
 ## Authorized use
 
@@ -89,7 +93,7 @@ Perseid has two project modes:
 - **Persistent:** **Save Project As…** or **Open Project…** uses one
   user-selected `.perseid` redb database. Captured HTTP/WebSocket records and
   project-scoped workbench state are committed automatically. **Save Project
-  Copy…** creates another file. There is no encryption at rest. Saved projects
+  Copy…** creates another file. Saved projects
   default to unlimited retention; **Settings > Automatic deletion…** can opt into oldest-first
   combined HTTP/WebSocket record-count and retained-body-byte limits. Applying
   lower limits removes eligible records immediately and persists the policy.
@@ -113,7 +117,7 @@ history view. The project does not
 include the local TLS CA certificate or private key.
 
 New project files are created owner-only (`0600`) on Unix; Windows uses the
-user's normal filesystem ACLs. This is access control, not encryption. Project
+user's normal filesystem ACLs. Project
 files can contain cookies, bearer tokens, credentials, personal data, and
 binary uploads. Do not share them unless you have reviewed and intended to share
 their contents. Clipboard copying is explicit. There is no background upload or
@@ -129,23 +133,14 @@ Clear history deletes that stream's captures (and HTTP Inspector notes), not
 independent tool snapshots or the project file. To delete a saved project,
 switch away or quit, then remove the `.perseid` file through your file manager;
 remove copies/backups separately. Unsaved temporary work is discarded on exit.
-Retention, Clear history, and filesystem deletion are not secure erasure.
 
 Schema-v1 files are upgraded to v2 atomically on open. The upgrade preserves
 captures and notes and leaves saved retention unlimited. Back up the closed
 file first if you need compatibility with an older Perseid; newer unsupported
 schemas are rejected. See [Projects and persistence](workbench.md#projects-and-persistence).
 
-Only committed transactions are expected to survive a crash. Capture events can
-be dropped before storage commits; the project status reports capture loss when
-detected. A forced termination cannot resume in-flight network requests. On
-normal exit the app flushes the project writer, but temporary project contents
-are always at risk of exit.
-
-RAM retention limits are not a hard cap on whole-process memory. OS swap, crash
-reports, clipboard history, terminal logs, and screenshots can retain copies.
-Capture only data you are authorized to handle, on a machine you trust, and
-redact shared output.
+Capture events can be dropped before storage commits; the project status reports
+capture loss when detected.
 
 ## TLS interception
 

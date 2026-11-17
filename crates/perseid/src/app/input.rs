@@ -70,7 +70,6 @@ impl PerseidApp {
         let on_history = on_http_history || on_websocket_history;
         let on_site_map = self.main_tab == MainTab::Target
             && self.target_section == TargetSection::SiteMap
-            && self.site_map_ui.on_contents()
             && !self.site_map_ui.windows_open();
         if on_site_map {
             let search_id = egui::Id::unique(super::target::SITE_MAP_SEARCH_ID);
@@ -311,13 +310,7 @@ mod tests {
         keyboard_frame(&ctx, &mut app, vec![key(Key::Home)]);
         assert_eq!(app.selected, Some(10));
 
-        // The site map only owns the keyboard while Contents is active.
-        app.site_map_ui.set_issues_tab();
-        keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
-        assert_eq!(app.selected, Some(10));
-
         // Open floating windows also own the keyboard.
-        app.site_map_ui.set_contents_tab();
         app.site_map_ui.set_windows_open(true);
         keyboard_frame(&ctx, &mut app, vec![key(Key::ArrowDown)]);
         assert_eq!(app.selected, Some(10));

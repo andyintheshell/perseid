@@ -3,35 +3,26 @@
 [Documentation](README.md) · [Workbench guide](workbench.md) ·
 [Getting started](getting-started.md)
 
-These full-window scenes are generated deterministically by
-`scripts/screenshots.sh`. CI uploads the images as an artifact. Same-repository
-pull requests get one comment linking to the gallery's exact preview commit;
-later runs do not change that gallery. The images are not embedded in the PR
-thread. Forks can use workflow artifacts. Traffic and credentials in these
-scenes are synthetic.
-The main scenes are captured at 2× and saved at native resolution (2560×1640)
-for HiDPI displays; the memory panel is a smaller close-up. Screenshots
-illustrate the UI, not platform support or performance guarantees.
+Take a tour of Perseid: capture traffic, inspect messages, then send them to the
+tools below. All traffic, tokens, and credentials shown here are synthetic.
+Click any image to view it at full size.
 
-[History](#proxy--http-history) · [Projects](#projects) · [Search](#search) · [Settings](#settings) ·
-[WebSockets history](#proxy--websockets-history) · [Intercept](#proxy--intercept) ·
-[Intruder](#intruder) · [Repeater](#repeater) · [WebSocket Repeater](#repeater--websockets) · [Sequencer](#sequencer) ·
-[Sequencer result](#sequencer-result) · [Decoder](#decoder) · [Comparer](#comparer) ·
-[Comparer result](#comparer-result) · [Memory](#memory-usage)
+- **Capture:** [HTTP history](#proxy--http-history) · [WebSockets](#proxy--websockets-history) · [Intercept](#proxy--intercept)
+- **Explore:** [Site map](#target--site-map) · [Scope](#target--scope) · [Search](#search)
+- **Test:** [Intruder](#intruder) · [Repeater](#repeater) · [WebSocket Repeater](#repeater--websockets) · [Sequencer](#sequencer)
+- **Transform:** [Decoder](#decoder) · [Comparer](#comparer)
+- **Configure:** [Projects](#projects) · [Settings](#settings) · [Match/replace](#proxy--matchreplace) · [HTTPS settings](#proxy--proxy-settings) · [Memory](#memory-usage)
+
+These screenshots reflect development code, which may be newer than the latest
+release. See the [workbench guide](workbench.md) for behavior and limitations.
 
 ## Proxy > HTTP history
 
-The request and response editors open side by side, with the parsed Inspector
-on the right and per-exchange Notes behind its rail tab. The detail split
-defaults to roughly half of the workspace. The filter bar above the table opens
-Burp-style display filters for scope, MIME and status classes, search terms, and
-file extensions; the search field beside it narrows the visible rows directly.
-As in Burp, CSS and image responses plus common static extensions are hidden by
-default.
+Browse captured requests and inspect the request and response side by side.
+Use the Inspector for parsed fields or Notes for your observations.
 
-Message panes have a bottom search bar with previous/next arrows and a highlight
-count. The selected wrap toggle sits immediately left of `\n`; wrapping starts
-enabled.
+Filter the history by scope, content type, status, or search terms. Each message
+pane also has its own search bar and line-wrapping control.
 
 ![Proxy HTTP history with request and response detail and the Inspector side panel](images/perseid-main.png)
 
@@ -68,9 +59,10 @@ Raw, or Hex with matches highlighted.
 
 ## Settings
 
-Manage the in-memory cookie jar and configure which traffic updates or uses it.
+Configure project automatic deletion and choose whether Repeater and Intruder
+use cookies from the shared, session-only cookie jar.
 
-![Session and cookie jar settings](images/perseid-settings.png)
+![Settings with project automatic deletion, session handling, and cookie jar controls](images/perseid-settings.png)
 
 The separate viewer shows cookie scope, values, security flags, and expiration.
 All entries below are synthetic.
@@ -93,19 +85,30 @@ shared request/response detail panes.
 
 ## Target > Scope
 
+Choose which hosts or URL prefixes belong to your test. Filter views to scope
+and optionally block out-of-scope proxy traffic. Direct Repeater sends are not
+restricted by this proxy guardrail; see [scope behavior](workbench.md#target-and-scope).
+
 ![Target scope rules and captured hosts](images/perseid-target-scope.png)
 
 ## Proxy > Intercept
 
-Hold messages in a table; select a row to inspect or edit its Raw representation.
+Hold requests before they reach the target, edit the selected message, then
+forward or drop it. Pretty, Raw, and Hex views help inspect the message;
+response interception is opt-in.
 
 ![Proxy Intercept with three held requests](images/perseid-proxy-intercept.png)
 
 ## Proxy > Match/replace
 
+Apply literal or regex rewriting rules to traffic passing through the proxy.
+
 ![Proxy match/replace rules](images/perseid-proxy-match-replace.png)
 
 ## Proxy > Proxy settings
+
+Manage the local certificate authority and hosts that should bypass HTTPS
+decryption. Certificate trust is always a manual setup step; see the [TLS guide](tls.md).
 
 ![Proxy settings certificate authority and pass-through configuration](images/perseid-proxy-tls.png)
 
@@ -174,6 +177,14 @@ Allocator heap in use and peak, not total process RSS. See the
 
 ## Recording the demo animation
 
+The [README demo](images/perseid-demo.webp) follows a captured request through
+Repeater, Intruder, Decoder, and Comparer in a real desktop session with a
+loopback-only synthetic target. It is a separate recording, not an animation of
+the still images above.
+
+<details>
+<summary>Maintainer details: record and replace the animation</summary>
+
 Run **Actions > Record demo animation > Run workflow**, selecting the branch to
 record. The workflow is manual-only and does not run on pull requests. It
 builds Perseid on a Linux runner, starts a loopback-only synthetic target, and
@@ -200,3 +211,40 @@ partial recording, or no artifacts if they fail before recording starts.
 All traffic and values in this workflow are synthetic; the workflow does not
 use local files or data from your machine. Animated WebP is supported by
 current Chrome, Firefox, Safari, and Edge, and renders in GitHub Markdown.
+
+</details>
+
+## Updating the screenshots
+
+<details>
+<summary>Maintainer details: source, generation, and publishing</summary>
+
+The 22 PNGs above come from the
+[Screenshots run for `15f7f8b`](https://github.com/andyintheshell/perseid/actions/runs/42131452202),
+captured on 2026-11-05. The
+[retained gallery](https://github.com/andyintheshell/perseid/blob/dd94b1582395486e50f9dae5ef5942d6a03ee526/index.md)
+records the source commit. The main scenes are captured at 2× (2560×1640);
+the memory panel is a smaller close-up. They illustrate the UI, not platform
+support or performance guarantees.
+
+To refresh them locally on Linux with the build dependencies and Xvfb installed:
+
+```sh
+scripts/screenshots.sh
+python3 scripts/check_screenshots.py docs/images
+```
+
+The script builds the app with the `screenshots` feature, seeds synthetic scenes,
+and verifies the PNGs before replacing files in `docs/images`.
+
+Alternatively, run **Actions > Screenshots > Run workflow** for the desired
+branch. Download the `perseid-screenshots` artifact, review the images, and copy
+the PNGs into `docs/images`. Update the source run and capture date above,
+check the captions, and commit the refreshed files together.
+
+**CI does not update this checked-in gallery automatically.** It publishes a
+separate retained gallery and uploads artifacts. Same-repository pull requests
+receive a comment linking to their exact gallery commit; forks can use the
+workflow artifacts. Those previews do not replace the files linked on this page.
+
+</details>

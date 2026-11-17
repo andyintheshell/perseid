@@ -102,7 +102,9 @@ pub struct SiteMap {
     pub hosts: Vec<SiteHost>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum SiteNodeId {
     Host {
         host: String,
@@ -806,12 +808,16 @@ fn join_path(parent: &str, segment: &str) -> String {
 }
 
 fn normalize_tree_path(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() {
-        "/".to_string()
-    } else {
-        trimmed.to_string()
+    // Match the URL tree's segment grouping, without rewriting captured URLs.
+    let mut normalized = String::new();
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        normalized.push('/');
+        normalized.push_str(segment);
     }
+    if normalized.is_empty() {
+        normalized.push('/');
+    }
+    normalized
 }
 
 #[cfg(test)]
