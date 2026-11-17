@@ -1,6 +1,6 @@
 # Perseid screenshot gallery
 
-Generated from `64f55e5916c39ed08023d1d7358c69a857be4e2f` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/44158939033) (attempt 1).
+Generated from `c450f89e102856f93c80dc856b2651d1202a5257` by the [Screenshots workflow](https://github.com/andyintheshell/perseid/actions/runs/44190755039) (attempt 1).
 
 ## Proxy - HTTP history
 
