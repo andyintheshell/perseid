@@ -240,15 +240,22 @@ async fn sniper_attack_sends_every_payload_and_reports_results() {
 async fn stopping_an_attack_finishes_in_flight_requests_and_reports_cancellation() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let service_started = started.clone();
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 break;
             };
+            let started = service_started.clone();
             tokio::spawn(async move {
-                let service = service_fn(|_request: Request<Incoming>| async {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    Ok::<_, Infallible>(Response::new(Full::new(Bytes::new())))
+                let service = service_fn(move |_request: Request<Incoming>| {
+                    let started = started.clone();
+                    async move {
+                        started.notify_one();
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::new())))
+                    }
                 });
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service)
@@ -272,11 +279,14 @@ async fn stopping_an_attack_finishes_in_flight_requests_and_reports_cancellation
     attack_plan.payload_sets = vec![payloads];
     attack_plan.concurrency = 2;
     intruder.start_attack(attack_plan).unwrap();
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio::time::timeout(TIMEOUT, started.notified())
+        .await
+        .expect("the origin should receive an admitted request before cancellation");
     intruder.stop();
 
     let (results, completed, cancelled) = collect_attack(&mut intruder).await;
     assert!(cancelled);
+    assert!(completed > 0, "at least one request must be in flight");
     assert!(completed < total as u64);
     // Every admitted request finishes and is delivered before Finished.
     assert_eq!(results.len() as u64, completed);
