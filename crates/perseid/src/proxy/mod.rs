@@ -239,6 +239,9 @@ impl Proxy {
         let client: Client<HttpsConnector<HttpConnector>, ProxyBody> =
             Client::builder(TokioExecutor::new())
                 .http1_preserve_header_case(true)
+                // HTTP/2 has no original casing to preserve. Use conventional
+                // casing for those headers when the origin speaks HTTP/1.1.
+                .http1_title_case_headers(true)
                 .build(connector);
 
         // WebSocket upgrades only exist in HTTP/1.1. Give them a separate

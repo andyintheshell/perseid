@@ -2090,6 +2090,10 @@ async fn forwards_and_captures_h2c_requests() {
         upstream.starts_with("GET /h2c HTTP/1.1"),
         "upstream request was: {upstream}"
     );
+    assert!(
+        upstream.contains(&format!("\r\nHost: {origin}\r\n")),
+        "HTTP/2 to HTTP/1.1 forwarding should use conventional header casing:\n{upstream}"
+    );
 
     let events = drain_until_finished(&proxy);
     let request = started_of(&events);
