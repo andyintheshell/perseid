@@ -1451,6 +1451,26 @@ async fn strips_unsupported_accept_encoding_before_forwarding() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn does_not_forward_connection_nominated_accept_encoding() {
+    let (origin, request_rx) =
+        spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let proxy = test_proxy(64 * 1024, 64);
+    let request = format!(
+        "GET http://{origin}/ HTTP/1.1\r\nHost: {origin}\r\n\
+         Accept-Encoding: gzip\r\nConnection: close, accept-encoding\r\n\r\n"
+    );
+
+    assert!(
+        raw_exchange(proxy.local_addr(), &request)
+            .await
+            .starts_with(b"HTTP/1.1 200 OK")
+    );
+    let upstream = request_rx.await.expect("origin should receive the request");
+    let upstream = String::from_utf8_lossy(&upstream).to_ascii_lowercase();
+    assert!(!upstream.contains("\r\naccept-encoding:"), "{upstream}");
+}
+
 #[test]
 fn invalid_rules_prevent_start() {
     let settings = ProxySettings {
@@ -2494,7 +2514,9 @@ async fn websocket_handshake_relays_frames_and_captures_messages() {
         .await
         .expect("origin should receive the handshake")
         .expect("handshake request channel");
-    let upstream_lower = String::from_utf8_lossy(&upstream_head).to_ascii_lowercase();
+    let upstream = String::from_utf8_lossy(&upstream_head);
+    assert!(upstream.contains("\r\nSec-WebSocket-Protocol: chat\r\n"));
+    let upstream_lower = upstream.to_ascii_lowercase();
     assert!(upstream_lower.contains("connection: upgrade"));
     assert!(upstream_lower.contains("upgrade: websocket"));
     assert!(

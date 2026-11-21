@@ -261,6 +261,7 @@ impl Proxy {
         let ws_client: Client<HttpsConnector<HttpConnector>, ProxyBody> =
             Client::builder(TokioExecutor::new())
                 .http1_preserve_header_case(true)
+                .http1_title_case_headers(true)
                 .build(ws_connector);
 
         let tls_ca = Arc::new(RwLock::new(config.tls.authority.clone()));

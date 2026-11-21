@@ -61,6 +61,7 @@ pub(super) async fn forward_websocket(
     *upstream.uri_mut() = target.uri;
     *upstream.version_mut() = Version::HTTP_11;
     *upstream.headers_mut() = websocket_upstream_headers(&parts.headers);
+    *upstream.extensions_mut() = parts.extensions;
 
     let mut response = match ctx.ws_client.request(upstream).await {
         Ok(response) => response,
