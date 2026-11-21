@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 description = "A lightweight web security workbench for inspecting, modifying, and replaying HTTP traffic"
 repository.workspace = true
-homepage.workspace = true
 readme = "README.md"
 keywords = ["http", "proxy", "security", "egui", "burp"]
 categories = ["gui", "network-programming", "development-tools::testing"]
