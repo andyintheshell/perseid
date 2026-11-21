@@ -1732,6 +1732,36 @@ fn results(events: &[ProxyEvent]) -> Vec<ExchangeResult> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn https_interception_rejects_an_untrusted_origin() {
+    let (origin, _, _origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+    )
+    .await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca.clone()),
+        Vec::new(),
+        ProxySettings {
+            tls_intercept: true,
+            ..ProxySettings::default()
+        },
+    );
+    let request = format!("GET / HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "localhost",
+        pem_roots(&[ca.cert_pem()]),
+        &request,
+    )
+    .await;
+    let response = String::from_utf8_lossy(&response);
+    assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+    assert!(response.contains("could not connect to the upstream server"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn intercepts_https_and_captures_the_decrypted_exchange() {
     let (origin, origin_pem, mut origin_requests) = spawn_tls_origin(
         "127.0.0.1",
