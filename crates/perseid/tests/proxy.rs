@@ -1425,7 +1425,9 @@ async fn strips_unsupported_accept_encoding_before_forwarding() {
     let request = format!(
         "GET http://{origin}/compressed HTTP/1.1\r\n\
          Host: {origin}\r\n\
+         X-Before: first\r\n\
          Accept-Encoding: gzip, zstd, br;q=0.9\r\n\
+         X-After: last\r\n\
          Connection: close\r\n\r\n"
     );
 
@@ -1440,9 +1442,8 @@ async fn strips_unsupported_accept_encoding_before_forwarding() {
     .into_owned();
     assert!(
         upstream
-            .to_ascii_lowercase()
-            .contains("accept-encoding: gzip, br;q=0.9"),
-        "upstream request did not sanitize Accept-Encoding:\n{upstream}"
+            .contains("X-Before: first\r\nAccept-Encoding: gzip, br;q=0.9\r\nX-After: last\r\n"),
+        "upstream request did not sanitize Accept-Encoding in place or preserve header casing:\n{upstream}"
     );
     assert!(
         !upstream.to_ascii_lowercase().contains("zstd"),
