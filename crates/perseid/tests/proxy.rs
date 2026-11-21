@@ -1425,7 +1425,9 @@ async fn strips_unsupported_accept_encoding_before_forwarding() {
     let request = format!(
         "GET http://{origin}/compressed HTTP/1.1\r\n\
          Host: {origin}\r\n\
+         X-Before: first\r\n\
          Accept-Encoding: gzip, zstd, br;q=0.9\r\n\
+         X-After: last\r\n\
          Connection: close\r\n\r\n"
     );
 
@@ -1440,14 +1442,33 @@ async fn strips_unsupported_accept_encoding_before_forwarding() {
     .into_owned();
     assert!(
         upstream
-            .to_ascii_lowercase()
-            .contains("accept-encoding: gzip, br;q=0.9"),
-        "upstream request did not sanitize Accept-Encoding:\n{upstream}"
+            .contains("X-Before: first\r\nAccept-Encoding: gzip, br;q=0.9\r\nX-After: last\r\n"),
+        "upstream request did not sanitize Accept-Encoding in place or preserve header casing:\n{upstream}"
     );
     assert!(
         !upstream.to_ascii_lowercase().contains("zstd"),
         "upstream request kept an unsupported coding:\n{upstream}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn does_not_forward_connection_nominated_accept_encoding() {
+    let (origin, request_rx) =
+        spawn_capture_origin("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_string()).await;
+    let proxy = test_proxy(64 * 1024, 64);
+    let request = format!(
+        "GET http://{origin}/ HTTP/1.1\r\nHost: {origin}\r\n\
+         Accept-Encoding: gzip\r\nConnection: close, accept-encoding\r\n\r\n"
+    );
+
+    assert!(
+        raw_exchange(proxy.local_addr(), &request)
+            .await
+            .starts_with(b"HTTP/1.1 200 OK")
+    );
+    let upstream = request_rx.await.expect("origin should receive the request");
+    let upstream = String::from_utf8_lossy(&upstream).to_ascii_lowercase();
+    assert!(!upstream.contains("\r\naccept-encoding:"), "{upstream}");
 }
 
 #[test]
@@ -1729,6 +1750,36 @@ fn results(events: &[ProxyEvent]) -> Vec<ExchangeResult> {
             _ => None,
         })
         .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn https_interception_rejects_an_untrusted_origin() {
+    let (origin, _, _origin_requests) = spawn_tls_origin(
+        "127.0.0.1",
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+    )
+    .await;
+    let ca = Arc::new(CertificateAuthority::generate().expect("CA"));
+    let proxy = proxy_with_tls(
+        Some(ca.clone()),
+        Vec::new(),
+        ProxySettings {
+            tls_intercept: true,
+            ..ProxySettings::default()
+        },
+    );
+    let request = format!("GET / HTTP/1.1\r\nHost: {origin}\r\nConnection: close\r\n\r\n");
+    let (_, response) = tls_exchange(
+        proxy.local_addr(),
+        origin,
+        "localhost",
+        pem_roots(&[ca.cert_pem()]),
+        &request,
+    )
+    .await;
+    let response = String::from_utf8_lossy(&response);
+    assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+    assert!(response.contains("could not connect to the upstream server"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2058,6 +2109,10 @@ async fn forwards_and_captures_h2c_requests() {
     assert!(
         upstream.starts_with("GET /h2c HTTP/1.1"),
         "upstream request was: {upstream}"
+    );
+    assert!(
+        upstream.contains(&format!("\r\nHost: {origin}\r\n")),
+        "HTTP/2 to HTTP/1.1 forwarding should use conventional header casing:\n{upstream}"
     );
 
     let events = drain_until_finished(&proxy);
@@ -2459,7 +2514,9 @@ async fn websocket_handshake_relays_frames_and_captures_messages() {
         .await
         .expect("origin should receive the handshake")
         .expect("handshake request channel");
-    let upstream_lower = String::from_utf8_lossy(&upstream_head).to_ascii_lowercase();
+    let upstream = String::from_utf8_lossy(&upstream_head);
+    assert!(upstream.contains("\r\nSec-WebSocket-Protocol: chat\r\n"));
+    let upstream_lower = upstream.to_ascii_lowercase();
     assert!(upstream_lower.contains("connection: upgrade"));
     assert!(upstream_lower.contains("upgrade: websocket"));
     assert!(

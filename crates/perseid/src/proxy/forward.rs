@@ -474,23 +474,29 @@ async fn forward(
     let mut upstream = Request::new(body);
     *upstream.method_mut() = parts.method;
     *upstream.uri_mut() = target.uri;
+    // Hyper stores the original HTTP/1 header casing in request extensions.
+    *upstream.extensions_mut() = parts.extensions;
     // Keep HTTP/1.1 as the request version for the legacy client. If the
     // origin negotiates h2 over ALPN, hyper-util switches the pooled
     // connection to HTTP/2 and derives the pseudo-headers from the URI and
     // headers; if it stays on h1, the request is already in the right form.
     *upstream.version_mut() = Version::HTTP_11;
     let mut headers = HeaderMap::new();
+    let mut accept_encoding = sanitized_accept_encoding(&parts.headers);
     for (name, value) in forwarded_headers(&parts.headers) {
         // Let hyper derive Host for HTTP/1.1 and :authority for HTTP/2 from
         // the target URI. An explicit Host header alongside HTTP/2 :authority
         // is invalid and strict origins such as Google reject the request.
-        if name == ACCEPT_ENCODING || name == HOST {
+        if name == HOST {
             continue;
         }
-        headers.append(name, value);
-    }
-    if let Some(value) = sanitized_accept_encoding(&parts.headers) {
-        headers.insert(ACCEPT_ENCODING, value);
+        if name == ACCEPT_ENCODING {
+            if let Some(value) = accept_encoding.take() {
+                headers.insert(ACCEPT_ENCODING, value);
+            }
+        } else {
+            headers.append(name, value);
+        }
     }
     // `Content-Length` was stripped: the body's size hint drives framing.
     debug_assert!(headers.get(CONTENT_LENGTH).is_none());

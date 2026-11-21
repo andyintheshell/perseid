@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
-use log::{debug, warn};
+use log::warn;
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose,
@@ -298,15 +298,48 @@ pub enum UpstreamTlsError {
 
 /// Build the TLS client configuration used for connections to origin servers.
 ///
-/// Platform trust anchors are used so origin certificates validate exactly as
-/// the user's browser would see them. `extra_roots_pem` adds trust anchors on
-/// top of the platform store, which tests and internal deployments use for
-/// their own certificate authorities.
+/// On macOS, system trust evaluation can complete chains when servers omit
+/// intermediates. Elsewhere, rustls verifies against the platform trust anchors
+/// (or bundled roots if no platform anchors were found). `extra_roots_pem` adds
+/// trust anchors for tests and internal deployments.
 pub fn upstream_client_config(
     extra_roots_pem: &[String],
 ) -> Result<Arc<rustls::ClientConfig>, UpstreamTlsError> {
-    let mut roots = rustls::RootCertStore::empty();
+    let mut extra_roots = Vec::new();
+    for pem in extra_roots_pem {
+        for cert in rustls_pemfile::certs(&mut Cursor::new(pem.as_bytes())) {
+            extra_roots.push(cert.map_err(UpstreamTlsError::Root)?);
+        }
+    }
+    let builder = rustls::ClientConfig::builder();
 
+    #[cfg(target_os = "macos")]
+    let builder = {
+        let verifier = rustls_platform_verifier::Verifier::new_with_extra_roots(
+            extra_roots,
+            builder.crypto_provider().clone(),
+        )
+        .map_err(UpstreamTlsError::Trust)?;
+        builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.with_root_certificates(upstream_roots(extra_roots)?);
+
+    let mut config = builder.with_no_client_auth();
+    // Let the upstream client negotiate the best protocol the origin supports.
+    // hyper-rustls reports the selected ALPN protocol to hyper-util, which
+    // switches the pooled connection to HTTP/2 when the origin selects it.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok(Arc::new(config))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn upstream_roots(
+    extra_roots: Vec<rustls::pki_types::CertificateDer<'static>>,
+) -> Result<rustls::RootCertStore, UpstreamTlsError> {
+    let mut roots = rustls::RootCertStore::empty();
     let native = rustls_native_certs::load_native_certs();
     if !native.errors.is_empty() {
         // Keep certificate-store details out of the log. The error text can
@@ -316,28 +349,17 @@ pub fn upstream_client_config(
     }
     for cert in native.certs {
         if let Err(err) = roots.add(cert) {
-            debug!("skipping an unusable platform root certificate: {err}");
+            log::debug!("skipping an unusable platform root certificate: {err}");
         }
     }
     if roots.is_empty() {
         warn!("no platform trust anchors found; using the bundled webpki roots");
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
-    for pem in extra_roots_pem {
-        for cert in rustls_pemfile::certs(&mut Cursor::new(pem.as_bytes())) {
-            let cert = cert.map_err(UpstreamTlsError::Root)?;
-            roots.add(cert).map_err(UpstreamTlsError::Trust)?;
-        }
+    for cert in extra_roots {
+        roots.add(cert).map_err(UpstreamTlsError::Trust)?;
     }
-
-    let mut config = rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    // Let the upstream client negotiate the best protocol the origin supports.
-    // hyper-rustls reports the selected ALPN protocol to hyper-util, which
-    // switches the pooled connection to HTTP/2 when the origin selects it.
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    Ok(Arc::new(config))
+    Ok(roots)
 }
 
 struct CertCache {
